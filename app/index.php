@@ -1,5 +1,5 @@
 <?PHP
-
+ç
 /* Read the environment.json file */
 if(file_exists("/home/dotcloud/environment.json")) {
     /* configuration on dotCloud */
@@ -24,7 +24,7 @@ catch(PDOException $e) {
 }
 
 ?>
-<div id='content' data-stack="php" data-appname="<?PHP echo $env->DOTCLOUD_PROJECT?>">
+<div id='content' data-stack="php" data-appname="<?PHP echo $env->DOTCLOUD_PROJECT; ?>">
     Hello World, from PHP!
 </div>
 <script type="text/javascript" src="https://helloapp.dotcloud.com/inject.min.js"></script>
