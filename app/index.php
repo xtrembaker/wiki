@@ -1,5 +1,5 @@
 <?PHP
-ç
+
 /* Read the environment.json file */
 if(file_exists("/home/dotcloud/environment.json")) {
     /* configuration on dotCloud */
