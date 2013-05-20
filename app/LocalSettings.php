@@ -127,9 +127,8 @@ $wgDiff3 = "/usr/bin/diff3";
 # that value)
 $wgResourceLoaderMaxQueryLength = -1;
 
-# seuls les administrateurs peuvent faire des modifications                            
-$wgGroupPermissions['*']['edit'] = $wgGroupPermissions['user']['edit'] = true;                                        
-$wgGroupPermissions['sysop']['edit'] = true;
+# seuls les utilisateurs enregistrés peuvent faire des modifications    
+$wgGroupPermissions['*']['edit'] = false;
 
 
 function getConfParams(){
