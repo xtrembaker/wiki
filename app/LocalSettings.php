@@ -129,6 +129,7 @@ $wgResourceLoaderMaxQueryLength = -1;
 
 # seuls les utilisateurs enregistrés peuvent faire des modifications    
 $wgGroupPermissions['*']['edit'] = false;
+$wgGroupPermissions['*']['createaccount'] = false;
 
 
 function getConfParams(){
