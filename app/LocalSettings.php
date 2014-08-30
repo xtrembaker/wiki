@@ -130,13 +130,24 @@ $wgResourceLoaderMaxQueryLength = -1;
 # seuls les utilisateurs enregistrés peuvent faire des modifications    
 $wgGroupPermissions['*']['edit'] = false;
 $wgGroupPermissions['*']['createaccount'] = false;
-
+$wgGroupPermissions['*']['read']    = false;
+$wgGroupPermissions['user']['read'] = true;
+$wgGroupPermissions['*']['edit']    = false;
+$wgGroupPermissions['user']['edit'] = true;
 
 function getConfParams(){
-    $env_file = '/home/dotcloud/environment.json';
+	return array(
+		'env' => 'production',
+		'user' => 'root',
+		'password' => 'Wsms=162',
+		'dbName' => 'wikidb',
+		'server' => 'http://wiki-xtrembaker.buzzevent.net',
+		'img_magick_command' => '/usr/bin/convert'
+	);
+    //$env_file = '/home/dotcloud/environment.json';
     
     // Prod
-    if(file_exists($env_file) && (false !== $env = json_decode(file_get_contents($env_file)))){
+    /*if(file_exists($env_file) && (false !== $env = json_decode(file_get_contents($env_file)))){
         return array(
             'env' => 'production',
             'user' => $env->DOTCLOUD_DB_MYSQL_LOGIN,
@@ -146,9 +157,9 @@ function getConfParams(){
             'server' => 'http://wiki-xtrembaker.dotcloud.com/',
             'img_magick_command' => '/usr/bin/convert'
         );
-    }
+    }*/
     //Dev
-    return array(
+    /*return array(
         'env' => 'dev',
         'user' => 'root',
         'password' => 'Wsms=162',
@@ -156,7 +167,7 @@ function getConfParams(){
         'dbName' => 'wikidb',
         'server' => 'http://wiki.dev',
         'img_magick_command' => '/opt/local/bin/convert'
-    );
+    );*/
 }
 
 
