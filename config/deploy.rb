@@ -1,14 +1,14 @@
 # config valid only for Capistrano 3.1
 lock '3.2.1'
 
-set :application, 'livedico'
-set :repo_url, 'git@github.com:xtrembaker/tooltipdictionnary.git'
+set :application, 'wiki'
+set :repo_url, 'https://github.com/xtrembaker/wiki.git'
 
 # Default branch is :master
 # ask :branch, proc { `git rev-parse --abbrev-ref HEAD`.chomp }.call
 
 # Default deploy_to directory is /var/www/my_app
-set :deploy_to, '/var/www/livedico'
+set :deploy_to, '/var/www/wiki'
 
 # Default value for :scm is :git
 # set :scm, :git
