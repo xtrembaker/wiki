@@ -136,12 +136,22 @@ $wgGroupPermissions['*']['edit']    = false;
 $wgGroupPermissions['user']['edit'] = true;
 
 function getConfParams(){
-	return array(
-		'env' => 'production',
+//	return array(
+//		'env' => 'production',
+//		'user' => 'root',
+//  'host' => '127.0.0.1:3306',
+//		'password' => 'Wsms=162',
+//		'dbName' => 'wikidb',
+//		'server' => 'http://wiki-xtrembaker.buzzevent.net',
+//		'img_magick_command' => '/usr/bin/convert'
+//	);
+ return array(
+		'env' => 'dev',
 		'user' => 'root',
+  'host' => '127.0.0.1:3306',
 		'password' => 'Wsms=162',
 		'dbName' => 'wikidb',
-		'server' => 'http://wiki-xtrembaker.buzzevent.net',
+		'server' => 'http://wiki.dev',
 		'img_magick_command' => '/usr/bin/convert'
 	);
     //$env_file = '/home/dotcloud/environment.json';
