@@ -16,6 +16,11 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 	exit;
 }
 
+wfLoadSkin( 'Vector' );
+wfLoadSkin( 'MonoBook' );
+wfLoadSkin( 'Modern' );
+wfLoadSkin( 'CologneBlue' );
+
 $conf_params = getConfParams();
 ## Uncomment this to disable output compression
 # $wgDisableOutputCompression = true;
@@ -108,7 +113,7 @@ $wgUpgradeKey = "1cad3a0c7a42f594";
 
 ## Default skin: you can change the default skin. Use the internal symbolic
 ## names, ie 'standard', 'nostalgia', 'cologneblue', 'monobook', 'vector':
-$wgDefaultSkin = "vector";
+$wgDefaultSkin = "cologneblue";
 
 ## For attaching licensing metadata to pages, and displaying an
 ## appropriate copyright notice / icon. GNU Free Documentation
@@ -136,26 +141,26 @@ $wgGroupPermissions['*']['edit']    = false;
 $wgGroupPermissions['user']['edit'] = true;
 
 function getConfParams(){
-//	return array(
-//		'env' => 'production',
-//		'user' => 'root',
-//  'host' => '127.0.0.1:3306',
-//		'password' => 'Wsms=162',
-//		'dbName' => 'wikidb',
-//		'server' => 'http://wiki-xtrembaker.buzzevent.net',
-//		'img_magick_command' => '/usr/bin/convert'
-//	);
- return array(
-		'env' => 'dev',
-		'user' => 'root',
-  'host' => '127.0.0.1:3306',
-		'password' => 'Wsms=162',
-		'dbName' => 'wikidb',
-		'server' => 'http://wiki.dev',
-		'img_magick_command' => '/usr/bin/convert'
-	);
+    return array(
+        'env' => 'production',
+        'user' => 'root',
+        'host' => '127.0.0.1:3306',
+        'password' => 'Wsms=162',
+        'dbName' => 'wikidb',
+        'server' => 'http://wiki-xtrembaker.buzzevent.net',
+        'img_magick_command' => '/usr/bin/convert'
+    );
+//    return array(
+//        'env' => 'dev',
+//        'user' => 'root',
+//        'host' => '127.0.0.1:3306',
+//        'password' => 'Wsms=162',
+//        'dbName' => 'wikidb',
+//        'server' => 'http://wiki.dev',
+//        'img_magick_command' => '/usr/bin/convert'
+//    );
     //$env_file = '/home/dotcloud/environment.json';
-    
+
     // Prod
     /*if(file_exists($env_file) && (false !== $env = json_decode(file_get_contents($env_file)))){
         return array(
@@ -179,6 +184,7 @@ function getConfParams(){
         'img_magick_command' => '/opt/local/bin/convert'
     );*/
 }
+
 
 
 # End of automatically generated settings.
