@@ -31,6 +31,71 @@
  * @ingroup Media
  */
 class JpegHandler extends ExifBitmapHandler {
+
+	function normaliseParams( $image, &$params ) {
+		if ( !parent::normaliseParams( $image, $params ) ) {
+			return false;
+		}
+		if ( isset( $params['quality'] ) && !self::validateQuality( $params['quality'] ) ) {
+			return false;
+		}
+		return true;
+	}
+
+	public function validateParam( $name, $value ) {
+		if ( $name === 'quality' ) {
+			return self::validateQuality( $value );
+		} else {
+			return parent::validateParam( $name, $value );
+		}
+	}
+
+	/** Validate and normalize quality value to be between 1 and 100 (inclusive).
+	 * @param int $value Quality value, will be converted to integer or 0 if invalid
+	 * @return bool True if the value is valid
+	 */
+	private static function validateQuality( $value ) {
+		return $value === 'low';
+	}
+
+	public function makeParamString( $params ) {
+		// Prepend quality as "qValue-". This has to match parseParamString() below
+		$res = parent::makeParamString( $params );
+		if ( $res && isset( $params['quality'] ) ) {
+			$res = "q{$params['quality']}-$res";
+		}
+		return $res;
+	}
+
+	public function parseParamString( $str ) {
+		// $str contains "qlow-200px" or "200px" strings because thumb.php would strip the filename
+		// first - check if the string begins with "qlow-", and if so, treat it as quality.
+		// Pass the first portion, or the whole string if "qlow-" not found, to the parent
+		// The parsing must match the makeParamString() above
+		$res = false;
+		$m = false;
+		if ( preg_match( '/q([^-]+)-(.*)$/', $str, $m ) ) {
+			$v = $m[1];
+			if ( self::validateQuality( $v ) ) {
+				$res = parent::parseParamString( $m[2] );
+				if ( $res ) {
+					$res['quality'] = $v;
+				}
+			}
+		} else {
+			$res = parent::parseParamString( $str );
+		}
+		return $res;
+	}
+
+	function getScriptParams( $params ) {
+		$res = parent::getScriptParams( $params );
+		if ( isset( $params['quality'] ) ) {
+			$res['quality'] = $params['quality'];
+		}
+		return $res;
+	}
+
 	function getMetadata( $image, $filename ) {
 		try {
 			$meta = BitmapMetadataHandler::Jpeg( $filename );
@@ -41,14 +106,14 @@ class JpegHandler extends ExifBitmapHandler {
 			$meta['MEDIAWIKI_EXIF_VERSION'] = Exif::version();
 
 			return serialize( $meta );
-		} catch ( MWException $e ) {
+		} catch ( Exception $e ) {
 			// BitmapMetadataHandler throws an exception in certain exceptional
 			// cases like if file does not exist.
 			wfDebug( __METHOD__ . ': ' . $e->getMessage() . "\n" );
 
 			/* This used to use 0 (ExifBitmapHandler::OLD_BROKEN_FILE) for the cases
-			 * 	* No metadata in the file
-			 * 	* Something is broken in the file.
+			 *   * No metadata in the file
+			 *   * Something is broken in the file.
 			 * However, if the metadata support gets expanded then you can't tell if the 0 is from
 			 * a broken file, or just no props found. A broken file is likely to stay broken, but
 			 * a file which had no props could have props once the metadata support is improved.
@@ -65,23 +130,21 @@ class JpegHandler extends ExifBitmapHandler {
 	 * @param array $params Rotate parameters.
 	 *    'rotation' clockwise rotation in degrees, allowed are multiples of 90
 	 * @since 1.21
-	 * @return bool
+	 * @return bool|MediaTransformError
 	 */
 	public function rotate( $file, $params ) {
 		global $wgJpegTran;
 
 		$rotation = ( $params['rotation'] + $this->getRotation( $file ) ) % 360;
 
-		if ( $wgJpegTran && is_file( $wgJpegTran ) ) {
+		if ( $wgJpegTran && is_executable( $wgJpegTran ) ) {
 			$cmd = wfEscapeShellArg( $wgJpegTran ) .
 				" -rotate " . wfEscapeShellArg( $rotation ) .
 				" -outfile " . wfEscapeShellArg( $params['dstPath'] ) .
 				" " . wfEscapeShellArg( $params['srcPath'] );
 			wfDebug( __METHOD__ . ": running jpgtran: $cmd\n" );
-			wfProfileIn( 'jpegtran' );
 			$retval = 0;
 			$err = wfShellExecWithStderr( $cmd, $retval );
-			wfProfileOut( 'jpegtran' );
 			if ( $retval !== 0 ) {
 				$this->logErrorForExternalProcess( $retval, $err, $cmd );
 
@@ -92,5 +155,20 @@ class JpegHandler extends ExifBitmapHandler {
 		} else {
 			return parent::rotate( $file, $params );
 		}
+	}
+
+	public function supportsBucketing() {
+		return true;
+	}
+
+	public function sanitizeParamsForBucketing( $params ) {
+		$params = parent::sanitizeParamsForBucketing( $params );
+
+		// Quality needs to be cleared for bucketing. Buckets need to be default quality
+		if ( isset( $params['quality'] ) ) {
+			unset( $params['quality'] );
+		}
+
+		return $params;
 	}
 }

@@ -37,26 +37,14 @@
 class ApiDisabled extends ApiBase {
 
 	public function execute() {
-		$this->dieUsage( "The \"{$this->getModuleName()}\" module has been disabled.", 'moduledisabled' );
+		$this->dieWithError( [ 'apierror-moduledisabled', $this->getModuleName() ] );
 	}
 
 	public function isReadMode() {
 		return false;
 	}
 
-	public function getAllowedParams() {
-		return array();
-	}
-
-	public function getParamDescription() {
-		return array();
-	}
-
-	public function getDescription() {
-		return 'This module has been disabled.';
-	}
-
-	public function getExamples() {
-		return array();
+	protected function getDescriptionMessage() {
+		return 'apihelp-disabled-description';
 	}
 }

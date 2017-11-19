@@ -22,6 +22,9 @@
  */
 
 class SpecialNewFiles extends IncludableSpecialPage {
+	/** @var FormOptions */
+	protected $opts;
+
 	public function __construct() {
 		parent::__construct( 'Newimages' );
 	}
@@ -30,165 +33,116 @@ class SpecialNewFiles extends IncludableSpecialPage {
 		$this->setHeaders();
 		$this->outputHeader();
 
-		$pager = new NewFilesPager( $this->getContext(), $par );
+		$out = $this->getOutput();
+		$this->addHelpLink( 'Help:New images' );
 
-		if ( !$this->including() ) {
-			$form = $pager->getForm();
-			$form->prepareForm();
-			$form->displayForm( '' );
+		$opts = new FormOptions();
+
+		$opts->add( 'like', '' );
+		$opts->add( 'user', '' );
+		$opts->add( 'showbots', false );
+		$opts->add( 'hidepatrolled', false );
+		$opts->add( 'limit', 50 );
+		$opts->add( 'offset', '' );
+
+		$opts->fetchValuesFromRequest( $this->getRequest() );
+
+		if ( $par !== null ) {
+			$opts->setValue( is_numeric( $par ) ? 'limit' : 'like', $par );
 		}
 
-		$this->getOutput()->addHTML( $pager->getBody() );
+		$opts->validateIntBounds( 'limit', 0, 500 );
+
+		$this->opts = $opts;
+
 		if ( !$this->including() ) {
-			$this->getOutput()->addHTML( $pager->getNavigationBar() );
+			$this->setTopText();
+			$this->buildForm();
 		}
+
+		$pager = new NewFilesPager( $this->getContext(), $opts );
+
+		$out->addHTML( $pager->getBody() );
+		if ( !$this->including() ) {
+			$out->addHTML( $pager->getNavigationBar() );
+		}
+	}
+
+	protected function buildForm() {
+		$formDescriptor = [
+			'like' => [
+				'type' => 'text',
+				'label-message' => 'newimages-label',
+				'name' => 'like',
+			],
+
+			'user' => [
+				'type' => 'text',
+				'label-message' => 'newimages-user',
+				'name' => 'user',
+			],
+
+			'showbots' => [
+				'type' => 'check',
+				'label-message' => 'newimages-showbots',
+				'name' => 'showbots',
+			],
+
+			'hidepatrolled' => [
+				'type' => 'check',
+				'label-message' => 'newimages-hidepatrolled',
+				'name' => 'hidepatrolled',
+			],
+
+			'limit' => [
+				'type' => 'hidden',
+				'default' => $this->opts->getValue( 'limit' ),
+				'name' => 'limit',
+			],
+
+			'offset' => [
+				'type' => 'hidden',
+				'default' => $this->opts->getValue( 'offset' ),
+				'name' => 'offset',
+			],
+		];
+
+		if ( $this->getConfig()->get( 'MiserMode' ) ) {
+			unset( $formDescriptor['like'] );
+		}
+
+		if ( !$this->getUser()->useFilePatrol() ) {
+			unset( $formDescriptor['hidepatrolled'] );
+		}
+
+		HTMLForm::factory( 'ooui', $formDescriptor, $this->getContext() )
+			->setWrapperLegendMsg( 'newimages-legend' )
+			->setSubmitTextMsg( 'ilsubmit' )
+			->setMethod( 'get' )
+			->prepareForm()
+			->displayForm( false );
 	}
 
 	protected function getGroupName() {
 		return 'changes';
 	}
-}
 
-/**
- * @ingroup SpecialPage Pager
- */
-class NewFilesPager extends ReverseChronologicalPager {
 	/**
-	 * @var ImageGallery
+	 * Send the text to be displayed above the options
 	 */
-	var $gallery;
+	function setTopText() {
+		global $wgContLang;
 
-	function __construct( IContextSource $context, $par = null ) {
-		$this->like = $context->getRequest()->getText( 'like' );
-		$this->showbots = $context->getRequest()->getBool( 'showbots', 0 );
-		if ( is_numeric( $par ) ) {
-			$this->setLimit( $par );
+		$message = $this->msg( 'newimagestext' )->inContentLanguage();
+		if ( !$message->isDisabled() ) {
+			$this->getOutput()->addWikiText(
+				Html::rawElement( 'p',
+					[ 'lang' => $wgContLang->getHtmlCode(), 'dir' => $wgContLang->getDir() ],
+					"\n" . $message->plain() . "\n"
+				),
+				/* $lineStart */ false,
+				/* $interface */ false
+			);
 		}
-
-		parent::__construct( $context );
-	}
-
-	function getQueryInfo() {
-		global $wgMiserMode;
-		$conds = $jconds = array();
-		$tables = array( 'image' );
-
-		if ( !$this->showbots ) {
-			$groupsWithBotPermission = User::getGroupsWithPermission( 'bot' );
-
-			if ( count( $groupsWithBotPermission ) ) {
-				$tables[] = 'user_groups';
-				$conds[] = 'ug_group IS NULL';
-				$jconds['user_groups'] = array(
-					'LEFT JOIN',
-					array(
-						'ug_group' => $groupsWithBotPermission,
-						'ug_user = img_user'
-					)
-				);
-			}
-		}
-
-		if ( !$wgMiserMode && $this->like !== null ) {
-			$dbr = wfGetDB( DB_SLAVE );
-			$likeObj = Title::newFromURL( $this->like );
-			if ( $likeObj instanceof Title ) {
-				$like = $dbr->buildLike(
-					$dbr->anyString(),
-					strtolower( $likeObj->getDBkey() ),
-					$dbr->anyString()
-				);
-				$conds[] = "LOWER(img_name) $like";
-			}
-		}
-
-		$query = array(
-			'tables' => $tables,
-			'fields' => '*',
-			'join_conds' => $jconds,
-			'conds' => $conds
-		);
-
-		return $query;
-	}
-
-	function getIndexField() {
-		return 'img_timestamp';
-	}
-
-	function getStartBody() {
-		if ( !$this->gallery ) {
-			// Note that null for mode is taken to mean use default.
-			$mode = $this->getRequest()->getVal( 'gallerymode', null );
-			try {
-				$this->gallery = ImageGalleryBase::factory( $mode );
-			} catch ( MWException $e ) {
-				// User specified something invalid, fallback to default.
-				$this->gallery = ImageGalleryBase::factory();
-			}
-			$this->gallery->setContext( $this->getContext() );
-		}
-
-		return '';
-	}
-
-	function getEndBody() {
-		return $this->gallery->toHTML();
-	}
-
-	function formatRow( $row ) {
-		$name = $row->img_name;
-		$user = User::newFromId( $row->img_user );
-
-		$title = Title::makeTitle( NS_FILE, $name );
-		$ul = Linker::link( $user->getUserpage(), $user->getName() );
-		$time = $this->getLanguage()->userTimeAndDate( $row->img_timestamp, $this->getUser() );
-
-		$this->gallery->add(
-			$title,
-			"$ul<br />\n<i>"
-				. htmlspecialchars( $time )
-				. "</i><br />\n"
-		);
-	}
-
-	function getForm() {
-		global $wgMiserMode;
-
-		$fields = array(
-			'like' => array(
-				'type' => 'text',
-				'label-message' => 'newimages-label',
-				'name' => 'like',
-			),
-			'showbots' => array(
-				'type' => 'check',
-				'label' => $this->msg( 'showhidebots', $this->msg( 'show' )->plain() )->escaped(),
-				'name' => 'showbots',
-			),
-			'limit' => array(
-				'type' => 'hidden',
-				'default' => $this->mLimit,
-				'name' => 'limit',
-			),
-			'offset' => array(
-				'type' => 'hidden',
-				'default' => $this->getRequest()->getText( 'offset' ),
-				'name' => 'offset',
-			),
-		);
-
-		if ( $wgMiserMode ) {
-			unset( $fields['like'] );
-		}
-
-		$context = new DerivativeContext( $this->getContext() );
-		$context->setTitle( $this->getTitle() ); // Remove subpage
-		$form = new HTMLForm( $fields, $context );
-		$form->setSubmitTextMsg( 'ilsubmit' );
-		$form->setMethod( 'get' );
-		$form->setWrapperLegendMsg( 'newimages-legend' );
-
-		return $form;
 	}
 }

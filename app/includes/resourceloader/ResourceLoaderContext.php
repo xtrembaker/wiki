@@ -1,6 +1,6 @@
 <?php
 /**
- * Context for resource loader modules.
+ * Context for ResourceLoader modules.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -22,67 +22,90 @@
  * @author Roan Kattouw
  */
 
+use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\MediaWikiServices;
+
 /**
  * Object passed around to modules which contains information about the state
- * of a specific loader request
+ * of a specific loader request.
  */
 class ResourceLoaderContext {
-
-	/* Protected Members */
-
 	protected $resourceLoader;
 	protected $request;
-	protected $modules;
-	protected $language;
-	protected $direction;
+	protected $logger;
+
+	// Module content vary
 	protected $skin;
-	protected $user;
+	protected $language;
 	protected $debug;
+	protected $user;
+
+	// Request vary (in addition to cache vary)
+	protected $modules;
 	protected $only;
 	protected $version;
-	protected $hash;
 	protected $raw;
+	protected $image;
+	protected $variant;
+	protected $format;
 
-	/* Methods */
+	protected $direction;
+	protected $hash;
+	protected $userObj;
+	protected $imageObj;
 
 	/**
-	 * @param $resourceLoader ResourceLoader
-	 * @param $request WebRequest
+	 * @param ResourceLoader $resourceLoader
+	 * @param WebRequest $request
 	 */
-	public function __construct( $resourceLoader, WebRequest $request ) {
-		global $wgDefaultSkin, $wgResourceLoaderDebug;
-
+	public function __construct( ResourceLoader $resourceLoader, WebRequest $request ) {
 		$this->resourceLoader = $resourceLoader;
 		$this->request = $request;
+		$this->logger = $resourceLoader->getLogger();
 
-		// Interpret request
+		// Future developers: Avoid use of getVal() in this class, which performs
+		// expensive UTF normalisation by default. Use getRawVal() instead.
+		// Values here are either one of a finite number of internal IDs,
+		// or previously-stored user input (e.g. titles, user names) that were passed
+		// to this endpoint by ResourceLoader itself from the canonical value.
+		// Values do not come directly from user input and need not match.
+
 		// List of modules
-		$modules = $request->getVal( 'modules' );
-		$this->modules = $modules ? self::expandModuleNames( $modules ) : array();
+		$modules = $request->getRawVal( 'modules' );
+		$this->modules = $modules ? self::expandModuleNames( $modules ) : [];
+
 		// Various parameters
-		$this->skin = $request->getVal( 'skin' );
-		$this->user = $request->getVal( 'user' );
-		$this->debug = $request->getFuzzyBool( 'debug', $wgResourceLoaderDebug );
-		$this->only = $request->getVal( 'only' );
-		$this->version = $request->getVal( 'version' );
+		$this->user = $request->getRawVal( 'user' );
+		$this->debug = $request->getFuzzyBool(
+			'debug',
+			$resourceLoader->getConfig()->get( 'ResourceLoaderDebug' )
+		);
+		$this->only = $request->getRawVal( 'only', null );
+		$this->version = $request->getRawVal( 'version', null );
 		$this->raw = $request->getFuzzyBool( 'raw' );
 
+		// Image requests
+		$this->image = $request->getRawVal( 'image' );
+		$this->variant = $request->getRawVal( 'variant' );
+		$this->format = $request->getRawVal( 'format' );
+
+		$this->skin = $request->getRawVal( 'skin' );
 		$skinnames = Skin::getSkinNames();
 		// If no skin is specified, or we don't recognize the skin, use the default skin
 		if ( !$this->skin || !isset( $skinnames[$this->skin] ) ) {
-			$this->skin = $wgDefaultSkin;
+			$this->skin = $resourceLoader->getConfig()->get( 'DefaultSkin' );
 		}
 	}
 
 	/**
 	 * Expand a string of the form jquery.foo,bar|jquery.ui.baz,quux to
-	 * an array of module names like array( 'jquery.foo', 'jquery.bar',
-	 * 'jquery.ui.baz', 'jquery.ui.quux' )
+	 * an array of module names like [ 'jquery.foo', 'jquery.bar',
+	 * 'jquery.ui.baz', 'jquery.ui.quux' ]
 	 * @param string $modules Packed module name list
-	 * @return array of module names
+	 * @return array Array of module names
 	 */
 	public static function expandModuleNames( $modules ) {
-		$retval = array();
+		$retval = [];
 		$exploded = explode( '|', $modules );
 		foreach ( $exploded as $group ) {
 			if ( strpos( $group, ',' ) === false ) {
@@ -98,7 +121,7 @@ class ResourceLoaderContext {
 				} else {
 					// We have a prefix and a bunch of suffixes
 					$prefix = substr( $group, 0, $pos ); // 'foo'
-					$suffixes = explode( ',', substr( $group, $pos + 1 ) ); // array( 'bar', 'baz' )
+					$suffixes = explode( ',', substr( $group, $pos + 1 ) ); // [ 'bar', 'baz' ]
 					foreach ( $suffixes as $suffix ) {
 						$retval[] = "$prefix.$suffix";
 					}
@@ -109,11 +132,15 @@ class ResourceLoaderContext {
 	}
 
 	/**
-	 * Return a dummy ResourceLoaderContext object suitable for passing into things that don't "really" need a context
+	 * Return a dummy ResourceLoaderContext object suitable for passing into
+	 * things that don't "really" need a context.
 	 * @return ResourceLoaderContext
 	 */
 	public static function newDummyContext() {
-		return new self( null, new FauxRequest( array() ) );
+		return new self( new ResourceLoader(
+			MediaWikiServices::getInstance()->getMainConfig(),
+			LoggerFactory::getInstance( 'resourceloader' )
+		), new FauxRequest( [] ) );
 	}
 
 	/**
@@ -131,6 +158,14 @@ class ResourceLoaderContext {
 	}
 
 	/**
+	 * @since 1.27
+	 * @return \Psr\Log\LoggerInterface
+	 */
+	public function getLogger() {
+		return $this->logger;
+	}
+
+	/**
 	 * @return array
 	 */
 	public function getModules() {
@@ -142,8 +177,15 @@ class ResourceLoaderContext {
 	 */
 	public function getLanguage() {
 		if ( $this->language === null ) {
-			// Must be a valid language code after this point (bug 62849)
-			$this->language = RequestContext::sanitizeLangCode( $this->request->getVal( 'lang' ) );
+			// Must be a valid language code after this point (T64849)
+			// Only support uselang values that follow built-in conventions (T102058)
+			$lang = $this->getRequest()->getRawVal( 'lang', '' );
+			// Stricter version of RequestContext::sanitizeLangCode()
+			if ( !Language::isValidBuiltInCode( $lang ) ) {
+				wfDebug( "Invalid user language code\n" );
+				$lang = $this->getResourceLoader()->getConfig()->get( 'LanguageCode' );
+			}
+			$this->language = $lang;
 		}
 		return $this->language;
 	}
@@ -153,9 +195,9 @@ class ResourceLoaderContext {
 	 */
 	public function getDirection() {
 		if ( $this->direction === null ) {
-			$this->direction = $this->request->getVal( 'dir' );
+			$this->direction = $this->getRequest()->getRawVal( 'dir' );
 			if ( !$this->direction ) {
-				// Determine directionality based on user language (bug 6100)
+				// Determine directionality based on user language (T8100)
 				$this->direction = Language::factory( $this->getLanguage() )->getDir();
 			}
 		}
@@ -163,7 +205,7 @@ class ResourceLoaderContext {
 	}
 
 	/**
-	 * @return string|null
+	 * @return string
 	 */
 	public function getSkin() {
 		return $this->skin;
@@ -177,6 +219,43 @@ class ResourceLoaderContext {
 	}
 
 	/**
+	 * Get a Message object with context set.  See wfMessage for parameters.
+	 *
+	 * @since 1.27
+	 * @param mixed ...
+	 * @return Message
+	 */
+	public function msg() {
+		return call_user_func_array( 'wfMessage', func_get_args() )
+			->inLanguage( $this->getLanguage() )
+			// Use a dummy title because there is no real title
+			// for this endpoint, and the cache won't vary on it
+			// anyways.
+			->title( Title::newFromText( 'Dwimmerlaik' ) );
+	}
+
+	/**
+	 * Get the possibly-cached User object for the specified username
+	 *
+	 * @since 1.25
+	 * @return User
+	 */
+	public function getUserObj() {
+		if ( $this->userObj === null ) {
+			$username = $this->getUser();
+			if ( $username ) {
+				// Use provided username if valid, fallback to anonymous user
+				$this->userObj = User::newFromName( $username ) ?: new User;
+			} else {
+				// Anonymous user
+				$this->userObj = new User;
+			}
+		}
+
+		return $this->userObj;
+	}
+
+	/**
 	 * @return bool
 	 */
 	public function getDebug() {
@@ -184,14 +263,16 @@ class ResourceLoaderContext {
 	}
 
 	/**
-	 * @return String|null
+	 * @return string|null
 	 */
 	public function getOnly() {
 		return $this->only;
 	}
 
 	/**
-	 * @return String|null
+	 * @see ResourceLoaderModule::getVersionHash
+	 * @see ResourceLoaderClientHtml::makeLoad
+	 * @return string|null
 	 */
 	public function getVersion() {
 		return $this->version;
@@ -205,35 +286,109 @@ class ResourceLoaderContext {
 	}
 
 	/**
+	 * @return string|null
+	 */
+	public function getImage() {
+		return $this->image;
+	}
+
+	/**
+	 * @return string|null
+	 */
+	public function getVariant() {
+		return $this->variant;
+	}
+
+	/**
+	 * @return string|null
+	 */
+	public function getFormat() {
+		return $this->format;
+	}
+
+	/**
+	 * If this is a request for an image, get the ResourceLoaderImage object.
+	 *
+	 * @since 1.25
+	 * @return ResourceLoaderImage|bool false if a valid object cannot be created
+	 */
+	public function getImageObj() {
+		if ( $this->imageObj === null ) {
+			$this->imageObj = false;
+
+			if ( !$this->image ) {
+				return $this->imageObj;
+			}
+
+			$modules = $this->getModules();
+			if ( count( $modules ) !== 1 ) {
+				return $this->imageObj;
+			}
+
+			$module = $this->getResourceLoader()->getModule( $modules[0] );
+			if ( !$module || !$module instanceof ResourceLoaderImageModule ) {
+				return $this->imageObj;
+			}
+
+			$image = $module->getImage( $this->image, $this );
+			if ( !$image ) {
+				return $this->imageObj;
+			}
+
+			$this->imageObj = $image;
+		}
+
+		return $this->imageObj;
+	}
+
+	/**
 	 * @return bool
 	 */
 	public function shouldIncludeScripts() {
-		return is_null( $this->only ) || $this->only === 'scripts';
+		return $this->getOnly() === null || $this->getOnly() === 'scripts';
 	}
 
 	/**
 	 * @return bool
 	 */
 	public function shouldIncludeStyles() {
-		return is_null( $this->only ) || $this->only === 'styles';
+		return $this->getOnly() === null || $this->getOnly() === 'styles';
 	}
 
 	/**
 	 * @return bool
 	 */
 	public function shouldIncludeMessages() {
-		return is_null( $this->only ) || $this->only === 'messages';
+		return $this->getOnly() === null;
 	}
 
 	/**
+	 * All factors that uniquely identify this request, except 'modules'.
+	 *
+	 * The list of modules is excluded here for legacy reasons as most callers already
+	 * split up handling of individual modules. Including it here would massively fragment
+	 * the cache and decrease its usefulness.
+	 *
+	 * E.g. Used by RequestFileCache to form a cache key for storing the reponse output.
+	 *
 	 * @return string
 	 */
 	public function getHash() {
 		if ( !isset( $this->hash ) ) {
-			$this->hash = implode( '|', array(
-				$this->getLanguage(), $this->getDirection(), $this->skin, $this->user,
-				$this->debug, $this->only, $this->version
-			) );
+			$this->hash = implode( '|', [
+				// Module content vary
+				$this->getLanguage(),
+				$this->getSkin(),
+				$this->getDebug(),
+				$this->getUser(),
+				// Request vary
+				$this->getOnly(),
+				$this->getVersion(),
+				$this->getRaw(),
+				$this->getImage(),
+				$this->getVariant(),
+				$this->getFormat(),
+			] );
 		}
 		return $this->hash;
 	}

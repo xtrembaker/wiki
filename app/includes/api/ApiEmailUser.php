@@ -36,41 +36,45 @@ class ApiEmailUser extends ApiBase {
 		// Validate target
 		$targetUser = SpecialEmailUser::getTarget( $params['target'] );
 		if ( !( $targetUser instanceof User ) ) {
-			$this->dieUsageMsg( array( $targetUser ) );
+			switch ( $targetUser ) {
+				case 'notarget':
+					$this->dieWithError( 'apierror-notarget' );
+				case 'noemail':
+					$this->dieWithError( [ 'noemail', $params['target'] ] );
+				case 'nowikiemail':
+					$this->dieWithError( 'nowikiemailtext', 'nowikiemail' );
+				default:
+					$this->dieWithError( [ 'apierror-unknownerror', $targetUser ] );
+			}
 		}
 
 		// Check permissions and errors
-		$error = SpecialEmailUser::getPermissionsError( $this->getUser(), $params['token'] );
+		$error = SpecialEmailUser::getPermissionsError(
+			$this->getUser(),
+			$params['token'],
+			$this->getConfig()
+		);
 		if ( $error ) {
-			$this->dieUsageMsg( array( $error ) );
+			$this->dieWithError( $error );
 		}
 
-		$data = array(
+		$data = [
 			'Target' => $targetUser->getName(),
 			'Text' => $params['text'],
 			'Subject' => $params['subject'],
 			'CCMe' => $params['ccme'],
-		);
+		];
 		$retval = SpecialEmailUser::submit( $data, $this->getContext() );
-
-		if ( $retval instanceof Status ) {
-			// SpecialEmailUser sometimes returns a status
-			// sometimes it doesn't.
-			if ( $retval->isGood() ) {
-				$retval = true;
-			} else {
-				$retval = $retval->getErrorsArray();
-			}
+		if ( !$retval instanceof Status ) {
+			// This is probably the reason
+			$retval = Status::newFatal( 'hookaborted' );
 		}
 
-		if ( $retval === true ) {
-			$result = array( 'result' => 'Success' );
-		} else {
-			$result = array(
-				'result' => 'Failure',
-				'message' => $retval
-			);
-		}
+		$result = array_filter( [
+			'result' => $retval->isGood() ? 'Success' : $retval->isOk() ? 'Warnings' : 'Failure',
+			'warnings' => $this->getErrorFormatter()->arrayFromStatus( $retval, 'warning' ),
+			'errors' => $this->getErrorFormatter()->arrayFromStatus( $retval, 'error' ),
+		] );
 
 		$this->getResult()->addValue( null, $this->getModuleName(), $result );
 	}
@@ -84,77 +88,32 @@ class ApiEmailUser extends ApiBase {
 	}
 
 	public function getAllowedParams() {
-		return array(
-			'target' => array(
+		return [
+			'target' => [
 				ApiBase::PARAM_TYPE => 'string',
 				ApiBase::PARAM_REQUIRED => true
-			),
+			],
 			'subject' => null,
-			'text' => array(
-				ApiBase::PARAM_TYPE => 'string',
+			'text' => [
+				ApiBase::PARAM_TYPE => 'text',
 				ApiBase::PARAM_REQUIRED => true
-			),
-			'token' => array(
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true
-			),
+			],
 			'ccme' => false,
-		);
-	}
-
-	public function getParamDescription() {
-		return array(
-			'target' => 'User to send email to',
-			'subject' => 'Subject header',
-			'text' => 'Mail body',
-			'token' => 'A token previously acquired via prop=info',
-			'ccme' => 'Send a copy of this mail to me',
-		);
-	}
-
-	public function getResultProperties() {
-		return array(
-			'' => array(
-				'result' => array(
-					ApiBase::PROP_TYPE => array(
-						'Success',
-						'Failure'
-					),
-				),
-				'message' => array(
-					ApiBase::PROP_TYPE => 'string',
-					ApiBase::PROP_NULLABLE => true
-				)
-			)
-		);
-	}
-
-	public function getDescription() {
-		return 'Email a user.';
-	}
-
-	public function getPossibleErrors() {
-		return array_merge( parent::getPossibleErrors(), array(
-			array( 'usermaildisabled' ),
-		) );
+		];
 	}
 
 	public function needsToken() {
-		return true;
+		return 'csrf';
 	}
 
-	public function getTokenSalt() {
-		return '';
-	}
-
-	public function getExamples() {
-		return array(
-			'api.php?action=emailuser&target=WikiSysop&text=Content'
-				=> 'Send an email to the User "WikiSysop" with the text "Content"',
-		);
+	protected function getExamplesMessages() {
+		return [
+			'action=emailuser&target=WikiSysop&text=Content&token=123ABC'
+				=> 'apihelp-emailuser-example-email',
+		];
 	}
 
 	public function getHelpUrls() {
-		return 'https://www.mediawiki.org/wiki/API:Email';
+		return 'https://www.mediawiki.org/wiki/Special:MyLanguage/API:Email';
 	}
 }

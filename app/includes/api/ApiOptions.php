@@ -35,21 +35,27 @@ class ApiOptions extends ApiBase {
 	 * Changes preferences of the current user.
 	 */
 	public function execute() {
-		$user = $this->getUser();
-
-		if ( $user->isAnon() ) {
-			$this->dieUsage( 'Anonymous users cannot change preferences', 'notloggedin' );
+		if ( $this->getUser()->isAnon() ) {
+			$this->dieWithError(
+				[ 'apierror-mustbeloggedin', $this->msg( 'action-editmyoptions' ) ], 'notloggedin'
+			);
 		}
 
-		if ( !$user->isAllowed( 'editmyoptions' ) ) {
-			$this->dieUsage( 'You don\'t have permission to edit your options', 'permissiondenied' );
-		}
+		$this->checkUserRightsAny( 'editmyoptions' );
 
 		$params = $this->extractRequestParams();
 		$changed = false;
 
 		if ( isset( $params['optionvalue'] ) && !isset( $params['optionname'] ) ) {
-			$this->dieUsageMsg( array( 'missingparam', 'optionname' ) );
+			$this->dieWithError( [ 'apierror-missingparam', 'optionname' ] );
+		}
+
+		// Load the user from the master to reduce CAS errors on double post (T95839)
+		$user = $this->getUser()->getInstanceForUpdate();
+		if ( !$user ) {
+			$this->dieWithError(
+				[ 'apierror-mustbeloggedin', $this->msg( 'action-editmyoptions' ) ], 'notloggedin'
+			);
 		}
 
 		if ( $params['reset'] ) {
@@ -57,7 +63,7 @@ class ApiOptions extends ApiBase {
 			$changed = true;
 		}
 
-		$changes = array();
+		$changes = [];
 		if ( count( $params['change'] ) ) {
 			foreach ( $params['change'] as $entry ) {
 				$array = explode( '=', $entry, 2 );
@@ -69,17 +75,22 @@ class ApiOptions extends ApiBase {
 			$changes[$params['optionname']] = $newValue;
 		}
 		if ( !$changed && !count( $changes ) ) {
-			$this->dieUsage( 'No changes were requested', 'nochanges' );
+			$this->dieWithError( 'apierror-nochanges' );
 		}
 
 		$prefs = Preferences::getPreferences( $user, $this->getContext() );
 		$prefsKinds = $user->getOptionKinds( $this->getContext(), $changes );
 
+		$htmlForm = null;
 		foreach ( $changes as $key => $value ) {
 			switch ( $prefsKinds[$key] ) {
 				case 'registered':
 					// Regular option.
-					$field = HTMLForm::loadInputFromParameters( $key, $prefs[$key] );
+					if ( $htmlForm === null ) {
+						// We need a dummy HTMLForm for the validate callback...
+						$htmlForm = new HTMLForm( [], $this );
+					}
+					$field = HTMLForm::loadInputFromParameters( $key, $prefs[$key], $htmlForm );
 					$validation = $field->validate( $value, $user->getOptions() );
 					break;
 				case 'registered-multiselect':
@@ -91,26 +102,26 @@ class ApiOptions extends ApiBase {
 				case 'userjs':
 					// Allow non-default preferences prefixed with 'userjs-', to be set by user scripts
 					if ( strlen( $key ) > 255 ) {
-						$validation = "key too long (no more than 255 bytes allowed)";
-					} elseif ( preg_match( "/[^a-zA-Z0-9_-]/", $key ) !== 0 ) {
-						$validation = "invalid key (only a-z, A-Z, 0-9, _, - allowed)";
+						$validation = $this->msg( 'apiwarn-validationfailed-keytoolong', Message::numParam( 255 ) );
+					} elseif ( preg_match( '/[^a-zA-Z0-9_-]/', $key ) !== 0 ) {
+						$validation = $this->msg( 'apiwarn-validationfailed-badchars' );
 					} else {
 						$validation = true;
 					}
 					break;
 				case 'special':
-					$validation = "cannot be set by this module";
+					$validation = $this->msg( 'apiwarn-validationfailed-cannotset' );
 					break;
 				case 'unused':
 				default:
-					$validation = "not a valid preference";
+					$validation = $this->msg( 'apiwarn-validationfailed-badpref' );
 					break;
 			}
 			if ( $validation === true ) {
 				$user->setOption( $key, $value );
 				$changed = true;
 			} else {
-				$this->setWarning( "Validation error for '$key': $validation" );
+				$this->addWarning( [ 'apiwarn-validationfailed', wfEscapeWikitext( $key ), $validation ] );
 			}
 		}
 
@@ -134,91 +145,42 @@ class ApiOptions extends ApiBase {
 		$optionKinds = User::listOptionKinds();
 		$optionKinds[] = 'all';
 
-		return array(
-			'token' => array(
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true
-			),
+		return [
 			'reset' => false,
-			'resetkinds' => array(
+			'resetkinds' => [
 				ApiBase::PARAM_TYPE => $optionKinds,
 				ApiBase::PARAM_DFLT => 'all',
 				ApiBase::PARAM_ISMULTI => true
-			),
-			'change' => array(
+			],
+			'change' => [
 				ApiBase::PARAM_ISMULTI => true,
-			),
-			'optionname' => array(
+			],
+			'optionname' => [
 				ApiBase::PARAM_TYPE => 'string',
-			),
-			'optionvalue' => array(
+			],
+			'optionvalue' => [
 				ApiBase::PARAM_TYPE => 'string',
-			),
-		);
-	}
-
-	public function getResultProperties() {
-		return array(
-			'' => array(
-				'*' => array(
-					ApiBase::PROP_TYPE => array(
-						'success'
-					)
-				)
-			)
-		);
-	}
-
-	public function getParamDescription() {
-		return array(
-			'token' => 'An options token previously obtained through the action=tokens',
-			'reset' => 'Resets preferences to the site defaults',
-			'resetkinds' => 'List of types of options to reset when the "reset" option is set',
-			'change' => array( 'List of changes, formatted name=value (e.g. skin=vector), ' .
-				'value cannot contain pipe characters. If no value is given (not ',
-				'even an equals sign), e.g., optionname|otheroption|..., the ' .
-				'option will be reset to its default value'
-			),
-			'optionname' => 'A name of a option which should have an optionvalue set',
-			'optionvalue' => 'A value of the option specified by the optionname, ' .
-				'can contain pipe characters',
-		);
-	}
-
-	public function getDescription() {
-		return array(
-			'Change preferences of the current user.',
-			'Only options which are registered in core or in one of installed extensions,',
-			'or as options with keys prefixed with \'userjs-\' (intended to be used by user',
-			'scripts), can be set.'
-		);
-	}
-
-	public function getPossibleErrors() {
-		return array_merge( parent::getPossibleErrors(), array(
-			array( 'code' => 'notloggedin', 'info' => 'Anonymous users cannot change preferences' ),
-			array( 'code' => 'nochanges', 'info' => 'No changes were requested' ),
-		) );
+			],
+		];
 	}
 
 	public function needsToken() {
-		return true;
-	}
-
-	public function getTokenSalt() {
-		return '';
+		return 'csrf';
 	}
 
 	public function getHelpUrls() {
-		return 'https://www.mediawiki.org/wiki/API:Options';
+		return 'https://www.mediawiki.org/wiki/Special:MyLanguage/API:Options';
 	}
 
-	public function getExamples() {
-		return array(
-			'api.php?action=options&reset=&token=123ABC',
-			'api.php?action=options&change=skin=vector|hideminor=1&token=123ABC',
-			'api.php?action=options&reset=&change=skin=monobook&optionname=nickname&' .
-				'optionvalue=[[User:Beau|Beau]]%20([[User_talk:Beau|talk]])&token=123ABC',
-		);
+	protected function getExamplesMessages() {
+		return [
+			'action=options&reset=&token=123ABC'
+				=> 'apihelp-options-example-reset',
+			'action=options&change=skin=vector|hideminor=1&token=123ABC'
+				=> 'apihelp-options-example-change',
+			'action=options&reset=&change=skin=monobook&optionname=nickname&' .
+				'optionvalue=[[User:Beau|Beau]]%20([[User_talk:Beau|talk]])&token=123ABC'
+				=> 'apihelp-options-example-complex',
+		];
 	}
 }

@@ -17,6 +17,10 @@
  */
 class TitleBlacklist {
 	private $mBlacklist = null, $mWhitelist = null;
+
+	/** @var TitleBlacklist */
+	protected static $instance = null;
+
 	const VERSION = 3;	// Blacklist format
 
 	/**
@@ -25,91 +29,106 @@ class TitleBlacklist {
 	 * @return TitleBlacklist
 	 */
 	public static function singleton() {
-		static $instance = null;
-
-		if ( $instance === null ) {
-			$instance = new self;
+		if ( self::$instance === null ) {
+			self::$instance = new self;
 		}
-		return $instance;
+		return self::$instance;
+	}
+
+	/**
+	 * Destroy/reset the current singleton instance.
+	 *
+	 * This is solely for testing and will fail unless MW_PHPUNIT_TEST is
+	 * defined.
+	 */
+	public static function destroySingleton() {
+
+		if ( !defined( 'MW_PHPUNIT_TEST' ) ) {
+			throw new MWException(
+				'Can not invoke ' . __METHOD__ . '() ' .
+				'out of tests (MW_PHPUNIT_TEST not set).'
+			);
+		}
+
+		self::$instance = null;
 	}
 
 	/**
 	 * Load all configured blacklist sources
 	 */
 	public function load() {
-		global $wgTitleBlacklistSources, $wgMemc, $wgTitleBlacklistCaching;
-		wfProfileIn( __METHOD__ );
+		global $wgTitleBlacklistSources, $wgTitleBlacklistCaching;
+
+		$cache = ObjectCache::getMainWANInstance();
 		// Try to find something in the cache
-		$cachedBlacklist = $wgMemc->get( wfMemcKey( "title_blacklist_entries" ) );
+		$cachedBlacklist = $cache->get( wfMemcKey( "title_blacklist_entries" ) );
 		if ( is_array( $cachedBlacklist ) && count( $cachedBlacklist ) > 0 && ( $cachedBlacklist[0]->getFormatVersion() == self::VERSION ) ) {
 			$this->mBlacklist = $cachedBlacklist;
-			wfProfileOut( __METHOD__ );
 			return;
 		}
 
 		$sources = $wgTitleBlacklistSources;
-		$sources['local'] = array( 'type' => TBLSRC_MSG );
+		$sources['local'] = array( 'type' => 'message' );
 		$this->mBlacklist = array();
 		foreach( $sources as $sourceName => $source ) {
 			$this->mBlacklist = array_merge( $this->mBlacklist, $this->parseBlacklist( $this->getBlacklistText( $source ), $sourceName ) );
 		}
-		$wgMemc->set( wfMemcKey( "title_blacklist_entries" ), $this->mBlacklist, $wgTitleBlacklistCaching['expiry'] );
-		wfProfileOut( __METHOD__ );
+		$cache->set( wfMemcKey( "title_blacklist_entries" ), $this->mBlacklist, $wgTitleBlacklistCaching['expiry'] );
+		wfDebugLog( 'TitleBlacklist-cache', 'Updated ' . wfMemcKey( "title_blacklist_entries" )
+			. ' with ' . count( $this->mBlacklist ) . ' entries.' );
 	}
 
 	/**
 	 * Load local whitelist
 	 */
 	public function loadWhitelist() {
-		global $wgMemc, $wgTitleBlacklistCaching;
-		wfProfileIn( __METHOD__ );
-		$cachedWhitelist = $wgMemc->get( wfMemcKey( "title_whitelist_entries" ) );
+		global $wgTitleBlacklistCaching;
+
+		$cache = ObjectCache::getMainWANInstance();
+		$cachedWhitelist = $cache->get( wfMemcKey( "title_whitelist_entries" ) );
 		if ( is_array( $cachedWhitelist ) && count( $cachedWhitelist ) > 0 && ( $cachedWhitelist[0]->getFormatVersion() != self::VERSION ) ) {
 			$this->mWhitelist = $cachedWhitelist;
-			wfProfileOut( __METHOD__ );
 			return;
 		}
 		$this->mWhitelist = $this->parseBlacklist( wfMessage( 'titlewhitelist' )
 				->inContentLanguage()->text(), 'whitelist' );
-		$wgMemc->set( wfMemcKey( "title_whitelist_entries" ), $this->mWhitelist, $wgTitleBlacklistCaching['expiry'] );
-		wfProfileOut( __METHOD__ );
+		$cache->set( wfMemcKey( "title_whitelist_entries" ), $this->mWhitelist, $wgTitleBlacklistCaching['expiry'] );
 	}
 
 	/**
 	 * Get the text of a blacklist from a specified source
 	 *
-	 * @param $source A blacklist source from $wgTitleBlacklistSources
-	 * @return The content of the blacklist source as a string
+	 * @param string $source A blacklist source from $wgTitleBlacklistSources
+	 * @return string The content of the blacklist source as a string
 	 */
 	private static function getBlacklistText( $source ) {
 		if ( !is_array( $source ) || count( $source ) <= 0 ) {
 			return '';	// Return empty string in error case
 		}
 
-		if ( $source['type'] == TBLSRC_MSG ) {
+		if ( $source['type'] == 'message' ) {
 			return wfMessage( 'titleblacklist' )->inContentLanguage()->text();
-		} elseif ( $source['type'] == TBLSRC_LOCALPAGE && count( $source ) >= 2 ) {
+		} elseif ( $source['type'] == 'localpage' && count( $source ) >= 2 ) {
 			$title = Title::newFromText( $source['src'] );
 			if ( is_null( $title ) ) {
 				return '';
 			}
 			if ( $title->getNamespace() == NS_MEDIAWIKI ) {
-				$msg = wfMessage( $title->getText() )->inContentLanguage()->text();
-				if ( !wfMessage( 'titleblacklist', $msg )->isDisabled() ) {
-					return $msg;
+				$msg = wfMessage( $title->getText() )->inContentLanguage();
+				if ( !$msg->isDisabled() ) {
+					return $msg->text();
 				} else {
 					return '';
 				}
 			} else {
-				$article = new Article( $title );
-				if ( $article->exists() ) {
-					$article->followRedirect();
-					return $article->getContent();
+				$page = WikiPage::factory( $title );
+				if ( $page->exists() ) {
+					return ContentHandler::getContentText( $page->getContent() );
 				}
 			}
-		} elseif ( $source['type'] == TBLSRC_URL && count( $source ) >= 2 ) {
+		} elseif ( $source['type'] == 'url' && count( $source ) >= 2 ) {
 			return self::getHttp( $source['src'] );
-		} elseif ( $source['type'] == TBLSRC_FILE && count( $source ) >= 2 ) {
+		} elseif ( $source['type'] == 'file' && count( $source ) >= 2 ) {
 			if ( file_exists( $source['src'] ) ) {
 				return file_get_contents( $source['src'] );
 			} else {
@@ -127,7 +146,6 @@ class TitleBlacklist {
 	 * @return array of TitleBlacklistEntry entries
 	 */
 	public static function parseBlacklist( $list, $sourceName ) {
-		wfProfileIn( __METHOD__ );
 		$lines = preg_split( "/\r?\n/", $list );
 		$result = array();
 		foreach ( $lines as $line ) {
@@ -137,12 +155,11 @@ class TitleBlacklist {
 			}
 		}
 
-		wfProfileOut( __METHOD__ );
 		return $result;
 	}
 
 	/**
-	 * Check whether the blacklist restricts giver nuser
+	 * Check whether the blacklist restricts given user
 	 * performing a specific action on the given Title
 	 *
 	 * @param $title Title to check
@@ -153,16 +170,18 @@ class TitleBlacklist {
 	 * blacklisted; otherwise false
 	 */
 	public function userCannot( $title, $user, $action = 'edit', $override = true ) {
+		$entry = $this->isBlacklisted( $title, $action );
+		if ( !$entry ) {
+			return false;
+		}
+		$params = $entry->getParams();
+		if ( isset( $params['autoconfirmed'] ) && $user->isAllowed( 'autoconfirmed' ) ) {
+			return false;
+		}
 		if ( $override && self::userCanOverride( $user, $action ) ) {
 			return false;
-		} else {
-			$entry = $this->isBlacklisted( $title, $action );
-			if ( !$entry ) {
-				return false;
-			}
-			$params = $entry->getParams();
-			return isset( $params['autoconfirmed'] ) && $user->isAllowed( 'autoconfirmed' ) ? false : $entry;
 		}
+		return $entry;
 	}
 
 	/**
@@ -226,7 +245,7 @@ class TitleBlacklist {
 	/**
 	 * Get the current blacklist
 	 *
-	 * @return Array of TitleBlacklistEntry items
+	 * @return TitleBlacklistEntry[]
 	 */
 	public function getBlacklist() {
 		if ( is_null( $this->mBlacklist ) ) {
@@ -271,8 +290,8 @@ class TitleBlacklist {
 	 * Invalidate the blacklist cache
 	 */
 	public function invalidate() {
-		global $wgMemc;
-		$wgMemc->delete( wfMemcKey( "title_blacklist_entries" ) );
+		$cache = ObjectCache::getMainWANInstance();
+		$cache->delete( wfMemcKey( "title_blacklist_entries" ) );
 	}
 
 	/**
@@ -349,7 +368,7 @@ class TitleBlacklistEntry {
 		}
 
 		if( !is_array( $wgTitleBlacklistUsernameSources ) ) {
-			throw new MWException(
+			throw new Exception(
 				'$wgTitleBlacklistUsernameSources must be "*", false or an array' );
 		}
 
@@ -357,26 +376,40 @@ class TitleBlacklistEntry {
 	}
 
 	/**
-	 * Check whether a user can perform the specified action
-	 * on the specified Title
+	 * Check whether a user can perform the specified action on the specified Title
 	 *
-	 * @param $title string to check
-	 * @param $action %Action to check
+	 * @param string $title Title to check
+	 * @param string $action Action to check
 	 * @return bool TRUE if the the regex matches the title, and is not overridden
 	 * else false if it doesn't match (or was overridden)
 	 */
 	public function matches( $title, $action ) {
-		if ( !$title ) {
+		if ( $title == '' ) {
 			return false;
 		}
 
-		if( $action == 'new-account' && !$this->filtersNewAccounts() ) {
+		if ( $action === 'new-account' && !$this->filtersNewAccounts() ) {
 			return false;
 		}
 
-		if ( isset( $this->mParams['antispoof'] ) && is_callable( 'AntiSpoof::checkUnicodeString' ) ) {
-			list( $ok, $norm ) = AntiSpoof::checkUnicodeString( $title );
-			if ( $ok == "OK" ) {
+		if ( isset( $this->mParams['antispoof'] )
+			&& is_callable( 'AntiSpoof::checkUnicodeString' )
+		) {
+			if ( $action === 'edit' ) {
+				// Use process cache for frequently edited pages
+				$cache = ObjectCache::getMainWANInstance();
+				list( $ok, $norm ) = $cache->getWithSetCallback(
+					$cache->makeKey( 'titleblacklist', 'normalized-unicode', md5( $title ) ),
+					$cache::TTL_MONTH,
+					function () use ( $title ) {
+						return AntiSpoof::checkUnicodeString( $title );
+					}
+				);
+			} else {
+				list( $ok, $norm ) = AntiSpoof::checkUnicodeString( $title );
+			}
+
+			if ( $ok === "OK" ) {
 				list( $ver, $title ) = explode( ':', $norm, 2 );
 			} else {
 				wfDebugLog( 'TitleBlacklist', 'AntiSpoof could not normalize "' . $title . '".' );
@@ -384,7 +417,10 @@ class TitleBlacklistEntry {
 		}
 
 		wfSuppressWarnings();
-		$match = preg_match( "/^(?:{$this->mRegex})$/us" . ( isset( $this->mParams['casesensitive'] ) ? '' : 'i' ), $title );
+		$match = preg_match(
+			"/^(?:{$this->mRegex})$/us" . ( isset( $this->mParams['casesensitive'] ) ? '' : 'i' ),
+			$title
+		);
 		wfRestoreWarnings();
 
 		if ( $match ) {
@@ -403,6 +439,7 @@ class TitleBlacklistEntry {
 			}
 			return true;
 		}
+
 		return false;
 	}
 
@@ -528,6 +565,9 @@ class TitleBlacklistEntry {
 	 */
 	public function getErrorMessage( $operation ) {
 		$message = $this->getCustomMessage();
+		// For grep:
+		// titleblacklist-forbidden-edit, titleblacklist-forbidden-move,
+		// titleblacklist-forbidden-upload, titleblacklist-forbidden-new-account
 		return $message ? $message : "titleblacklist-forbidden-{$operation}";
 	}
 }

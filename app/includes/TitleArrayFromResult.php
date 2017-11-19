@@ -24,13 +24,15 @@
  * @file
  */
 
-class TitleArrayFromResult extends TitleArray implements Countable {
+use Wikimedia\Rdbms\ResultWrapper;
 
-	/**
-	 * @var ResultWrapper
-	 */
-	var $res;
-	var $key, $current;
+class TitleArrayFromResult extends TitleArray implements Countable {
+	/** @var ResultWrapper */
+	public $res;
+
+	public $key;
+
+	public $current;
 
 	function __construct( $res ) {
 		$this->res = $res;

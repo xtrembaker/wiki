@@ -21,6 +21,7 @@
  * @author Rob Church <robchur@gmail.com>
  * @ingroup Media
  */
+use MediaWiki\MediaWikiServices;
 
 /**
  * File deletion user interface
@@ -83,7 +84,10 @@ class FileDeleteForm {
 		$suppress = $wgRequest->getVal( 'wpSuppress' ) && $wgUser->isAllowed( 'suppressrevision' );
 
 		if ( $this->oldimage ) {
-			$this->oldfile = RepoGroup::singleton()->getLocalRepo()->newFromArchiveName( $this->title, $this->oldimage );
+			$this->oldfile = RepoGroup::singleton()->getLocalRepo()->newFromArchiveName(
+				$this->title,
+				$this->oldimage
+			);
 		}
 
 		if ( !self::haveDeletableFile( $this->file, $this->oldfile, $this->oldimage ) ) {
@@ -107,13 +111,22 @@ class FileDeleteForm {
 				$reason = $deleteReasonList;
 			}
 
-			$status = self::doDelete( $this->title, $this->file, $this->oldimage, $reason, $suppress, $wgUser );
+			$status = self::doDelete(
+				$this->title,
+				$this->file,
+				$this->oldimage,
+				$reason,
+				$suppress,
+				$wgUser
+			);
 
 			if ( !$status->isGood() ) {
 				$wgOut->addHTML( '<h2>' . $this->prepareMessage( 'filedeleteerror-short' ) . "</h2>\n" );
-				$wgOut->addWikiText( '<div class="error">' . $status->getWikiText( 'filedeleteerror-short', 'filedeleteerror-long' ) . '</div>' );
+				$wgOut->addWikiText( '<div class="error">' .
+					$status->getWikiText( 'filedeleteerror-short', 'filedeleteerror-long' )
+					. '</div>' );
 			}
-			if ( $status->ok ) {
+			if ( $status->isOK() ) {
 				$wgOut->setPageTitle( wfMessage( 'actioncomplete' ) );
 				$wgOut->addHTML( $this->prepareMessage( 'filedelete-success' ) );
 				// Return to the main page if we just deleted all versions of the
@@ -138,10 +151,13 @@ class FileDeleteForm {
 	 * @param string $reason Reason of the deletion
 	 * @param bool $suppress Whether to mark all deleted versions as restricted
 	 * @param User $user User object performing the request
+	 * @param array $tags Tags to apply to the deletion action
 	 * @throws MWException
-	 * @return bool|Status
+	 * @return Status
 	 */
-	public static function doDelete( &$title, &$file, &$oldimage, $reason, $suppress, User $user = null ) {
+	public static function doDelete( &$title, &$file, &$oldimage, $reason,
+		$suppress, User $user = null, $tags = []
+	) {
 		if ( $user === null ) {
 			global $wgUser;
 			$user = $wgUser;
@@ -149,7 +165,7 @@ class FileDeleteForm {
 
 		if ( $oldimage ) {
 			$page = null;
-			$status = $file->deleteOld( $oldimage, $reason, $suppress );
+			$status = $file->deleteOld( $oldimage, $reason, $suppress, $user );
 			if ( $status->ok ) {
 				// Need to do a log item
 				$logComment = wfMessage( 'deletedrevision', $oldimage )->inContentLanguage()->text();
@@ -164,8 +180,11 @@ class FileDeleteForm {
 				$logEntry->setPerformer( $user );
 				$logEntry->setTarget( $title );
 				$logEntry->setComment( $logComment );
+				$logEntry->setTags( $tags );
 				$logid = $logEntry->insert();
 				$logEntry->publish( $logid );
+
+				$status->value = $logid;
 			}
 		} else {
 			$status = Status::newFatal( 'cannotdelete',
@@ -173,29 +192,31 @@ class FileDeleteForm {
 			);
 			$page = WikiPage::factory( $title );
 			$dbw = wfGetDB( DB_MASTER );
-			try {
-				// delete the associated article first
-				$error = '';
-				$deleteStatus = $page->doDeleteArticleReal( $reason, $suppress, 0, false, $error, $user );
-				// doDeleteArticleReal() returns a non-fatal error status if the page
-				// or revision is missing, so check for isOK() rather than isGood()
-				if ( $deleteStatus->isOK() ) {
-					$status = $file->delete( $reason, $suppress );
-					if ( $status->isOK() ) {
-						$dbw->commit( __METHOD__ );
-					} else {
-						$dbw->rollback( __METHOD__ );
-					}
+			$dbw->startAtomic( __METHOD__ );
+			// delete the associated article first
+			$error = '';
+			$deleteStatus = $page->doDeleteArticleReal( $reason, $suppress, 0, false, $error,
+				$user, $tags );
+			// doDeleteArticleReal() returns a non-fatal error status if the page
+			// or revision is missing, so check for isOK() rather than isGood()
+			if ( $deleteStatus->isOK() ) {
+				$status = $file->delete( $reason, $suppress, $user );
+				if ( $status->isOK() ) {
+					$status->value = $deleteStatus->value; // log id
+					$dbw->endAtomic( __METHOD__ );
+				} else {
+					// Page deleted but file still there? rollback page delete
+					$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+					$lbFactory->rollbackMasterChanges( __METHOD__ );
 				}
-			} catch ( MWException $e ) {
-				// rollback before returning to prevent UI from displaying incorrect "View or restore N deleted edits?"
-				$dbw->rollback( __METHOD__ );
-				throw $e;
+			} else {
+				// Done; nothing changed
+				$dbw->endAtomic( __METHOD__ );
 			}
 		}
 
 		if ( $status->isOK() ) {
-			wfRunHooks( 'FileDeleteComplete', array( &$file, &$oldimage, &$page, &$user, &$reason ) );
+			Hooks::run( 'FileDeleteComplete', [ &$file, &$oldimage, &$page, &$user, &$reason ] );
 		}
 
 		return $status;
@@ -212,7 +233,7 @@ class FileDeleteForm {
 					<td></td>
 					<td class='mw-input'><strong>" .
 						Xml::checkLabel( wfMessage( 'revdelete-suppress' )->text(),
-							'wpSuppress', 'wpSuppress', false, array( 'tabindex' => '3' ) ) .
+							'wpSuppress', 'wpSuppress', false, [ 'tabindex' => '3' ] ) .
 					"</strong></td>
 				</tr>";
 		} else {
@@ -220,13 +241,13 @@ class FileDeleteForm {
 		}
 
 		$checkWatch = $wgUser->getBoolOption( 'watchdeletion' ) || $wgUser->isWatched( $this->title );
-		$form = Xml::openElement( 'form', array( 'method' => 'post', 'action' => $this->getAction(),
-			'id' => 'mw-img-deleteconfirm' ) ) .
+		$form = Xml::openElement( 'form', [ 'method' => 'post', 'action' => $this->getAction(),
+			'id' => 'mw-img-deleteconfirm' ] ) .
 			Xml::openElement( 'fieldset' ) .
 			Xml::element( 'legend', null, wfMessage( 'filedelete-legend' )->text() ) .
 			Html::hidden( 'wpEditToken', $wgUser->getEditToken( $this->oldimage ) ) .
 			$this->prepareMessage( 'filedelete-intro' ) .
-			Xml::openElement( 'table', array( 'id' => 'mw-img-deleteconfirm-table' ) ) .
+			Xml::openElement( 'table', [ 'id' => 'mw-img-deleteconfirm-table' ] ) .
 			"<tr>
 				<td class='mw-label'>" .
 					Xml::label( wfMessage( 'filedelete-comment' )->text(), 'wpDeleteReasonList' ) .
@@ -248,7 +269,7 @@ class FileDeleteForm {
 				"</td>
 				<td class='mw-input'>" .
 					Xml::input( 'wpReason', 60, $wgRequest->getText( 'wpReason' ),
-						array( 'type' => 'text', 'maxlength' => '255', 'tabindex' => '2', 'id' => 'wpReason' ) ) .
+						[ 'type' => 'text', 'maxlength' => '255', 'tabindex' => '2', 'id' => 'wpReason' ] ) .
 				"</td>
 			</tr>
 			{$suppress}";
@@ -258,7 +279,7 @@ class FileDeleteForm {
 				<td></td>
 				<td class='mw-input'>" .
 					Xml::checkLabel( wfMessage( 'watchthis' )->text(),
-						'wpWatch', 'wpWatch', $checkWatch, array( 'tabindex' => '3' ) ) .
+						'wpWatch', 'wpWatch', $checkWatch, [ 'tabindex' => '3' ] ) .
 				"</td>
 			</tr>";
 		}
@@ -266,8 +287,14 @@ class FileDeleteForm {
 			<tr>
 				<td></td>
 				<td class='mw-submit'>" .
-					Xml::submitButton( wfMessage( 'filedelete-submit' )->text(),
-						array( 'name' => 'mw-filedelete-submit', 'id' => 'mw-filedelete-submit', 'tabindex' => '4' ) ) .
+					Xml::submitButton(
+						wfMessage( 'filedelete-submit' )->text(),
+						[
+							'name' => 'mw-filedelete-submit',
+							'id' => 'mw-filedelete-submit',
+							'tabindex' => '4'
+						]
+					) .
 				"</td>
 			</tr>" .
 			Xml::closeElement( 'table' ) .
@@ -275,12 +302,13 @@ class FileDeleteForm {
 			Xml::closeElement( 'form' );
 
 			if ( $wgUser->isAllowed( 'editinterface' ) ) {
-				$title = Title::makeTitle( NS_MEDIAWIKI, 'Filedelete-reason-dropdown' );
-				$link = Linker::link(
+				$title = wfMessage( 'filedelete-reason-dropdown' )->inContentLanguage()->getTitle();
+				$linkRenderer = MediaWikiServices::getInstance()->getLinkRenderer();
+				$link = $linkRenderer->makeKnownLink(
 					$title,
-					wfMessage( 'filedelete-edit-reasonlist' )->escaped(),
-					array(),
-					array( 'action' => 'edit' )
+					wfMessage( 'filedelete-edit-reasonlist' )->text(),
+					[],
+					[ 'action' => 'edit' ]
 				);
 				$form .= '<p class="mw-filedelete-editreasons">' . $link . '</p>';
 			}
@@ -303,14 +331,16 @@ class FileDeleteForm {
 	 * showing an appropriate message depending upon whether
 	 * it's a current file or an old version
 	 *
-	 * @param string $message message base
-	 * @return String
+	 * @param string $message Message base
+	 * @return string
 	 */
 	private function prepareMessage( $message ) {
 		global $wgLang;
 		if ( $this->oldimage ) {
+			# Message keys used:
+			# 'filedelete-intro-old', 'filedelete-nofile-old', 'filedelete-success-old'
 			return wfMessage(
-				"{$message}-old", # To ensure grep will find them: 'filedelete-intro-old', 'filedelete-nofile-old', 'filedelete-success-old'
+				"{$message}-old",
 				wfEscapeWikiText( $this->title->getText() ),
 				$wgLang->date( $this->getTimestamp(), true ),
 				$wgLang->time( $this->getTimestamp(), true ),
@@ -336,6 +366,7 @@ class FileDeleteForm {
 	/**
 	 * Is the provided `oldimage` value valid?
 	 *
+	 * @param string $oldimage
 	 * @return bool
 	 */
 	public static function isValidOldSpec( $oldimage ) {
@@ -349,9 +380,9 @@ class FileDeleteForm {
 	 * value was provided, does it correspond to an
 	 * existing, local, old version of this file?
 	 *
-	 * @param $file File
-	 * @param $oldfile File
-	 * @param $oldimage File
+	 * @param File $file
+	 * @param File $oldfile
+	 * @param File $oldimage
 	 * @return bool
 	 */
 	public static function haveDeletableFile( &$file, &$oldfile, $oldimage ) {
@@ -366,7 +397,7 @@ class FileDeleteForm {
 	 * @return string
 	 */
 	private function getAction() {
-		$q = array();
+		$q = [];
 		$q['action'] = 'delete';
 
 		if ( $this->oldimage ) {

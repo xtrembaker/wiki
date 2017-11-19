@@ -1,8 +1,10 @@
 {
-    "@metadata": {
-        "authors": [
-            "Malafaya"
-        ]
-    },
-    "createarticle": "Crea paje"
+	"@metadata": {
+		"authors": [
+			"Malafaya",
+			"Cgboeree"
+		]
+	},
+	"inputbox-tryexact": "Atenta un acorda esata",
+	"inputbox-createarticle": "Crea paje"
 }

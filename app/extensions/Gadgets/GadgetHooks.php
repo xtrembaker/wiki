@@ -20,24 +20,26 @@
  *
  * @file
  */
+use WrappedString\WrappedString;
 
 class GadgetHooks {
 	/**
-	 * ArticleSaveComplete hook handler.
+	 * PageContentSaveComplete hook handler.
 	 *
 	 * @param $article Article
 	 * @param $user User
-	 * @param $text String: New page text
+	 * @param $content Content New page content
 	 * @return bool
 	 */
-	public static function articleSaveComplete( $article, $user, $text ) {
+	public static function onPageContentSaveComplete( $article, $user, $content ) {
 		// update cache if MediaWiki:Gadgets-definition was edited
-		wfProfileIn( __METHOD__ );
 		$title = $article->getTitle();
-		if ( $title->getNamespace() == NS_MEDIAWIKI && $title->getText() == 'Gadgets-definition' ) {
-			Gadget::loadStructuredList( $text );
+		$repo = GadgetRepo::singleton();
+		if ( $title->getNamespace() == NS_MEDIAWIKI && $title->getText() == 'Gadgets-definition'
+			&& $repo instanceof MediaWikiGadgetsDefinitionRepo
+		) {
+			$repo->purgeDefinitionCache();
 		}
-		wfProfileOut( __METHOD__ );
 		return true;
 	}
 
@@ -47,7 +49,7 @@ class GadgetHooks {
 	 * @return bool
 	 */
 	public static function userGetDefaultOptions( &$defaultOptions ) {
-		$gadgets = Gadget::loadStructuredList();
+		$gadgets = GadgetRepo::singleton()->getStructuredList();
 		if ( !$gadgets ) {
 			return true;
 		}
@@ -73,23 +75,21 @@ class GadgetHooks {
 	 * @return bool
 	 */
 	public static function getPreferences( $user, &$preferences ) {
-		wfProfileIn( __METHOD__ );
-		$gadgets = Gadget::loadStructuredList();
+		$gadgets = GadgetRepo::singleton()->getStructuredList();
 		if ( !$gadgets ) {
-			wfProfileOut( __METHOD__ );
 			return true;
 		}
 
-		$options = array();
-		$default = array();
+		$options = [];
+		$default = [];
 		foreach ( $gadgets as $section => $thisSection ) {
-			$available = array();
+			$available = [];
 
 			/**
 			 * @var $gadget Gadget
 			 */
 			foreach ( $thisSection as $gadget ) {
-				if ( $gadget->isAllowed( $user ) ) {
+				if ( !$gadget->isHidden() && $gadget->isAllowed( $user ) ) {
 					$gname = $gadget->getName();
 					# bug 30182: dir="auto" because it's often not translated
 					$desc = '<span dir="auto">' . $gadget->getDescription() . '</span>';
@@ -112,27 +112,26 @@ class GadgetHooks {
 		}
 
 		$preferences['gadgets-intro'] =
-			array(
+			[
 				'type' => 'info',
 				'label' => '&#160;',
-				'default' => Xml::tags( 'tr', array(),
-					Xml::tags( 'td', array( 'colspan' => 2 ),
+				'default' => Xml::tags( 'tr', [],
+					Xml::tags( 'td', [ 'colspan' => 2 ],
 						wfMessage( 'gadgets-prefstext' )->parseAsBlock() ) ),
 				'section' => 'gadgets',
 				'raw' => 1,
 				'rawrow' => 1,
-			);
+			];
 
 		$preferences['gadgets'] =
-			array(
+			[
 				'type' => 'multiselect',
 				'options' => $options,
 				'section' => 'gadgets',
 				'label' => '&#160;',
 				'prefix' => 'gadget-',
 				'default' => $default,
-			);
-		wfProfileOut( __METHOD__ );
+			];
 
 		return true;
 	}
@@ -143,22 +142,17 @@ class GadgetHooks {
 	 * @return bool
 	 */
 	public static function registerModules( &$resourceLoader ) {
-		$gadgets = Gadget::loadList();
-		if ( !$gadgets ) {
-			return true;
+		$repo = GadgetRepo::singleton();
+		$ids = $repo->getGadgetIds();
+
+		foreach ( $ids as $id ) {
+			$resourceLoader->register( Gadget::getModuleName( $id ), [
+				'class' => 'GadgetResourceLoaderModule',
+				'id' => $id,
+			] );
 		}
 
-		/**
-		 * @var $g Gadget
-		 */
-		foreach ( $gadgets as $g ) {
-			$module = $g->getModule();
-			if ( $module ) {
-				$resourceLoader->register( $g->getModuleName(), $module );
-			}
-		}
 		return true;
-
 	}
 
 	/**
@@ -167,91 +161,190 @@ class GadgetHooks {
 	 * @return bool
 	 */
 	public static function beforePageDisplay( $out ) {
-		wfProfileIn( __METHOD__ );
-
-		$gadgets = Gadget::loadList();
-		if ( !$gadgets ) {
-			wfProfileOut( __METHOD__ );
+		$repo = GadgetRepo::singleton();
+		$ids = $repo->getGadgetIds();
+		if ( !$ids ) {
 			return true;
 		}
 
 		$lb = new LinkBatch();
 		$lb->setCaller( __METHOD__ );
-		$pages = array();
+		$enabledLegacyGadgets = [];
+		$typelessMixedGadgets = [];
 
 		/**
 		 * @var $gadget Gadget
 		 */
 		$user = $out->getUser();
-		foreach ( $gadgets as $gadget ) {
+		foreach ( $ids as $id ) {
+			try {
+				$gadget = $repo->getGadget( $id );
+			} catch ( InvalidArgumentException $e ) {
+				continue;
+			}
+			$peers = [];
+			foreach ( $gadget->getPeers() as $peerName ) {
+				try {
+					$peers[] = $repo->getGadget( $peerName );
+				} catch ( InvalidArgumentException $e ) {
+					// Ignore
+					// @todo: Emit warning for invalid peer?
+				}
+			}
 			if ( $gadget->isEnabled( $user ) && $gadget->isAllowed( $user ) ) {
 				if ( $gadget->hasModule() ) {
-					$out->addModuleStyles( $gadget->getModuleName() );
-					$out->addModules( $gadget->getModuleName() );
+					if ( $gadget->getType() === 'styles' ) {
+						$out->addModuleStyles( Gadget::getModuleName( $gadget->getName() ) );
+					} elseif ( $gadget->getType() === 'general' ) {
+						$out->addModules( Gadget::getModuleName( $gadget->getName() ) );
+						// Load peer modules
+						foreach ( $peers as $peer ) {
+							if ( $peer->getType() === 'styles' ) {
+								$out->addModuleStyles( Gadget::getModuleName( $peer->getName() ) );
+							}
+							// Else if not type=styles: Use dependencies instead.
+							// Note: No need for recursion as styles modules don't support
+							// either of 'dependencies' and 'peers'.
+							// @todo: Emit warning for non-styles peer?
+						}
+					} else {
+						$out->addModuleStyles( Gadget::getModuleName( $gadget->getName() ) );
+						$out->addModules( Gadget::getModuleName( $gadget->getName() ) );
+						$typelessMixedGadgets[] = $id;
+					}
 				}
 
-				foreach ( $gadget->getLegacyScripts() as $page ) {
-					$lb->add( NS_MEDIAWIKI, $page );
-					$pages[] = $page;
+				if ( $gadget->getLegacyScripts() ) {
+					$enabledLegacyGadgets[] = $id;
 				}
 			}
 		}
 
-
-		// Allow other extensions, e.g. MobileFrontend, to disallow legacy gadgets
-		if ( wfRunHooks( 'Gadgets::allowLegacy', array( $out->getContext() ) ) ) {
-			$lb->execute( __METHOD__ );
-
-			$done = array();
-
-			foreach ( $pages as $page ) {
-				if ( isset( $done[$page] ) ) {
-					continue;
-				}
-
-				$done[$page] = true;
-				self::applyScript( $page, $out );
-			}
+		$strings = [];
+		foreach ( $enabledLegacyGadgets as $id ) {
+			$strings[] = self::makeLegacyWarning( $id );
 		}
-		wfProfileOut( __METHOD__ );
+		foreach ( $typelessMixedGadgets as $id ) {
+			$strings[] = self::makeTypelessWarning( $id );
+		}
+		$out->addHTML( WrappedString::join( "\n", $strings ) );
+
+		return true;
+	}
+
+	private static function makeLegacyWarning( $id ) {
+		$special = SpecialPage::getTitleFor( 'Gadgets' );
+
+		return ResourceLoader::makeInlineScript(
+			Xml::encodeJsCall( 'mw.log.warn', [
+				"Gadget \"$id\" was not loaded. Please migrate it to use ResourceLoader. " .
+				'See <' . $special->getCanonicalURL() . '>.'
+			] )
+		);
+	}
+
+	private static function makeTypelessWarning( $id ) {
+		return ResourceLoader::makeInlineScript( Xml::encodeJsCall( 'mw.log.warn', [
+			"Gadget \"$id\" styles loaded twice. Migrate to type=general. " .
+			'See <https://www.mediawiki.org/wiki/RL/MGU#Gadget_type>.'
+		] ) );
+	}
+
+	/**
+	 * Valid gadget definition page after content is modified
+	 *
+	 * @param IContextSource $context
+	 * @param Content $content
+	 * @param Status $status
+	 * @param string $summary
+	 * @throws Exception
+	 * @return bool
+	 */
+	public static function onEditFilterMergedContent( $context, $content, $status, $summary ) {
+		$title = $context->getTitle();
+
+		if ( !$title->inNamespace( NS_GADGET_DEFINITION ) ) {
+			return true;
+		}
+
+		if ( !$content instanceof GadgetDefinitionContent ) {
+			// This should not be possible?
+			throw new Exception( "Tried to save non-GadgetDefinitionContent to {$title->getPrefixedText()}" );
+		}
+
+		$status = $content->validate();
+		if ( !$status->isGood() ) {
+			$status->merge( $status );
+			return false;
+		}
 
 		return true;
 	}
 
 	/**
-	 * Adds one legacy script to output.
+	 * After a new page is created in the Gadget definition namespace,
+	 * invalidate the list of gadget ids
 	 *
-	 * @param string $page Unprefixed page title
-	 * @param OutputPage $out
+	 * @param WikiPage $page
 	 */
-	private static function applyScript( $page, $out ) {
-		global $wgJsMimeType;
-
-		# bug 22929: disable gadgets on sensitive pages.  Scripts loaded through the
-		# ResourceLoader handle this in OutputPage::getModules()
-		# TODO: make this extension load everything via RL, then we don't need to worry
-		# about any of this.
-		if ( $out->getAllowedModules( ResourceLoaderModule::TYPE_SCRIPTS ) < ResourceLoaderModule::ORIGIN_USER_SITEWIDE ) {
-			return;
+	public static function onPageContentInsertComplete( WikiPage $page ) {
+		if ( $page->getTitle()->inNamespace( NS_GADGET_DEFINITION ) ) {
+			$repo = GadgetRepo::singleton();
+			if ( $repo instanceof GadgetDefinitionNamespaceRepo ) {
+				$repo->purgeGadgetIdsList();
+			}
 		}
-
-		$t = Title::makeTitleSafe( NS_MEDIAWIKI, $page );
-		if ( !$t ) {
-			return;
-		}
-
-		$u = $t->getLocalURL( 'action=raw&ctype=' . $wgJsMimeType );
-		$out->addScriptFile( $u, $t->getLatestRevID() );
 	}
 
 	/**
-	 * UnitTestsList hook handler
-	 * @param array $files
+	 * Mark the Title as having a content model of javascript or css for pages
+	 * in the Gadget namespace based on their file extension
+	 *
+	 * @param Title $title
+	 * @param string $model
 	 * @return bool
 	 */
-	public static function onUnitTestsList( array &$files ) {
-		$testDir = __DIR__ . '/tests/';
-		$files = array_merge( $files, glob( "$testDir/*Test.php" ) );
+	public static function onContentHandlerDefaultModelFor( Title $title, &$model ) {
+		if ( $title->inNamespace( NS_GADGET ) ) {
+			preg_match( '!\.(css|js)$!u', $title->getText(), $ext );
+			$ext = isset( $ext[1] ) ? $ext[1] : '';
+			switch ( $ext ) {
+				case 'js':
+					$model = 'javascript';
+					return false;
+				case 'css':
+					$model = 'css';
+					return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Set the CodeEditor language for Gadget definition pages. It already
+	 * knows the language for Gadget: namespace pages.
+	 *
+	 * @param Title $title
+	 * @param string $lang
+	 * @return bool
+	 */
+	public static function onCodeEditorGetPageLanguage( Title $title, &$lang ) {
+		if ( $title->hasContentModel( 'GadgetDefinition' ) ) {
+			$lang = 'json';
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
+	 * Add the GadgetUsage special page to the list of QueryPages.
+	 * @param array &$queryPages
+	 * @return bool
+	 */
+	public static function onwgQueryPages( &$queryPages ) {
+		$queryPages[] = [ 'SpecialGadgetUsage', 'GadgetUsage' ];
 		return true;
 	}
 }

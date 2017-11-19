@@ -55,20 +55,13 @@ class ApiSpamBlacklist extends ApiBase {
 		);
 	}
 
-	public function getParamDescription() {
+	/**
+	 * @see ApiBase::getExamplesMessages()
+	 */
+	protected function getExamplesMessages() {
 		return array(
-			'url' => 'A pipe-separated list of URLs to validate against the blacklist',
-		);
-	}
-
-	public function getDescription() {
-		return 'Validate one or more URLs against the SpamBlacklist.';
-	}
-
-	public function getExamples() {
-		return array(
-			'api.php?action=spamblacklist&url=http%3A%2F%2Fwww.example.com%2F%7Chttp%3A%2F%2Fwww.example.org%2F',
-			'api.php?action=spamblacklist&url=https%3A%2F%2Fwww.example.net%2Findex.php',
+			'action=spamblacklist&url=http://www.example.com/|http://www.example.org/'
+				=> 'apihelp-spamblacklist-example-1',
 		);
 	}
 

@@ -2,70 +2,73 @@
  * @class mw.user
  * @singleton
  */
+/* global Uint32Array */
 ( function ( mw, $ ) {
-	var user,
-		deferreds = {},
-		// Extend the skeleton mw.user from mediawiki.js
-		// This is kind of ugly but we're stuck with this for b/c reasons
-		options = mw.user.options || new mw.Map(),
-		tokens = mw.user.tokens || new mw.Map();
+	var userInfoPromise;
 
 	/**
 	 * Get the current user's groups or rights
 	 *
 	 * @private
-	 * @param {string} info One of 'groups' or 'rights'
-	 * @param {Function} [callback]
 	 * @return {jQuery.Promise}
 	 */
-	function getUserInfo( info, callback ) {
-		var api;
-		if ( !deferreds[info] ) {
-
-			deferreds.rights = $.Deferred();
-			deferreds.groups = $.Deferred();
-
-			api = new mw.Api();
-			api.get( {
-				action: 'query',
-				meta: 'userinfo',
-				uiprop: 'rights|groups'
-			} ).always( function ( data ) {
-				var rights, groups;
-				if ( data.query && data.query.userinfo ) {
-					rights = data.query.userinfo.rights;
-					groups = data.query.userinfo.groups;
-				}
-				deferreds.rights.resolve( rights || [] );
-				deferreds.groups.resolve( groups || [] );
-			} );
-
+	function getUserInfo() {
+		if ( !userInfoPromise ) {
+			userInfoPromise = new mw.Api().getUserInfo();
 		}
-
-		return deferreds[info].done( callback ).promise();
+		return userInfoPromise;
 	}
 
-	mw.user = user = {
-		options: options,
-		tokens: tokens,
+	// mw.user with the properties options and tokens gets defined in mediawiki.js.
+	$.extend( mw.user, {
 
 		/**
-		 * Generate a random user session ID (32 alpha-numeric characters)
+		 * Generate a random user session ID.
 		 *
 		 * This information would potentially be stored in a cookie to identify a user during a
-		 * session or series of sessions. Its uniqueness should not be depended on.
+		 * session or series of sessions. Its uniqueness should not be depended on unless the
+		 * browser supports the crypto API.
 		 *
-		 * @return {string} Random set of 32 alpha-numeric characters
+		 * Known problems with Math.random():
+		 * Using the Math.random function we have seen sets
+		 * with 1% of non uniques among 200,000 values with Safari providing most of these.
+		 * Given the prevalence of Safari in mobile the percentage of duplicates in
+		 * mobile usages of this code is probably higher.
+		 *
+		 * Rationale:
+		 * We need about 64 bits to make sure that probability of collision
+		 * on 500 million (5*10^8) is <= 1%
+		 * See https://en.wikipedia.org/wiki/Birthday_problem#Probability_table
+		 *
+		 * @return {string} 64 bit integer in hex format, padded
 		 */
 		generateRandomSessionId: function () {
-			var i, r,
-				id = '',
-				seed = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-			for ( i = 0; i < 32; i++ ) {
-				r = Math.floor( Math.random() * seed.length );
-				id += seed.substring( r, r + 1 );
+			var rnds, i,
+				hexRnds = new Array( 2 ),
+				// Support: IE 11
+				crypto = window.crypto || window.msCrypto;
+
+			if ( crypto && crypto.getRandomValues ) {
+				// Fill an array with 2 random values, each of which is 32 bits.
+				// Note that Uint32Array is array-like but does not implement Array.
+				rnds = new Uint32Array( 2 );
+				crypto.getRandomValues( rnds );
+			} else {
+				rnds = [
+					Math.floor( Math.random() * 0x100000000 ),
+					Math.floor( Math.random() * 0x100000000 )
+				];
 			}
-			return id;
+			// Convert number to a string with 16 hex characters
+			for ( i = 0; i < 2; i++ ) {
+				// Add 0x100000000 before converting to hex and strip the extra character
+				// after converting to keep the leading zeros.
+				hexRnds[ i ] = ( rnds[ i ] + 0x100000000 ).toString( 16 ).slice( 1 );
+			}
+
+			// Concatenation of two random integers with entropy n and m
+			// returns a string with entropy n+m if those strings are independent
+			return hexRnds.join( '' );
 		},
 
 		/**
@@ -76,7 +79,7 @@
 		 * @return {number} Current user's id, or 0 if user is anonymous
 		 */
 		getId: function () {
-			return mw.config.get( 'wgUserId', 0 );
+			return mw.config.get( 'wgUserId' ) || 0;
 		},
 
 		/**
@@ -89,30 +92,20 @@
 		},
 
 		/**
-		 * @inheritdoc #getName
-		 * @deprecated since 1.20 use #getName instead
-		 */
-		name: function () {
-			return user.getName();
-		},
-
-		/**
 		 * Get date user registered, if available
 		 *
-		 * @return {Date|boolean|null} Date user registered, or false for anonymous users, or
-		 *  null when data is not available
+		 * @return {boolean|null|Date} False for anonymous users, null if data is
+		 *  unavailable, or Date for when the user registered.
 		 */
 		getRegistration: function () {
-			var registration = mw.config.get( 'wgUserRegistration' );
-			if ( user.isAnon() ) {
+			var registration;
+			if ( mw.user.isAnon() ) {
 				return false;
-			} else if ( registration === null ) {
-				// Information may not be available if they signed up before
-				// MW began storing this.
-				return null;
-			} else {
-				return new Date( registration );
 			}
+			registration = mw.config.get( 'wgUserRegistration' );
+			// Registration may be unavailable if the user signed up before MediaWiki
+			// began tracking this.
+			return !registration ? null : new Date( registration );
 		},
 
 		/**
@@ -121,30 +114,22 @@
 		 * @return {boolean}
 		 */
 		isAnon: function () {
-			return user.getName() === null;
+			return mw.user.getName() === null;
 		},
 
 		/**
-		 * @inheritdoc #isAnon
-		 * @deprecated since 1.20 use #isAnon instead
-		 */
-		anonymous: function () {
-			return user.isAnon();
-		},
-
-		/**
-		 * Get an automatically generated random ID (stored in a session cookie)
+		 * Get an automatically generated random ID (persisted in sessionStorage)
 		 *
-		 * This ID is ephemeral for everyone, staying in their browser only until they close
-		 * their browser.
+		 * This ID is ephemeral for everyone, staying in their browser only until they
+		 * close their browsing session.
 		 *
 		 * @return {string} Random session ID
 		 */
 		sessionId: function () {
-			var sessionId = $.cookie( 'mediaWiki.user.sessionId' );
-			if ( sessionId === undefined || sessionId === null ) {
-				sessionId = user.generateRandomSessionId();
-				$.cookie( 'mediaWiki.user.sessionId', sessionId, { expires: null, path: '/' } );
+			var sessionId = mw.storage.session.get( 'mwuser-sessionId' );
+			if ( !sessionId ) {
+				sessionId = mw.user.generateRandomSessionId();
+				mw.storage.session.set( 'mwuser-sessionId', sessionId );
 			}
 			return sessionId;
 		},
@@ -157,7 +142,7 @@
 		 * @return {string} User name or random session ID
 		 */
 		id: function () {
-			return user.getName() || user.sessionId();
+			return mw.user.getName() || mw.user.sessionId();
 		},
 
 		/**
@@ -190,14 +175,14 @@
 				expires: 30
 			}, options || {} );
 
-			cookie = $.cookie( 'mediaWiki.user.bucket:' + key );
+			cookie = mw.cookie.get( 'mwuser-bucket:' + key );
 
 			// Bucket information is stored as 2 integers, together as version:bucket like: "1:2"
 			if ( typeof cookie === 'string' && cookie.length > 2 && cookie.indexOf( ':' ) !== -1 ) {
 				parts = cookie.split( ':' );
-				if ( parts.length > 1 && Number( parts[0] ) === options.version ) {
-					version = Number( parts[0] );
-					bucket = String( parts[1] );
+				if ( parts.length > 1 && Number( parts[ 0 ] ) === options.version ) {
+					version = Number( parts[ 0 ] );
+					bucket = String( parts[ 1 ] );
 				}
 			}
 
@@ -211,7 +196,7 @@
 				// Find range
 				range = 0;
 				for ( k in options.buckets ) {
-					range += options.buckets[k];
+					range += options.buckets[ k ];
 				}
 
 				// Select random value within range
@@ -221,16 +206,16 @@
 				total = 0;
 				for ( k in options.buckets ) {
 					bucket = k;
-					total += options.buckets[k];
+					total += options.buckets[ k ];
 					if ( total >= rand ) {
 						break;
 					}
 				}
 
-				$.cookie(
-					'mediaWiki.user.bucket:' + key,
+				mw.cookie.set(
+					'mwuser-bucket:' + key,
 					version + ':' + bucket,
-					{ path: '/', expires: Number( options.expires ) }
+					{ expires: Number( options.expires ) * 86400 }
 				);
 			}
 
@@ -244,7 +229,10 @@
 		 * @return {jQuery.Promise}
 		 */
 		getGroups: function ( callback ) {
-			return getUserInfo( 'groups', callback );
+			var userGroups = mw.config.get( 'wgUserGroups', [] );
+
+			// Uses promise for backwards compatibility
+			return $.Deferred().resolve( userGroups ).done( callback );
 		},
 
 		/**
@@ -254,8 +242,11 @@
 		 * @return {jQuery.Promise}
 		 */
 		getRights: function ( callback ) {
-			return getUserInfo( 'rights', callback );
+			return getUserInfo().then(
+				function ( userInfo ) { return userInfo.rights; },
+				function () { return []; }
+			).done( callback );
 		}
-	};
+	} );
 
 }( mediaWiki, jQuery ) );

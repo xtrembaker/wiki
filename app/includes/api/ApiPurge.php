@@ -24,6 +24,7 @@
  *
  * @file
  */
+use MediaWiki\Logger\LoggerFactory;
 
 /**
  * API interface for page purging
@@ -38,49 +39,71 @@ class ApiPurge extends ApiBase {
 	public function execute() {
 		$params = $this->extractRequestParams();
 
+		$continuationManager = new ApiContinuationManager( $this, [], [] );
+		$this->setContinuationManager( $continuationManager );
+
 		$forceLinkUpdate = $params['forcelinkupdate'];
 		$forceRecursiveLinkUpdate = $params['forcerecursivelinkupdate'];
 		$pageSet = $this->getPageSet();
 		$pageSet->execute();
 
 		$result = $pageSet->getInvalidTitlesAndRevisions();
+		$user = $this->getUser();
 
 		foreach ( $pageSet->getGoodTitles() as $title ) {
-			$r = array();
+			$r = [];
 			ApiQueryBase::addTitleInfo( $r, $title );
 			$page = WikiPage::factory( $title );
-			$page->doPurge(); // Directly purge and skip the UI part of purge().
-			$r['purged'] = '';
+			if ( !$user->pingLimiter( 'purge' ) ) {
+				// Directly purge and skip the UI part of purge()
+				$page->doPurge();
+				$r['purged'] = true;
+			} else {
+				$this->addWarning( 'apierror-ratelimited' );
+			}
 
 			if ( $forceLinkUpdate || $forceRecursiveLinkUpdate ) {
-				if ( !$this->getUser()->pingLimiter( 'linkpurge' ) ) {
-					global $wgEnableParserCache;
-
+				if ( !$user->pingLimiter( 'linkpurge' ) ) {
 					$popts = $page->makeParserOptions( 'canonical' );
 
 					# Parse content; note that HTML generation is only needed if we want to cache the result.
 					$content = $page->getContent( Revision::RAW );
-					$p_result = $content->getParserOutput(
-						$title,
-						$page->getLatest(),
-						$popts,
-						$wgEnableParserCache
-					);
+					if ( $content ) {
+						$enableParserCache = $this->getConfig()->get( 'EnableParserCache' );
+						$p_result = $content->getParserOutput(
+							$title,
+							$page->getLatest(),
+							$popts,
+							$enableParserCache
+						);
 
-					# Update the links tables
-					$updates = $content->getSecondaryDataUpdates(
-						$title, null, $forceRecursiveLinkUpdate, $p_result );
-					DataUpdate::runUpdates( $updates );
+						# Logging to better see expensive usage patterns
+						if ( $forceRecursiveLinkUpdate ) {
+							LoggerFactory::getInstance( 'RecursiveLinkPurge' )->info(
+								"Recursive link purge enqueued for {title}",
+								[
+									'user' => $this->getUser()->getName(),
+									'title' => $title->getPrefixedText()
+								]
+							);
+						}
 
-					$r['linkupdate'] = '';
+						# Update the links tables
+						$updates = $content->getSecondaryDataUpdates(
+							$title, null, $forceRecursiveLinkUpdate, $p_result );
+						foreach ( $updates as $update ) {
+							DeferredUpdates::addUpdate( $update, DeferredUpdates::PRESEND );
+						}
 
-					if ( $wgEnableParserCache ) {
-						$pcache = ParserCache::singleton();
-						$pcache->save( $p_result, $page, $popts );
+						$r['linkupdate'] = true;
+
+						if ( $enableParserCache ) {
+							$pcache = ParserCache::singleton();
+							$pcache->save( $p_result, $page, $popts );
+						}
 					}
 				} else {
-					$error = $this->parseMsg( array( 'actionthrottledtext' ) );
-					$this->setWarning( $error['info'] );
+					$this->addWarning( 'apierror-ratelimited' );
 					$forceLinkUpdate = false;
 				}
 			}
@@ -88,7 +111,7 @@ class ApiPurge extends ApiBase {
 			$result[] = $r;
 		}
 		$apiResult = $this->getResult();
-		$apiResult->setIndexedTagName( $result, 'page' );
+		ApiResult::setIndexedTagName( $result, 'page' );
 		$apiResult->addValue( null, $this->getModuleName(), $result );
 
 		$values = $pageSet->getNormalizedTitlesAsResult( $apiResult );
@@ -103,6 +126,9 @@ class ApiPurge extends ApiBase {
 		if ( $values ) {
 			$apiResult->addValue( null, 'redirects', $values );
 		}
+
+		$this->setContinuationManager( null );
+		$continuationManager->setContinuationIntoResult( $apiResult );
 	}
 
 	/**
@@ -122,15 +148,17 @@ class ApiPurge extends ApiBase {
 	}
 
 	public function mustBePosted() {
-		// Anonymous users are not allowed a non-POST request
-		return !$this->getUser()->isAllowed( 'purge' );
+		return true;
 	}
 
 	public function getAllowedParams( $flags = 0 ) {
-		$result = array(
+		$result = [
 			'forcelinkupdate' => false,
-			'forcerecursivelinkupdate' => false
-		);
+			'forcerecursivelinkupdate' => false,
+			'continue' => [
+				ApiBase::PARAM_HELP_MSG => 'api-help-param-continue',
+			],
+		];
 		if ( $flags ) {
 			$result += $this->getPageSet()->getFinalParams( $flags );
 		}
@@ -138,68 +166,16 @@ class ApiPurge extends ApiBase {
 		return $result;
 	}
 
-	public function getParamDescription() {
-		return $this->getPageSet()->getFinalParamDescription()
-			+ array(
-				'forcelinkupdate' => 'Update the links tables',
-				'forcerecursivelinkupdate' => 'Update the links table, and update ' .
-					'the links tables for any page that uses this page as a template',
-			);
-	}
-
-	public function getResultProperties() {
-		return array(
-			ApiBase::PROP_LIST => true,
-			'' => array(
-				'ns' => array(
-					ApiBase::PROP_TYPE => 'namespace',
-					ApiBase::PROP_NULLABLE => true
-				),
-				'title' => array(
-					ApiBase::PROP_TYPE => 'string',
-					ApiBase::PROP_NULLABLE => true
-				),
-				'pageid' => array(
-					ApiBase::PROP_TYPE => 'integer',
-					ApiBase::PROP_NULLABLE => true
-				),
-				'revid' => array(
-					ApiBase::PROP_TYPE => 'integer',
-					ApiBase::PROP_NULLABLE => true
-				),
-				'invalid' => 'boolean',
-				'special' => 'boolean',
-				'missing' => 'boolean',
-				'purged' => 'boolean',
-				'linkupdate' => 'boolean',
-				'iw' => array(
-					ApiBase::PROP_TYPE => 'string',
-					ApiBase::PROP_NULLABLE => true
-				),
-			)
-		);
-	}
-
-	public function getDescription() {
-		return array( 'Purge the cache for the given titles.',
-			'Requires a POST request if the user is not logged in.'
-		);
-	}
-
-	public function getPossibleErrors() {
-		return array_merge(
-			parent::getPossibleErrors(),
-			$this->getPageSet()->getFinalPossibleErrors()
-		);
-	}
-
-	public function getExamples() {
-		return array(
-			'api.php?action=purge&titles=Main_Page|API' => 'Purge the "Main Page" and the "API" page',
-		);
+	protected function getExamplesMessages() {
+		return [
+			'action=purge&titles=Main_Page|API'
+				=> 'apihelp-purge-example-simple',
+			'action=purge&generator=allpages&gapnamespace=0&gaplimit=10'
+				=> 'apihelp-purge-example-generator',
+		];
 	}
 
 	public function getHelpUrls() {
-		return 'https://www.mediawiki.org/wiki/API:Purge';
+		return 'https://www.mediawiki.org/wiki/Special:MyLanguage/API:Purge';
 	}
 }

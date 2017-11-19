@@ -1,9 +1,13 @@
-/**
+/*!
  * JavaScript for Special:RecentChanges
  */
 ( function ( mw, $ ) {
 	var rc, $checkboxes, $select;
 
+	/**
+	 * @class mw.special.recentchanges
+	 * @singleton
+	 */
 	rc = {
 		/**
 		 * Handler to disable/enable the namespace selector checkboxes when the
@@ -29,6 +33,6 @@
 
 	$( rc.init );
 
-	mw.special.recentchanges = rc;
+	module.exports = rc;
 
 }( mediaWiki, jQuery ) );

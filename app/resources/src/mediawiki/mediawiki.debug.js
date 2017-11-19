@@ -61,7 +61,7 @@
 		 */
 		switchPane: function ( e ) {
 			var currentPaneId = debug.$container.data( 'currentPane' ),
-				requestedPaneId = $( this ).prop( 'id' ).substr( 9 ),
+				requestedPaneId = $( this ).prop( 'id' ).slice( 9 ),
 				$currentPane = $( '#mw-debug-pane-' + currentPaneId ),
 				$requestedPane = $( '#mw-debug-pane-' + requestedPaneId ),
 				hovDone = false;
@@ -170,11 +170,9 @@
 
 			paneTriggerBitDiv( 'includes', 'PHP includes', this.data.includes.length );
 
-			paneTriggerBitDiv( 'profile', 'Profile', this.data.profile.length );
-
 			gitInfo = '';
 			if ( this.data.gitRevision !== false ) {
-				gitInfo = '(' + this.data.gitRevision.substring( 0, 7 ) + ')';
+				gitInfo = '(' + this.data.gitRevision.slice( 0, 7 ) + ')';
 				if ( this.data.gitViewUrl !== false ) {
 					gitInfo = $( '<a>' )
 						.attr( 'href', this.data.gitViewUrl )
@@ -192,7 +190,10 @@
 			}
 
 			bitDiv( 'phpversion' )
-				.append( $( '<a href="//www.php.net/"></a>' ).text( 'PHP' ) )
+				.append( $( this.data.phpEngine === 'HHVM' ?
+					'<a href="http://hhvm.com/">HHVM</a>' :
+					'<a href="https://php.net/">PHP</a>'
+				) )
 				.append( ': ' + this.data.phpVersion );
 
 			bitDiv( 'time' )
@@ -208,8 +209,7 @@
 				querylist: this.buildQueryTable(),
 				debuglog: this.buildDebugLogTable(),
 				request: this.buildRequestPane(),
-				includes: this.buildIncludesPane(),
-				profile: this.buildProfilePane()
+				includes: this.buildIncludesPane()
 			};
 
 			for ( id in panes ) {
@@ -222,7 +222,7 @@
 						className: 'mw-debug-pane',
 						id: 'mw-debug-pane-' + id
 					} )
-					.append( panes[id] )
+					.append( panes[ id ] )
 					.appendTo( $container );
 			}
 
@@ -231,6 +231,8 @@
 
 		/**
 		 * Build the console panel
+		 *
+		 * @return {jQuery} Console panel
 		 */
 		buildConsoleTable: function () {
 			var $table, entryTypeText, i, length, entry;
@@ -255,7 +257,7 @@
 			};
 
 			for ( i = 0, length = this.data.log.length; i < length; i += 1 ) {
-				entry = this.data.log[i];
+				entry = this.data.log[ i ];
 				entry.typeText = entryTypeText( entry.type );
 
 				$( '<tr>' )
@@ -282,20 +284,20 @@
 			$table = $( '<table id="mw-debug-querylist"></table>' );
 
 			$( '<tr>' )
-				.append( $( '<th>#</th>' ).css( 'width', '4em' )    )
+				.append( $( '<th>#</th>' ).css( 'width', '4em' ) )
 				.append( $( '<th>SQL</th>' ) )
-				.append( $( '<th>Time</th>' ).css( 'width', '8em'  ) )
+				.append( $( '<th>Time</th>' ).css( 'width', '8em' ) )
 				.append( $( '<th>Call</th>' ).css( 'width', '18em' ) )
 			.appendTo( $table );
 
 			for ( i = 0, length = this.data.queries.length; i < length; i += 1 ) {
-				query = this.data.queries[i];
+				query = this.data.queries[ i ];
 
 				$( '<tr>' )
 					.append( $( '<td>' ).text( i + 1 ) )
 					.append( $( '<td>' ).text( query.sql ) )
 					.append( $( '<td class="stats">' ).text( ( query.time * 1000 ).toFixed( 4 ) + 'ms' ) )
-					.append( $( '<td>' ).text( query['function'] ) )
+					.append( $( '<td>' ).text( query[ 'function' ] ) )
 				.appendTo( $table );
 			}
 
@@ -312,7 +314,7 @@
 			$list = $( '<ul>' );
 
 			for ( i = 0, length = this.data.debugLog.length; i < length; i += 1 ) {
-				line = this.data.debugLog[i];
+				line = this.data.debugLog[ i ];
 				$( '<li>' )
 					.html( mw.html.escape( line ).replace( /\n/g, '<br />\n' ) )
 					.appendTo( $list );
@@ -346,7 +348,7 @@
 
 					$( '<tr>' )
 						.append( $( '<th>' ).text( key ) )
-						.append( $( '<td>' ).text( data[key] ) )
+						.append( $( '<td>' ).text( data[ key ] ) )
 						.appendTo( $table );
 				}
 
@@ -370,7 +372,7 @@
 			$table = $( '<table>' );
 
 			for ( i = 0, length = this.data.includes.length; i < length; i += 1 ) {
-				file = this.data.includes[i];
+				file = this.data.includes[ i ];
 				$( '<tr>' )
 					.append( $( '<td>' ).text( file.name ) )
 					.append( $( '<td class="nr">' ).text( file.size ) )
@@ -378,11 +380,11 @@
 			}
 
 			return $table;
-		},
-
-		buildProfilePane: function () {
-			return mw.Debug.profile.init();
 		}
 	};
+
+	$( function () {
+		debug.init();
+	} );
 
 }( mediaWiki, jQuery ) );

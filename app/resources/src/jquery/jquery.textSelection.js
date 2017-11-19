@@ -4,8 +4,8 @@
 ( function ( $ ) {
 	if ( document.selection && document.selection.createRange ) {
 		// On IE, patch the focus() method to restore the windows' scroll position
-		// (bug 32241)
-		$.fn.extend({
+		// (T34241)
+		$.fn.extend( {
 			focus: ( function ( jqFocus ) {
 				return function () {
 					var $w, state, result;
@@ -19,25 +19,30 @@
 					return jqFocus.apply( this, arguments );
 				};
 			}( $.fn.focus ) )
-		});
+		} );
 	}
 
 	$.fn.textSelection = function ( command, options ) {
 		var fn,
+			alternateFn,
 			context,
-			hasIframe,
+			hasWikiEditor,
 			needSave,
 			retval;
 
 		/**
 		 * Helper function to get an IE TextRange object for an element
+		 *
+		 * @param {HTMLElement} element
+		 * @return {TextRange}
 		 */
-		function rangeForElementIE( e ) {
-			if ( e.nodeName.toLowerCase() === 'input' ) {
-				return e.createTextRange();
+		function rangeForElementIE( element ) {
+			var sel;
+			if ( element.nodeName.toLowerCase() === 'input' ) {
+				return element.createTextRange();
 			} else {
-				var sel = document.body.createTextRange();
-				sel.moveToElementText( e );
+				sel = document.body.createTextRange();
+				sel.moveToElementText( element );
 				return sel;
 			}
 		}
@@ -46,10 +51,12 @@
 		 * Helper function for IE for activating the textarea. Called only in the
 		 * IE-specific code paths below; makes use of IE-specific non-standard
 		 * function setActive() if possible to avoid screen flicker.
+		 *
+		 * @param {HTMLElement} element
 		 */
 		function activateElementOnIE( element ) {
 			if ( element.setActive ) {
-				element.setActive(); // bug 32241: doesn't scroll
+				element.setActive(); // T34241: doesn't scroll
 			} else {
 				$( element ).focus(); // may scroll (but we patched it above)
 			}
@@ -58,13 +65,25 @@
 		fn = {
 			/**
 			 * Get the contents of the textarea
+			 *
+			 * @return {string}
 			 */
 			getContents: function () {
 				return this.val();
 			},
 			/**
+			 * Set the contents of the textarea, replacing anything that was there before
+			 *
+			 * @param {string} content
+			 */
+			setContents: function ( content ) {
+				this.val( content );
+			},
+			/**
 			 * Get the currently selected text in this textarea. Will focus the textarea
 			 * in some browsers (IE/Opera)
+			 *
+			 * @return {string}
 			 */
 			getSelection: function () {
 				var retval, range,
@@ -89,7 +108,9 @@
 			 * Inserts text at the beginning and end of a text selection, optionally
 			 * inserting text at the caret when selection is empty.
 			 *
-			 * @fixme document the options parameters
+			 * @param {Object} options Options
+			 * FIXME document the options parameters
+			 * @return {jQuery}
 			 */
 			encapsulateSelection: function ( options ) {
 				return this.each( function () {
@@ -110,12 +131,12 @@
 						} else {
 							while ( selText.charAt( selText.length - 1 ) === ' ' ) {
 								// Exclude ending space char
-								selText = selText.substring( 0, selText.length - 1 );
+								selText = selText.slice( 0, -1 );
 								post += ' ';
 							}
 							while ( selText.charAt( 0 ) === ' ' ) {
 								// Exclude prepending space char
-								selText = selText.substring( 1, selText.length );
+								selText = selText.slice( 1 );
 								pre = ' ' + pre;
 							}
 						}
@@ -125,13 +146,18 @@
 					 * Do the splitlines stuff.
 					 *
 					 * Wrap each line of the selected text with pre and post
+					 *
+					 * @param {string} selText Selected text
+					 * @param {string} pre Text before
+					 * @param {string} post Text after
+					 * @return {string} Wrapped text
 					 */
 					function doSplitLines( selText, pre, post ) {
 						var i,
 							insertText = '',
 							selTextArr = selText.split( '\n' );
 						for ( i = 0; i < selTextArr.length; i++ ) {
-							insertText += pre + selTextArr[i] + post;
+							insertText += pre + selTextArr[ i ] + post;
 							if ( i !== selTextArr.length - 1 ) {
 								insertText += '\n';
 							}
@@ -146,17 +172,17 @@
 							// IE
 
 							// Note that IE9 will trigger the next section unless we check this first.
-							// See bug 35201.
+							// See bug T37201.
 
 							activateElementOnIE( this );
 							if ( context ) {
 								context.fn.restoreCursorAndScrollTop();
 							}
 							if ( options.selectionStart !== undefined ) {
-								$(this).textSelection( 'setSelection', { 'start': options.selectionStart, 'end': options.selectionEnd } );
+								$( this ).textSelection( 'setSelection', { start: options.selectionStart, end: options.selectionEnd } );
 							}
 
-							selText = $(this).textSelection( 'getSelection' );
+							selText = $( this ).textSelection( 'getSelection' );
 							scrollTop = this.scrollTop;
 							range = document.selection.createRange();
 
@@ -194,19 +220,20 @@
 						} else if ( this.selectionStart || this.selectionStart === 0 ) {
 							// Mozilla/Opera
 
-							$(this).focus();
+							$( this ).focus();
 							if ( options.selectionStart !== undefined ) {
-								$(this).textSelection( 'setSelection', { 'start': options.selectionStart, 'end': options.selectionEnd } );
+								$( this ).textSelection( 'setSelection', { start: options.selectionStart, end: options.selectionEnd } );
 							}
 
-							selText = $(this).textSelection( 'getSelection' );
+							selText = $( this ).textSelection( 'getSelection' );
 							startPos = this.selectionStart;
 							endPos = this.selectionEnd;
 							scrollTop = this.scrollTop;
 							checkSelectedText();
-							if ( options.selectionStart !== undefined
-									&& endPos - startPos !== options.selectionEnd - options.selectionStart )
-							{
+							if (
+								options.selectionStart !== undefined &&
+								endPos - startPos !== options.selectionEnd - options.selectionStart
+							) {
 								// This means there is a difference in the selection range returned by browser and what we passed.
 								// This happens for Chrome in the case of composite characters. Ref bug #30130
 								// Set the startPos to the correct position.
@@ -227,8 +254,8 @@
 									post += '\n';
 								}
 							}
-							this.value = this.value.substring( 0, startPos ) + insertText +
-								this.value.substring( endPos, this.value.length );
+							this.value = this.value.slice( 0, startPos ) + insertText +
+								this.value.slice( endPos );
 							// Setting this.value scrolls the textarea to the top, restore the scroll position
 							this.scrollTop = scrollTop;
 							if ( window.opera ) {
@@ -236,7 +263,7 @@
 								selText = selText.replace( /\r?\n/g, '\r\n' );
 								post = post.replace( /\r?\n/g, '\r\n' );
 							}
-							if ( isSample && options.selectPeri && !options.splitlines ) {
+							if ( isSample && options.selectPeri && ( !options.splitlines || ( options.splitlines && selText.indexOf( '\n' ) === -1 ) ) ) {
 								this.selectionStart = startPos + pre.length;
 								this.selectionEnd = startPos + pre.length + selText.length;
 							} else {
@@ -245,9 +272,9 @@
 							}
 						}
 					}
-					$(this).trigger( 'encapsulateSelection', [ options.pre, options.peri, options.post, options.ownline,
+					$( this ).trigger( 'encapsulateSelection', [ options.pre, options.peri, options.post, options.ownline,
 						options.replace, options.spitlines ] );
-				});
+				} );
 			},
 			/**
 			 * Ported from Wikia's LinkSuggest extension
@@ -260,14 +287,16 @@
 			 *
 			 * Will focus the textarea in some browsers (IE/Opera)
 			 *
-			 * @fixme document the options parameters
+			 * @param {Object} options Options
+			 * FIXME document the options parameters
+			 * @return {number} Position
 			 */
-			 getCaretPosition: function ( options ) {
+			getCaretPosition: function ( options ) {
 				function getCaret( e ) {
 					var caretPos = 0,
 						endPos = 0,
 						preText, rawPreText, periText,
-						rawPeriText, postText, rawPostText,
+						rawPeriText, postText,
 						// IE Support
 						preFinished,
 						periFinished,
@@ -283,7 +312,7 @@
 						// IE doesn't properly report non-selected caret position through
 						// the selection ranges when textarea isn't focused. This can
 						// lead to saving a bogus empty selection, which then screws up
-						// whatever we do later (bug 31847).
+						// whatever we do later (T33847).
 						activateElementOnIE( e );
 
 						preFinished = false;
@@ -302,7 +331,7 @@
 						// Load the text values we need to compare
 						preText = rawPreText = preRange.text;
 						periText = rawPeriText = periRange.text;
-						postText = rawPostText = postRange.text;
+						postText = postRange.text;
 
 						/*
 						 * Check each range for trimmed newlines by shrinking the range by 1
@@ -339,9 +368,7 @@
 									postFinished = true;
 								} else {
 									postRange.moveEnd( 'character', -1 );
-									if ( postRange.text === postText ) {
-										rawPostText += '\r\n';
-									} else {
+									if ( postRange.text !== postText ) {
 										postFinished = true;
 									}
 								}
@@ -359,13 +386,15 @@
 				return getCaret( this.get( 0 ) );
 			},
 			/**
-			 * @fixme document the options parameters
+			 * @param {Object} options options
+			 * FIXME document the options parameters
+			 * @return {jQuery}
 			 */
 			setSelection: function ( options ) {
 				return this.each( function () {
 					var selection, length, newLines;
 					// Do nothing if hidden
-					if ( !$(this).is( ':hidden' ) ) {
+					if ( !$( this ).is( ':hidden' ) ) {
 						if ( this.selectionStart || this.selectionStart === 0 ) {
 							// Opera 9.0 doesn't allow setting selectionStart past
 							// selectionEnd; any attempts to do that will be ignored
@@ -395,7 +424,7 @@
 							} catch ( e ) { }
 						}
 					}
-				});
+				} );
 			},
 			/**
 			 * Ported from Wikia's LinkSuggest extension
@@ -403,10 +432,12 @@
 			 *
 			 * Scroll a textarea to the current cursor position. You can set the cursor
 			 * position with setSelection()
-			 * @param options boolean Whether to force a scroll even if the caret position
-			 *  is already visible. Defaults to false
 			 *
-			 * @fixme document the options parameters (function body suggests options.force is a boolean, not options itself)
+			 * @param {Object} options options
+			 * @cfg {boolean} [force=false] Whether to force a scroll even if the caret position
+			 *  is already visible.
+			 * FIXME document the options parameters
+			 * @return {jQuery}
 			 */
 			scrollToCaretPosition: function ( options ) {
 				function getLineLength( e ) {
@@ -458,16 +489,16 @@
 					}
 					return ( $.client.profile().platform === 'mac' ? 13 : ( $.client.profile().platform === 'linux' ? 15 : 16 ) ) * row;
 				}
-				return this.each(function () {
+				return this.each( function () {
 					var scroll, range, savedRange, pos, oldScrollTop;
 					// Do nothing if hidden
-					if ( !$(this).is( ':hidden' ) ) {
+					if ( !$( this ).is( ':hidden' ) ) {
 						if ( this.selectionStart || this.selectionStart === 0 ) {
 							// Mozilla
 							scroll = getCaretScrollPosition( this );
-							if ( options.force || scroll < $(this).scrollTop() ||
-									scroll > $(this).scrollTop() + $(this).height() ) {
-								$(this).scrollTop( scroll );
+							if ( options.force || scroll < $( this ).scrollTop() ||
+									scroll > $( this ).scrollTop() + $( this ).height() ) {
+								$( this ).scrollTop( scroll );
 							}
 						} else if ( document.selection && document.selection.createRange ) {
 							// IE / Opera
@@ -481,11 +512,11 @@
 							 */
 							range = document.body.createTextRange();
 							savedRange = document.selection.createRange();
-							pos = $(this).textSelection( 'getCaretPosition' );
+							pos = $( this ).textSelection( 'getCaretPosition' );
 							oldScrollTop = this.scrollTop;
 							range.moveToElementText( this );
 							range.collapse();
-							range.move( 'character', pos + 1);
+							range.move( 'character', pos + 1 );
 							range.select();
 							if ( this.scrollTop !== oldScrollTop ) {
 								this.scrollTop += range.offsetTop;
@@ -496,16 +527,18 @@
 							savedRange.select();
 						}
 					}
-					$(this).trigger( 'scrollToPosition' );
+					$( this ).trigger( 'scrollToPosition' );
 				} );
 			}
 		};
 
+		alternateFn = $( this ).data( 'jquery.textSelection' );
+
 		// Apply defaults
 		switch ( command ) {
-			//case 'getContents': // no params
-			//case 'setContents': // no params with defaults
-			//case 'getSelection': // no params
+			// case 'getContents': // no params
+			// case 'setContents': // no params with defaults
+			// case 'getSelection': // no params
 			case 'encapsulateSelection':
 				options = $.extend( {
 					pre: '', // Text to insert before the cursor/selection
@@ -531,18 +564,11 @@
 					// Position to start selection at
 					start: undefined,
 					// Position to end selection at. Defaults to start
-					end: undefined,
-					// Element to start selection in (iframe only)
-					startContainer: undefined,
-					// Element to end selection in (iframe only). Defaults to startContainer
-					endContainer: undefined
+					end: undefined
 				}, options );
 
 				if ( options.end === undefined ) {
 					options.end = options.start;
-				}
-				if ( options.endContainer === undefined ) {
-					options.endContainer = options.startContainer;
 				}
 				// FIXME: We may not need character position-based functions if we insert markers in the right places
 				break;
@@ -551,19 +577,30 @@
 					force: false // Force a scroll even if the caret position is already visible
 				}, options );
 				break;
+			case 'register':
+				if ( alternateFn ) {
+					throw new Error( 'Another textSelection API was already registered' );
+				}
+				$( this ).data( 'jquery.textSelection', options );
+				// No need to update alternateFn as this command only stores the options.
+				// A command that uses it will set it again.
+				return;
+			case 'unregister':
+				$( this ).removeData( 'jquery.textSelection' );
+				return;
 		}
 
-		context = $(this).data( 'wikiEditor-context' );
-		hasIframe = context !== undefined && context && context.$iframe !== undefined;
+		context = $( this ).data( 'wikiEditor-context' );
+		hasWikiEditor = ( context !== undefined && context.$iframe !== undefined );
 
 		// IE selection restore voodoo
 		needSave = false;
-		if ( hasIframe && context.savedSelection !== null ) {
+		if ( hasWikiEditor && context.savedSelection !== null ) {
 			context.fn.restoreSelection();
 			needSave = true;
 		}
-		retval = ( hasIframe ? context.fn : fn )[command].call( this, options );
-		if ( hasIframe && needSave ) {
+		retval = ( alternateFn && alternateFn[ command ] || fn[ command ] ).call( this, options );
+		if ( hasWikiEditor && needSave ) {
 			context.fn.saveSelection();
 		}
 

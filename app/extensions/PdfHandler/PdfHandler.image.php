@@ -19,6 +19,9 @@
  * http://www.gnu.org/copyleft/gpl.html
  */
 
+use MediaWiki\Logger\LoggerFactory;
+use UtfNormal\Validator;
+
 /**
  * inspired by djvuimage from Brion Vibber
  * modified and written by xarax
@@ -138,7 +141,7 @@ class PdfImage {
 				foreach( $pages as $page => $pageText ) {
 					# Get rid of invalid UTF-8, strip control characters
 					# Note we need to do this per page, as \f page feed would be stripped.
-					$pages[$page] = UtfNormal::cleanUp( $pageText );
+					$pages[$page] = Validator::cleanUp( $pageText );
 				}
 				$data['text'] = $pages;
 			}
@@ -295,7 +298,7 @@ class PdfImage {
 			// is present (Almost always is present)
 			// @todo: This only handles generic xmp properties. Would be improved
 			// by handling pdf xmp properties (pdf and pdfx) via XMPInfo hook.
-			$xmp = new XMPReader();
+			$xmp = new XMPReader( LoggerFactory::getInstance( 'XMP' ) );
 			$xmp->parse( $data['xmp'] );
 			$xmpRes = $xmp->getResults();
 			foreach ( $xmpRes as $type => $xmpSection ) {

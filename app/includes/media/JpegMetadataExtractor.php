@@ -43,20 +43,20 @@ class JpegMetadataExtractor {
 	 * but gis doesn't support having multiple app1 segments
 	 * and those can't extract xmp on files containing both exif and xmp data
 	 *
-	 * @param string $filename name of jpeg file
-	 * @return array of interesting segments.
-	 * @throws MWException if given invalid file.
+	 * @param string $filename Name of jpeg file
+	 * @return array Array of interesting segments.
+	 * @throws MWException If given invalid file.
 	 */
 	static function segmentSplitter( $filename ) {
-		$showXMP = function_exists( 'xml_parser_create_ns' );
+		$showXMP = XMPReader::isSupported();
 
 		$segmentCount = 0;
 
-		$segments = array(
-			'XMP_ext' => array(),
-			'COM' => array(),
-			'PSIR' => array(),
-		);
+		$segments = [
+			'XMP_ext' => [],
+			'COM' => [],
+			'PSIR' => [],
+		];
 
 		if ( !$filename ) {
 			throw new MWException( "No filename specified for " . __METHOD__ );
@@ -82,9 +82,10 @@ class JpegMetadataExtractor {
 				// this is just a sanity check
 				throw new MWException( 'Too many jpeg segments. Aborting' );
 			}
-			if ( $buffer !== "\xFF" ) {
-				throw new MWException( "Error reading jpeg file marker. " .
-					"Expected 0xFF but got " . bin2hex( $buffer ) );
+			while ( $buffer !== "\xFF" ) {
+				// In theory JPEG files are not allowed to contain anything between the sections,
+				// but in practice they sometimes do. It's customary to ignore the garbage data.
+				$buffer = fread( $fh, 1 );
 			}
 
 			$buffer = fread( $fh, 1 );
@@ -98,17 +99,17 @@ class JpegMetadataExtractor {
 				// First see if valid utf-8,
 				// if not try to convert it to windows-1252.
 				$com = $oldCom = trim( self::jpegExtractMarker( $fh ) );
-				UtfNormal::quickIsNFCVerify( $com );
+				UtfNormal\Validator::quickIsNFCVerify( $com );
 				// turns $com to valid utf-8.
 				// thus if no change, its utf-8, otherwise its something else.
 				if ( $com !== $oldCom ) {
-					wfSuppressWarnings();
+					MediaWiki\suppressWarnings();
 					$com = $oldCom = iconv( 'windows-1252', 'UTF-8//IGNORE', $oldCom );
-					wfRestoreWarnings();
+					MediaWiki\restoreWarnings();
 				}
 				// Try it again, if its still not a valid string, then probably
 				// binary junk or some really weird encoding, so don't extract.
-				UtfNormal::quickIsNFCVerify( $com );
+				UtfNormal\Validator::quickIsNFCVerify( $com );
 				if ( $com === $oldCom ) {
 					$segments["COM"][] = $oldCom;
 				} else {
@@ -155,7 +156,7 @@ class JpegMetadataExtractor {
 			} else {
 				// segment we don't care about, so skip
 				$size = wfUnpack( "nint", fread( $fh, 2 ), 2 );
-				if ( $size['int'] <= 2 ) {
+				if ( $size['int'] < 2 ) {
 					throw new MWException( "invalid marker size in jpeg" );
 				}
 				fseek( $fh, $size['int'] - 2, SEEK_CUR );
@@ -173,8 +174,12 @@ class JpegMetadataExtractor {
 	 */
 	private static function jpegExtractMarker( &$fh ) {
 		$size = wfUnpack( "nint", fread( $fh, 2 ), 2 );
-		if ( $size['int'] <= 2 ) {
+		if ( $size['int'] < 2 ) {
 			throw new MWException( "invalid marker size in jpeg" );
+		}
+		if ( $size['int'] === 2 ) {
+			// fread( ..., 0 ) generates a warning
+			return '';
 		}
 		$segment = fread( $fh, $size['int'] - 2 );
 		if ( strlen( $segment ) !== $size['int'] - 2 ) {
@@ -193,7 +198,7 @@ class JpegMetadataExtractor {
 	 *
 	 * This should generally be called by BitmapMetadataHandler::doApp13()
 	 *
-	 * @param string $app13 photoshop psir app13 block from jpg.
+	 * @param string $app13 Photoshop psir app13 block from jpg.
 	 * @throws MWException (It gets caught next level up though)
 	 * @return string If the iptc hash is good or not. One of 'iptc-no-hash',
 	 *   'iptc-good-hash', 'iptc-bad-hash'.
