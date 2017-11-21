@@ -8,3 +8,5 @@ In this boiler plate you will find the basic to get a PHP and MySQL stack runnin
 * Use of the dotCoud environment
 * Communication with a database, MySQL
 * Advanced `dotCloud.yml` option: `postinstall script to create a new database.
+
+#test
