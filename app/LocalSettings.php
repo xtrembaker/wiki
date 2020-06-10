@@ -78,7 +78,7 @@ $wgMemCachedServers = array();
 
 ## To enable image uploads, make sure the 'images' directory
 ## is writable, then set this to true:
-$wgEnableUploads  = false;
+$wgEnableUploads  = true;
 $wgUseImageMagick = true;
 $wgImageMagickConvertCommand = $conf_params['img_magick_command'];
 
@@ -94,7 +94,7 @@ $wgShellLocale = "en_US.UTF-8";
 ## create the directories images/archive, images/thumb and
 ## images/temp, and make them all writable. Then uncomment
 ## this, if it's not already uncommented:
-#$wgHashedUploadDirectory = false;
+$wgHashedUploadDirectory = false;
 
 ## Set $wgCacheDirectory to a writable directory on the web server
 ## to make your wiki go slightly faster. The directory should not
@@ -138,6 +138,7 @@ $wgGroupPermissions['*']['read']    = false;
 $wgGroupPermissions['user']['read'] = true;
 $wgGroupPermissions['*']['edit']    = false;
 $wgGroupPermissions['user']['edit'] = true;
+$wgGroupPermissions['user']['upload'] = true;
 
 function getConfParams(){
     return array(
