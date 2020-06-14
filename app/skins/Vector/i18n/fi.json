@@ -5,12 +5,15 @@
 			"Nedergard",
 			"Nike",
 			"Pxos",
-			"SuperPete"
+			"SuperPete",
+			"01miki10",
+			"Pyscowicz"
 		]
 	},
+	"skinname-vector": "Vektori",
 	"vector-skin-desc": "Uudistettu versio MonoBookista raikkaalla ulkoasulla ja useilla käytettävyysparannuksilla",
-	"vector.css": "/* Tämä sivu sisältää Vector-ulkoasua muuttavia tyylejä. */",
-	"vector.js": "/* Tämän sivun JavaScript-koodi liitetään Vector-tyyliin */",
+	"vector.css": "/* Tämä sivu sisältää Vektori-ulkoasua muuttavia tyylejä. */",
+	"vector.js": "/* Tämän sivun JavaScript-koodi liitetään Vektori-tyyliin */",
 	"vector-action-addsection": "Lisää aihe",
 	"vector-action-delete": "Poista",
 	"vector-action-move": "Siirrä",
@@ -22,5 +25,7 @@
 	"vector-view-history": "Näytä historia",
 	"vector-view-view": "Lue",
 	"vector-view-viewsource": "Näytä lähdekoodi",
+	"vector-jumptonavigation": "Siirry navigaatioon",
+	"vector-jumptosearch": "Siirry hakuun",
 	"vector-more-actions": "Muut"
 }

@@ -13,7 +13,7 @@ use Wikimedia\TestingAccessWrapper;
  * @covers SwiftFileBackendList
  */
 class SwiftFileBackendTest extends MediaWikiTestCase {
-	/** @var TestingAccessWrapper Proxy to SwiftFileBackend */
+	/** @var TestingAccessWrapper|SwiftFileBackend */
 	private $backend;
 
 	protected function setUp() {
@@ -22,7 +22,7 @@ class SwiftFileBackendTest extends MediaWikiTestCase {
 		$this->backend = TestingAccessWrapper::newFromObject(
 			new SwiftFileBackend( [
 				'name'             => 'local-swift-testing',
-				'class'            => 'SwiftFileBackend',
+				'class'            => SwiftFileBackend::class,
 				'wikiId'           => 'unit-testing',
 				'lockManager'      => LockManagerGroup::singleton()->get( 'fsLockManager' ),
 				'swiftAuthUrl'     => 'http://127.0.0.1:8080/auth', // unused
@@ -34,26 +34,28 @@ class SwiftFileBackendTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @dataProvider provider_testSanitizeHdrs
+	 * @covers SwiftFileBackend::extractMutableContentHeaders
+	 * @dataProvider provider_testExtractPostableContentHeaders
 	 */
-	public function testSanitizeHdrs( $raw, $sanitized ) {
-		$hdrs = $this->backend->sanitizeHdrs( [ 'headers' => $raw ] );
+	public function testExtractPostableContentHeaders( $raw, $sanitized ) {
+		$hdrs = $this->backend->extractMutableContentHeaders( $raw );
 
-		$this->assertEquals( $hdrs, $sanitized, 'sanitizeHdrs() has expected result' );
+		$this->assertEquals( $hdrs, $sanitized, 'Correct extractPostableContentHeaders() result' );
 	}
 
-	public static function provider_testSanitizeHdrs() {
+	public static function provider_testExtractPostableContentHeaders() {
 		return [
 			[
 				[
 					'content-length' => 345,
-					'content-type'   => 'image+bitmap/jpeg',
+					'content-type' => 'image+bitmap/jpeg',
 					'content-disposition' => 'inline',
 					'content-duration' => 35.6363,
 					'content-Custom' => 'hello',
 					'x-content-custom' => 'hello'
 				],
 				[
+					'content-type' => 'image+bitmap/jpeg',
 					'content-disposition' => 'inline',
 					'content-duration' => 35.6363,
 					'content-custom' => 'hello',
@@ -63,13 +65,14 @@ class SwiftFileBackendTest extends MediaWikiTestCase {
 			[
 				[
 					'content-length' => 345,
-					'content-type'   => 'image+bitmap/jpeg',
+					'content-type' => 'image+bitmap/jpeg',
 					'content-Disposition' => 'inline; filename=xxx; ' . str_repeat( 'o', 1024 ),
 					'content-duration' => 35.6363,
 					'content-custom' => 'hello',
 					'x-content-custom' => 'hello'
 				],
 				[
+					'content-type' => 'image+bitmap/jpeg',
 					'content-disposition' => 'inline;filename=xxx',
 					'content-duration' => 35.6363,
 					'content-custom' => 'hello',
@@ -79,13 +82,14 @@ class SwiftFileBackendTest extends MediaWikiTestCase {
 			[
 				[
 					'content-length' => 345,
-					'content-type'   => 'image+bitmap/jpeg',
+					'content-type' => 'image+bitmap/jpeg',
 					'content-disposition' => 'filename=' . str_repeat( 'o', 1024 ) . ';inline',
 					'content-duration' => 35.6363,
 					'content-custom' => 'hello',
 					'x-content-custom' => 'hello'
 				],
 				[
+					'content-type' => 'image+bitmap/jpeg',
 					'content-disposition' => '',
 					'content-duration' => 35.6363,
 					'content-custom' => 'hello',
@@ -96,10 +100,11 @@ class SwiftFileBackendTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * @covers SwiftFileBackend::extractMetadataHeaders
 	 * @dataProvider provider_testGetMetadataHeaders
 	 */
 	public function testGetMetadataHeaders( $raw, $sanitized ) {
-		$hdrs = $this->backend->getMetadataHeaders( $raw );
+		$hdrs = $this->backend->extractMetadataHeaders( $raw );
 
 		$this->assertEquals( $hdrs, $sanitized, 'getMetadataHeaders() has expected result' );
 	}
@@ -123,10 +128,11 @@ class SwiftFileBackendTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * @covers SwiftFileBackend::getMetadataFromHeaders
 	 * @dataProvider provider_testGetMetadata
 	 */
 	public function testGetMetadata( $raw, $sanitized ) {
-		$hdrs = $this->backend->getMetadata( $raw );
+		$hdrs = $this->backend->getMetadataFromHeaders( $raw );
 
 		$this->assertEquals( $hdrs, $sanitized, 'getMetadata() has expected result' );
 	}

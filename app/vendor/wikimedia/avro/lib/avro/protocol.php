@@ -31,6 +31,11 @@ class AvroProtocol
   public $namespace;
   public $schemata;
 
+  /**
+   * @param $json
+   * @return AvroProtocol
+   * @throws AvroProtocolParseException
+   */
   public static function parse($json)
   {
     if (is_null($json))
@@ -41,6 +46,10 @@ class AvroProtocol
     return $protocol;
   }
 
+  /**
+   * @param $avro
+   * @throws AvroSchemaParseException
+   */
   function real_parse($avro) {
     $this->protocol = $avro["protocol"];
     $this->namespace = $avro["namespace"];
@@ -54,12 +63,15 @@ class AvroProtocol
     if (!is_null($avro["messages"])) {
       foreach ($avro["messages"] as $messageName => $messageAvro) {
         $message = new AvroProtocolMessage($messageName, $messageAvro, $this);
-        $this->messages{$messageName} = $message;
+        $this->messages[$messageName] = $message;
       }
     }
   }
 }
 
+/**
+ * Class AvroProtocolMessage
+ */
 class AvroProtocolMessage
 {
   /**
@@ -70,17 +82,26 @@ class AvroProtocolMessage
 
   public $response;
 
+  /**
+   * AvroProtocolMessage constructor.
+   * @param $name
+   * @param $avro
+   * @param $protocol
+   */
   public function __construct($name, $avro, $protocol)
   {
     $this->name = $name;
-    $this->request = new AvroRecordSchema(new AvroName($name, null, $protocol->namespace), null, $avro{'request'}, $protocol->schemata, AvroSchema::REQUEST_SCHEMA);
+    $this->request = new AvroRecordSchema(new AvroName($name, null, $protocol->namespace), null, $avro['request'], $protocol->schemata, AvroSchema::REQUEST_SCHEMA);
 
     if (array_key_exists('response', $avro)) {
-      $this->response = $protocol->schemata->schema_by_name(new AvroName($avro{'response'}, $protocol->namespace, $protocol->namespace));
+      $this->response = $protocol->schemata->schema_by_name(new AvroName($avro['response'], $protocol->namespace, $protocol->namespace));
       if ($this->response == null)
-        $this->response = new AvroPrimitiveSchema($avro{'response'});
+        $this->response = new AvroPrimitiveSchema($avro['response']);
     }
   }
 }
 
+/**
+ * Class AvroProtocolParseException
+ */
 class AvroProtocolParseException extends AvroException {};

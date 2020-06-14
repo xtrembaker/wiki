@@ -1,22 +1,24 @@
 /*!
  * Live edit preview.
  */
-( function ( mw, $ ) {
+( function () {
 
 	/**
 	 * @ignore
 	 * @param {jQuery.Event} e
 	 */
 	function doLivePreview( e ) {
-		var isDiff, api, parseRequest, diffRequest, postData, copySelectors, section,
-			$wikiPreview, $wikiDiff, $editform, $textbox, $summary, $copyElements, $spinner, $errorBox;
+		var isDiff, api, parseRequest, diffRequest, postData, copySelectors, section, summary,
+			$wikiPreview, $wikiDiff, $editform, $textbox, $copyElements, $spinner, $errorBox;
 
 		isDiff = ( e.target.name === 'wpDiff' );
 		$wikiPreview = $( '#wikiPreview' );
 		$wikiDiff = $( '#wikiDiff' );
 		$editform = $( '#editform' );
 		$textbox = $editform.find( '#wpTextbox1' );
-		$summary = $editform.find( '#wpSummary' );
+
+		summary = OO.ui.infuse( $( '#wpSummaryWidget' ) );
+
 		$spinner = $( '.mw-spinner-preview' );
 		$errorBox = $( '.errorbox' );
 		section = $editform.find( '[name="wpSection"]' ).val();
@@ -69,16 +71,14 @@
 			$spinner.show();
 		}
 
-		// Can't use fadeTo because it calls show(), and we might want to keep some elements hidden
-		// (e.g. empty #catlinks)
-		$copyElements.animate( { opacity: 0.4 }, 'fast' );
+		$copyElements.addClass( [ 'mw-preview-copyelements', 'mw-preview-copyelements-loading' ] );
 
 		api = new mw.Api();
 		postData = {
 			formatversion: 2,
 			action: 'parse',
 			title: mw.config.get( 'wgPageName' ),
-			summary: $summary.textSelection( 'getContents' ),
+			summary: summary.getValue(),
 			prop: ''
 		};
 
@@ -97,7 +97,8 @@
 				rvdifftotext: $textbox.textSelection( 'getContents' ),
 				rvdifftotextpst: true,
 				rvprop: '',
-				rvsection: section === '' ? undefined : section
+				rvsection: section === '' ? undefined : section,
+				uselang: mw.config.get( 'wgUserLanguage' )
 			} );
 
 			// Wait for the summary before showing the diff so the page doesn't jump twice
@@ -108,9 +109,9 @@
 						.revisions[ 0 ].diff.body;
 					$wikiDiff.find( 'table.diff tbody' ).html( diffHtml );
 					mw.hook( 'wikipage.diff' ).fire( $wikiDiff.find( 'table.diff' ) );
-				} catch ( e ) {
+				} catch ( err ) {
 					// "result.blah is undefined" error, ignore
-					mw.log.warn( e );
+					mw.log.warn( err );
 				}
 				$wikiDiff.show();
 			} );
@@ -124,6 +125,7 @@
 				preview: true,
 				sectionpreview: section !== '',
 				disableeditsection: true,
+				useskin: mw.config.get( 'skin' ),
 				uselang: mw.config.get( 'wgUserLanguage' )
 			} );
 			if ( section === 'new' ) {
@@ -133,23 +135,23 @@
 
 			parseRequest = api.post( postData );
 			parseRequest.done( function ( response ) {
-				var li, newList, $displaytitle, $content, $parent, $list;
+				var newList, $displaytitle, $content, $parent, $list;
 				if ( response.parse.jsconfigvars ) {
 					mw.config.set( response.parse.jsconfigvars );
 				}
 				if ( response.parse.modules ) {
 					mw.loader.load( response.parse.modules.concat(
-						response.parse.modulescripts,
 						response.parse.modulestyles
 					) );
 				}
 
 				newList = [];
+				// eslint-disable-next-line no-jquery/no-each-util
 				$.each( response.parse.indicators, function ( name, indicator ) {
 					newList.push(
 						$( '<div>' )
 							.addClass( 'mw-indicator' )
-							.attr( 'id', mw.util.escapeId( 'mw-indicator-' + name ) )
+							.attr( 'id', mw.util.escapeIdForAttribute( 'mw-indicator-' + name ) )
 							.html( indicator )
 							.get( 0 ),
 						// Add a whitespace between the <div>s because
@@ -179,17 +181,15 @@
 					$( '.catlinks[data-mw="interface"]' ).replaceWith( $content );
 				}
 				if ( response.parse.templates ) {
-					newList = [];
-					$.each( response.parse.templates, function ( i, template ) {
-						li = $( '<li>' )
+					newList = response.parse.templates.map( function ( template ) {
+						return $( '<li>' )
 							.append( $( '<a>' )
 								.attr( {
 									href: mw.util.getUrl( template.title ),
-									'class': ( template.exists ? '' : 'new' )
+									class: ( template.exists ? '' : 'new' )
 								} )
 								.text( template.title )
 							);
-						newList.push( li );
 					} );
 
 					$editform.find( '.templatesUsed .mw-editfooter-list' ).detach().empty().append( newList ).appendTo( '.templatesUsed' );
@@ -198,20 +198,19 @@
 					$( '.limitreport' ).html( response.parse.limitreporthtml );
 				}
 				if ( response.parse.langlinks && mw.config.get( 'skin' ) === 'vector' ) {
-					newList = [];
-					$.each( response.parse.langlinks, function ( i, langlink ) {
-						li = $( '<li>' )
+					newList = response.parse.langlinks.map( function ( langlink ) {
+						var bcp47 = mw.language.bcp47( langlink.lang );
+						return $( '<li>' )
 							.addClass( 'interlanguage-link interwiki-' + langlink.lang )
 							.append( $( '<a>' )
 								.attr( {
 									href: langlink.url,
 									title: langlink.title + ' - ' + langlink.langname,
-									lang: langlink.lang,
-									hreflang: langlink.lang
+									lang: bcp47,
+									hreflang: bcp47
 								} )
 								.text( langlink.autonym )
 							);
-						newList.push( li );
 					} );
 					$list = $( '#p-lang ul' );
 					$parent = $list.parent();
@@ -256,9 +255,7 @@
 			mw.hook( 'wikipage.editform' ).fire( $editform );
 		} ).always( function () {
 			$spinner.hide();
-			$copyElements.animate( {
-				opacity: 1
-			}, 'fast' );
+			$copyElements.removeClass( 'mw-preview-copyelements-loading' );
 		} ).fail( function ( code, result ) {
 			// This just shows the error for whatever request failed first
 			var errorMsg = 'API error: ' + code;
@@ -293,20 +290,20 @@
 		// can change where they are output).
 
 		if ( !document.getElementById( 'p-lang' ) && document.getElementById( 'p-tb' ) && mw.config.get( 'skin' ) === 'vector' ) {
-			$( '.portal:last' ).after(
+			$( '.portal' ).last().after(
 				$( '<div>' ).attr( {
-					'class': 'portal',
+					class: 'portal',
 					id: 'p-lang',
 					role: 'navigation',
 					'aria-labelledby': 'p-lang-label'
 				} )
-				.append( $( '<h3>' ).attr( 'id', 'p-lang-label' ).text( mw.msg( 'otherlanguages' ) ) )
-				.append( $( '<div>' ).addClass( 'body' ).append( '<ul>' ) )
+					.append( $( '<h3>' ).attr( 'id', 'p-lang-label' ).text( mw.msg( 'otherlanguages' ) ) )
+					.append( $( '<div>' ).addClass( 'body' ).append( '<ul>' ) )
 			);
 		}
 
 		if ( !$( '.mw-summary-preview' ).length ) {
-			$( '#wpSummary' ).after(
+			$( '#wpSummaryWidget' ).after(
 				$( '<div>' ).addClass( 'mw-summary-preview' )
 			);
 		}
@@ -327,4 +324,4 @@
 		$( document.body ).on( 'click', '#wpPreview, #wpDiff', doLivePreview );
 	} );
 
-}( mediaWiki, jQuery ) );
+}() );

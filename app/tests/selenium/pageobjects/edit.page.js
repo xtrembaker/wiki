@@ -1,22 +1,28 @@
-'use strict';
-const Page = require( './page' );
+const Page = require( 'wdio-mediawiki/Page' );
 
 class EditPage extends Page {
+	get content() { return $( '#wpTextbox1' ); }
+	get conflictingContent() { return $( '#wpTextbox2' ); }
+	get displayedContent() { return $( '#mw-content-text .mw-parser-output' ); }
+	get heading() { return $( '#firstHeading' ); }
+	get save() { return $( '#wpSave' ); }
+	get previewButton() { return $( '#wpPreview' ); }
 
-	get content() { return browser.element( '#wpTextbox1' ); }
-	get displayedContent() { return browser.element( '#mw-content-text' ); }
-	get heading() { return browser.element( '#firstHeading' ); }
-	get save() { return browser.element( '#wpSave' ); }
+	openForEditing( title ) {
+		super.openTitle( title, { action: 'edit', vehidebetadialog: 1, hidewelcomedialog: 1 } );
+	}
 
-	open( name ) {
-		super.open( name + '&action=edit' );
+	preview( name, content ) {
+		this.openForEditing( name );
+		this.content.setValue( content );
+		this.previewButton.click();
 	}
 
 	edit( name, content ) {
-		this.open( name );
+		this.openForEditing( name );
 		this.content.setValue( content );
 		this.save.click();
 	}
-
 }
+
 module.exports = new EditPage();

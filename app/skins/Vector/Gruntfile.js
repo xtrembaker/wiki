@@ -1,24 +1,20 @@
-/* eslint-env node */
+/* eslint-env node, es6 */
 module.exports = function ( grunt ) {
 	var conf = grunt.file.readJSON( 'skin.json' );
 	grunt.loadNpmTasks( 'grunt-banana-checker' );
 	grunt.loadNpmTasks( 'grunt-eslint' );
-	grunt.loadNpmTasks( 'grunt-jsonlint' );
 	grunt.loadNpmTasks( 'grunt-stylelint' );
 
 	grunt.initConfig( {
 		eslint: {
+			options: {
+				reportUnusedDisableDirectives: true,
+				extensions: [ '.js', '.json' ],
+				cache: true
+			},
 			all: [
-				'*.js',
-				'**/*.js',
-				'!node_modules/**'
-			]
-		},
-		jsonlint: {
-			all: [
-				'*.json',
-				'**/*.json',
-				'!node_modules/**'
+				'**/*.js{,on}',
+				'!{vendor,node_modules}/**'
 			]
 		},
 		banana: conf.MessagesDirs,
@@ -30,11 +26,12 @@ module.exports = function ( grunt ) {
 				'*.{less,css}',
 				'**/*.{less,css}',
 				'!node_modules/**',
-				'!skinStyles/jquery.ui/**'
+				'!skinStyles/jquery.ui/**',
+				'!vendor/**'
 			]
 		}
 	} );
 
-	grunt.registerTask( 'test', [ 'eslint', 'jsonlint', 'banana', 'stylelint' ] );
+	grunt.registerTask( 'test', [ 'eslint', 'banana', 'stylelint' ] );
 	grunt.registerTask( 'default', 'test' );
 };

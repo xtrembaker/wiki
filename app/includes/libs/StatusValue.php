@@ -40,17 +40,22 @@
  * @since 1.25
  */
 class StatusValue {
+
 	/** @var bool */
 	protected $ok = true;
-	/** @var array */
+
+	/** @var array[] */
 	protected $errors = [];
 
 	/** @var mixed */
 	public $value;
-	/** @var array Map of (key => bool) to indicate success of each part of batch operations */
+
+	/** @var bool[] Map of (key => bool) to indicate success of each part of batch operations */
 	public $success = [];
+
 	/** @var int Counter for batch operations */
 	public $successCount = 0;
+
 	/** @var int Counter for batch operations */
 	public $failCount = 0;
 
@@ -58,19 +63,19 @@ class StatusValue {
 	 * Factory function for fatal errors
 	 *
 	 * @param string|MessageSpecifier $message Message key or object
+	 * @param mixed ...$parameters
 	 * @return static
 	 */
-	public static function newFatal( $message /*, parameters...*/ ) {
-		$params = func_get_args();
+	public static function newFatal( $message, ...$parameters ) {
 		$result = new static();
-		call_user_func_array( [ &$result, 'fatal' ], $params );
+		$result->fatal( $message, ...$parameters );
 		return $result;
 	}
 
 	/**
 	 * Factory function for good results
 	 *
-	 * @param mixed $value
+	 * @param mixed|null $value
 	 * @return static
 	 */
 	public static function newGood( $value = null ) {
@@ -88,7 +93,7 @@ class StatusValue {
 	 *     1 => object(StatusValue) # The StatusValue with warning messages, only
 	 * ]
 	 *
-	 * @return StatusValue[]
+	 * @return static[]
 	 */
 	public function splitByErrorType() {
 		$errorsOnlyStatusValue = clone $this;
@@ -102,7 +107,7 @@ class StatusValue {
 			} else {
 				$errorsOnlyStatusValue->errors[] = $item;
 			}
-		};
+		}
 
 		return [ $errorsOnlyStatusValue, $warningsOnlyStatusValue ];
 	}
@@ -138,7 +143,7 @@ class StatusValue {
 	 *
 	 * Each error is a (message:string or MessageSpecifier,params:array) map
 	 *
-	 * @return array
+	 * @return array[]
 	 */
 	public function getErrors() {
 		return $this->errors;
@@ -157,7 +162,7 @@ class StatusValue {
 	 * Change operation result
 	 *
 	 * @param bool $ok Whether the operation completed
-	 * @param mixed $value
+	 * @param mixed|null $value
 	 */
 	public function setResult( $ok, $value = null ) {
 		$this->ok = (bool)$ok;
@@ -168,12 +173,13 @@ class StatusValue {
 	 * Add a new warning
 	 *
 	 * @param string|MessageSpecifier $message Message key or object
+	 * @param mixed ...$parameters
 	 */
-	public function warning( $message /*, parameters... */ ) {
+	public function warning( $message, ...$parameters ) {
 		$this->errors[] = [
 			'type' => 'warning',
 			'message' => $message,
-			'params' => array_slice( func_get_args(), 1 )
+			'params' => $parameters
 		];
 	}
 
@@ -182,12 +188,13 @@ class StatusValue {
 	 * This can be used for non-fatal errors
 	 *
 	 * @param string|MessageSpecifier $message Message key or object
+	 * @param mixed ...$parameters
 	 */
-	public function error( $message /*, parameters... */ ) {
+	public function error( $message, ...$parameters ) {
 		$this->errors[] = [
 			'type' => 'error',
 			'message' => $message,
-			'params' => array_slice( func_get_args(), 1 )
+			'params' => $parameters
 		];
 	}
 
@@ -196,12 +203,13 @@ class StatusValue {
 	 * as a whole was fatal
 	 *
 	 * @param string|MessageSpecifier $message Message key or object
+	 * @param mixed ...$parameters
 	 */
-	public function fatal( $message /*, parameters... */ ) {
+	public function fatal( $message, ...$parameters ) {
 		$this->errors[] = [
 			'type' => 'error',
 			'message' => $message,
-			'params' => array_slice( func_get_args(), 1 )
+			'params' => $parameters
 		];
 		$this->ok = false;
 	}
@@ -209,7 +217,7 @@ class StatusValue {
 	/**
 	 * Merge another status object into this one
 	 *
-	 * @param StatusValue $other Other StatusValue object
+	 * @param StatusValue $other
 	 * @param bool $overwriteValue Whether to override the "value" member
 	 */
 	public function merge( $other, $overwriteValue = false ) {
@@ -230,7 +238,7 @@ class StatusValue {
 	 *   - params: array list of parameters
 	 *
 	 * @param string $type
-	 * @return array
+	 * @return array[]
 	 */
 	public function getErrorsByType( $type ) {
 		$result = [];

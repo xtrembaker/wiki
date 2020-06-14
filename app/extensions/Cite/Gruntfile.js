@@ -11,49 +11,67 @@ module.exports = function ( grunt ) {
 
 	grunt.loadNpmTasks( 'grunt-banana-checker' );
 	grunt.loadNpmTasks( 'grunt-eslint' );
-	grunt.loadNpmTasks( 'grunt-jsonlint' );
 	grunt.loadNpmTasks( 'grunt-stylelint' );
+	grunt.loadNpmTasks( 'grunt-svgmin' );
+
 	grunt.initConfig( {
 		eslint: {
-			fix: {
-				options: {
-					fix: true
-				},
-				src: '<%= eslint.main %>'
+			options: {
+				reportUnusedDisableDirectives: true,
+				extensions: [ '.js', '.json' ],
+				cache: true
 			},
-			main: [
-				'**/*.js',
-				'{.jsduck,build}/**/*.js',
-				'modules/**/*.js',
-				'!node_modules/**'
+			all: [
+				'**/*.js{,on}',
+				'!{vendor,node_modules}/**'
 			]
 		},
 		banana: conf.MessagesDirs,
 		stylelint: {
-			core: {
-				src: [
-					'**/*.css',
-					'!modules/ve-cite/**',
-					'!node_modules/**'
-				]
-			},
-			've-cite': {
-				options: {
-					configFile: 'modules/ve-cite/.stylelintrc'
-				},
-				src: [
-					'modules/ve-cite/**/*.css'
-				]
-			}
-		},
-		jsonlint: {
 			all: [
-				'**/*.json',
-				'!node_modules/**'
+				'**/*.css',
+				'**/*.less',
+				'!node_modules/**',
+				'!vendor/**'
 			]
+		},
+		// SVG Optimization
+		svgmin: {
+			options: {
+				js2svg: {
+					pretty: true,
+					multipass: true
+				},
+				plugins: [ {
+					cleanupIDs: false
+				}, {
+					removeDesc: false
+				}, {
+					removeRasterImages: true
+				}, {
+					removeTitle: false
+				}, {
+					removeViewBox: false
+				}, {
+					removeXMLProcInst: false
+				}, {
+					sortAttrs: true
+				} ]
+			},
+			all: {
+				files: [ {
+					expand: true,
+					cwd: 'modules/ve-cite/icons',
+					src: [
+						'**/*.svg'
+					],
+					dest: 'modules/ve-cite/icons/',
+					ext: '.svg'
+				} ]
+			}
 		}
 	} );
 
-	grunt.registerTask( 'test', [ 'eslint:main', 'stylelint', 'jsonlint', 'banana' ] );
+	grunt.registerTask( 'test', [ 'eslint', 'stylelint', 'banana', 'svgmin' ] );
 	grunt.registerTask( 'default', 'test' );
 };

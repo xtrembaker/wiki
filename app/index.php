@@ -30,12 +30,13 @@
  * @file
  */
 
+define( 'MW_ENTRY_POINT', 'index' );
+
 // Bail on old versions of PHP, or if composer has not been run yet to install
 // dependencies. Using dirname( __FILE__ ) here because __DIR__ is PHP5.3+.
-// @codingStandardsIgnoreStart MediaWiki.Usage.DirUsage.FunctionFound
+// phpcs:ignore MediaWiki.Usage.DirUsage.FunctionFound
 require_once dirname( __FILE__ ) . '/includes/PHPVersionCheck.php';
-// @codingStandardsIgnoreEnd
-wfEntryPointCheck( 'index.php' );
+wfEntryPointCheck( 'html', dirname( $_SERVER['SCRIPT_NAME'] ) );
 
 require __DIR__ . '/includes/WebStart.php';
 

@@ -21,6 +21,8 @@
  * @ingroup FileAbstraction
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Class representing a row of the 'filearchive' table
  *
@@ -63,11 +65,8 @@ class ArchivedFile {
 	/** @var string Upload description */
 	private $description;
 
-	/** @var int User ID of uploader */
+	/** @var User|null Uploader */
 	private $user;
-
-	/** @var string User name of uploader */
-	private $user_text;
 
 	/** @var string Time of upload */
 	private $timestamp;
@@ -95,6 +94,9 @@ class ArchivedFile {
 	/** @var Title */
 	protected $title; # image title
 
+	/** @var bool */
+	private $exists;
+
 	/**
 	 * @throws MWException
 	 * @param Title $title
@@ -116,8 +118,7 @@ class ArchivedFile {
 		$this->mime = "unknown/unknown";
 		$this->media_type = '';
 		$this->description = '';
-		$this->user = 0;
-		$this->user_text = '';
+		$this->user = null;
 		$this->timestamp = null;
 		$this->deleted = 0;
 		$this->dataLoaded = false;
@@ -171,19 +172,21 @@ class ArchivedFile {
 			$conds['fa_sha1'] = $this->sha1;
 		}
 
-		if ( !count( $conds ) ) {
+		if ( $conds === [] ) {
 			throw new MWException( "No specific information for retrieving archived file" );
 		}
 
 		if ( !$this->title || $this->title->getNamespace() == NS_FILE ) {
 			$this->dataLoaded = true; // set it here, to have also true on miss
 			$dbr = wfGetDB( DB_REPLICA );
+			$fileQuery = self::getQueryInfo();
 			$row = $dbr->selectRow(
-				'filearchive',
-				self::selectFields(),
+				$fileQuery['tables'],
+				$fileQuery['fields'],
 				$conds,
 				__METHOD__,
-				[ 'ORDER BY' => 'fa_timestamp DESC' ]
+				[ 'ORDER BY' => 'fa_timestamp DESC' ],
+				$fileQuery['joins']
 			);
 			if ( !$row ) {
 				// this revision does not exist?
@@ -214,31 +217,39 @@ class ArchivedFile {
 	}
 
 	/**
-	 * Fields in the filearchive table
-	 * @return array
+	 * Return the tables, fields, and join conditions to be selected to create
+	 * a new archivedfile object.
+	 * @since 1.31
+	 * @return array[] With three keys:
+	 *   - tables: (string[]) to include in the `$table` to `IDatabase->select()`
+	 *   - fields: (string[]) to include in the `$vars` to `IDatabase->select()`
+	 *   - joins: (array) to include in the `$join_conds` to `IDatabase->select()`
 	 */
-	static function selectFields() {
+	public static function getQueryInfo() {
+		$commentQuery = MediaWikiServices::getInstance()->getCommentStore()->getJoin( 'fa_description' );
+		$actorQuery = ActorMigration::newMigration()->getJoin( 'fa_user' );
 		return [
-			'fa_id',
-			'fa_name',
-			'fa_archive_name',
-			'fa_storage_key',
-			'fa_storage_group',
-			'fa_size',
-			'fa_bits',
-			'fa_width',
-			'fa_height',
-			'fa_metadata',
-			'fa_media_type',
-			'fa_major_mime',
-			'fa_minor_mime',
-			'fa_description',
-			'fa_user',
-			'fa_user_text',
-			'fa_timestamp',
-			'fa_deleted',
-			'fa_deleted_timestamp', /* Used by LocalFileRestoreBatch */
-			'fa_sha1',
+			'tables' => [ 'filearchive' ] + $commentQuery['tables'] + $actorQuery['tables'],
+			'fields' => [
+				'fa_id',
+				'fa_name',
+				'fa_archive_name',
+				'fa_storage_key',
+				'fa_storage_group',
+				'fa_size',
+				'fa_bits',
+				'fa_width',
+				'fa_height',
+				'fa_metadata',
+				'fa_media_type',
+				'fa_major_mime',
+				'fa_minor_mime',
+				'fa_timestamp',
+				'fa_deleted',
+				'fa_deleted_timestamp', /* Used by LocalFileRestoreBatch */
+				'fa_sha1',
+			] + $commentQuery['fields'] + $actorQuery['fields'],
+			'joins' => $commentQuery['joins'] + $actorQuery['joins'],
 		];
 	}
 
@@ -261,9 +272,10 @@ class ArchivedFile {
 		$this->metadata = $row->fa_metadata;
 		$this->mime = "$row->fa_major_mime/$row->fa_minor_mime";
 		$this->media_type = $row->fa_media_type;
-		$this->description = $row->fa_description;
-		$this->user = $row->fa_user;
-		$this->user_text = $row->fa_user_text;
+		$this->description = MediaWikiServices::getInstance()->getCommentStore()
+			// Legacy because $row may have come from self::selectFields()
+			->getCommentLegacy( wfGetDB( DB_REPLICA ), 'fa_description', $row )->text;
+		$this->user = User::newFromAnyId( $row->fa_user, $row->fa_user_text, $row->fa_actor );
 		$this->timestamp = $row->fa_timestamp;
 		$this->deleted = $row->fa_deleted;
 		if ( isset( $row->fa_sha1 ) ) {
@@ -426,7 +438,9 @@ class ArchivedFile {
 	function pageCount() {
 		if ( !isset( $this->pageCount ) ) {
 			// @FIXME: callers expect File objects
+			// @phan-suppress-next-line PhanTypeMismatchArgument
 			if ( $this->getHandler() && $this->handler->isMultiPage( $this ) ) {
+				// @phan-suppress-next-line PhanTypeMismatchArgument
 				$this->pageCount = $this->handler->pageCount( $this );
 			} else {
 				$this->pageCount = false;
@@ -476,17 +490,20 @@ class ArchivedFile {
 	 * @note Prior to MediaWiki 1.23, this method always
 	 *   returned the user id, and was inconsistent with
 	 *   the rest of the file classes.
-	 * @param string $type 'text' or 'id'
-	 * @return int|string
+	 * @param string $type 'text', 'id', or 'object'
+	 * @return int|string|User|null
 	 * @throws MWException
+	 * @since 1.31 added 'object'
 	 */
 	public function getUser( $type = 'text' ) {
 		$this->load();
 
-		if ( $type == 'text' ) {
-			return $this->user_text;
-		} elseif ( $type == 'id' ) {
-			return (int)$this->user;
+		if ( $type === 'object' ) {
+			return $this->user;
+		} elseif ( $type === 'text' ) {
+			return $this->user ? $this->user->getName() : '';
+		} elseif ( $type === 'id' ) {
+			return $this->user ? $this->user->getId() : 0;
 		}
 
 		throw new MWException( "Unknown type '$type'." );
@@ -512,9 +529,7 @@ class ArchivedFile {
 	 * @return int
 	 */
 	public function getRawUser() {
-		$this->load();
-
-		return $this->user;
+		return $this->getUser( 'id' );
 	}
 
 	/**
@@ -523,9 +538,7 @@ class ArchivedFile {
 	 * @return string
 	 */
 	public function getRawUserText() {
-		$this->load();
-
-		return $this->user_text;
+		return $this->getUser( 'text' );
 	}
 
 	/**

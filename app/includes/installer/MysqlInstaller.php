@@ -40,7 +40,6 @@ class MysqlInstaller extends DatabaseInstaller {
 		'wgDBpassword',
 		'wgDBprefix',
 		'wgDBTableOptions',
-		'wgDBmysql5',
 	];
 
 	protected $internalDefaults = [
@@ -49,9 +48,10 @@ class MysqlInstaller extends DatabaseInstaller {
 		'_InstallUser' => 'root',
 	];
 
-	public $supportedEngines = [ 'InnoDB', 'MyISAM' ];
+	public $supportedEngines = [ 'InnoDB' ];
 
-	public $minimumVersion = '5.0.3';
+	public static $minimumVersion = '5.5.8';
+	protected static $notMinimumVersionMessage = 'config-mysql-old';
 
 	public $webUserPrivs = [
 		'DELETE',
@@ -72,7 +72,7 @@ class MysqlInstaller extends DatabaseInstaller {
 	 * @return bool
 	 */
 	public function isCompiled() {
-		return self::checkExtension( 'mysql' ) || self::checkExtension( 'mysqli' );
+		return self::checkExtension( 'mysqli' );
 	}
 
 	/**
@@ -128,17 +128,13 @@ class MysqlInstaller extends DatabaseInstaller {
 			return $status;
 		}
 		/**
-		 * @var $conn Database
+		 * @var Database $conn
 		 */
 		$conn = $status->value;
+		'@phan-var Database $conn';
 
 		// Check version
-		$version = $conn->getServerVersion();
-		if ( version_compare( $version, $this->minimumVersion ) < 0 ) {
-			return Status::newFatal( 'config-mysql-old', $this->minimumVersion, $version );
-		}
-
-		return $status;
+		return static::meetsMinimumRequirement( $conn->getServerVersion() );
 	}
 
 	/**
@@ -147,6 +143,7 @@ class MysqlInstaller extends DatabaseInstaller {
 	public function openConnection() {
 		$status = Status::newGood();
 		try {
+			/** @var DatabaseMysqlBase $db */
 			$db = Database::factory( 'mysql', [
 				'host' => $this->getVar( 'wgDBserver' ),
 				'user' => $this->getVar( '_InstallUser' ),
@@ -167,12 +164,12 @@ class MysqlInstaller extends DatabaseInstaller {
 
 		$status = $this->getConnection();
 		if ( !$status->isOK() ) {
-			$this->parent->showStatusError( $status );
+			$this->parent->showStatusMessage( $status );
 
 			return;
 		}
 		/**
-		 * @var $conn Database
+		 * @var Database $conn
 		 */
 		$conn = $status->value;
 		$conn->selectDB( $this->getVar( 'wgDBname' ) );
@@ -197,11 +194,7 @@ class MysqlInstaller extends DatabaseInstaller {
 					$existingSchema = false;
 					$this->parent->showMessage( 'config-unknown-collation' );
 				}
-				if ( isset( $row->Engine ) ) {
-					$existingEngine = $row->Engine;
-				} else {
-					$existingEngine = $row->Type;
-				}
+				$existingEngine = $row->Engine ?? $row->Type;
 			}
 		} else {
 			$existingSchema = false;
@@ -223,6 +216,7 @@ class MysqlInstaller extends DatabaseInstaller {
 
 	/**
 	 * @param string $s
+	 * @param string $escapeChar
 	 * @return string
 	 */
 	protected function escapeLikeInternal( $s, $escapeChar = '`' ) {
@@ -240,7 +234,7 @@ class MysqlInstaller extends DatabaseInstaller {
 		$status = $this->getConnection();
 
 		/**
-		 * @var $conn Database
+		 * @var Database $conn
 		 */
 		$conn = $status->value;
 
@@ -275,7 +269,7 @@ class MysqlInstaller extends DatabaseInstaller {
 		if ( !$status->isOK() ) {
 			return false;
 		}
-		/** @var $conn Database */
+		/** @var Database $conn */
 		$conn = $status->value;
 
 		// Get current account name
@@ -342,6 +336,8 @@ class MysqlInstaller extends DatabaseInstaller {
 	/**
 	 * Convert a wildcard (as used in LIKE) to a regex
 	 * Slashes are escaped, slash terminators included
+	 * @param string $wildcard
+	 * @return string
 	 */
 	protected function likeToRegex( $wildcard ) {
 		$r = preg_quote( $wildcard, '/' );
@@ -370,63 +366,10 @@ class MysqlInstaller extends DatabaseInstaller {
 			$this->setVar( '_MysqlEngine', reset( $engines ) );
 		}
 
-		$s .= Xml::openElement( 'div', [
-			'id' => 'dbMyisamWarning'
-		] );
-		$myisamWarning = 'config-mysql-myisam-dep';
-		if ( count( $engines ) === 1 ) {
-			$myisamWarning = 'config-mysql-only-myisam-dep';
-		}
-		$s .= $this->parent->getWarningBox( wfMessage( $myisamWarning )->text() );
-		$s .= Xml::closeElement( 'div' );
-
-		if ( $this->getVar( '_MysqlEngine' ) != 'MyISAM' ) {
-			$s .= Xml::openElement( 'script' );
-			$s .= '$(\'#dbMyisamWarning\').hide();';
-			$s .= Xml::closeElement( 'script' );
-		}
-
-		if ( count( $engines ) >= 2 ) {
-			// getRadioSet() builds a set of labeled radio buttons.
-			// For grep: The following messages are used as the item labels:
-			// config-mysql-innodb, config-mysql-myisam
-			$s .= $this->getRadioSet( [
-				'var' => '_MysqlEngine',
-				'label' => 'config-mysql-engine',
-				'itemLabelPrefix' => 'config-mysql-',
-				'values' => $engines,
-				'itemAttribs' => [
-					'MyISAM' => [
-						'class' => 'showHideRadio',
-						'rel' => 'dbMyisamWarning'
-					],
-					'InnoDB' => [
-						'class' => 'hideShowRadio',
-						'rel' => 'dbMyisamWarning'
-					]
-				]
-			] );
-			$s .= $this->parent->getHelpBox( 'config-mysql-engine-help' );
-		}
-
 		// If the current default charset is not supported, use a charset that is
 		$charsets = $this->getCharsets();
 		if ( !in_array( $this->getVar( '_MysqlCharset' ), $charsets ) ) {
 			$this->setVar( '_MysqlCharset', reset( $charsets ) );
-		}
-
-		// Do charset selector
-		if ( count( $charsets ) >= 2 ) {
-			// getRadioSet() builds a set of labeled radio buttons.
-			// For grep: The following messages are used as the item labels:
-			// config-mysql-binary, config-mysql-utf8
-			$s .= $this->getRadioSet( [
-				'var' => '_MysqlCharset',
-				'label' => 'config-mysql-charset',
-				'itemLabelPrefix' => 'config-mysql-',
-				'values' => $charsets
-			] );
-			$s .= $this->parent->getHelpBox( 'config-mysql-charset-help' );
 		}
 
 		return $s;
@@ -501,16 +444,30 @@ class MysqlInstaller extends DatabaseInstaller {
 		/** @var Database $conn */
 		$conn = $status->value;
 		$dbName = $this->getVar( 'wgDBname' );
-		if ( !$conn->selectDB( $dbName ) ) {
+		if ( !$this->databaseExists( $dbName ) ) {
 			$conn->query(
 				"CREATE DATABASE " . $conn->addIdentifierQuotes( $dbName ) . "CHARACTER SET utf8",
 				__METHOD__
 			);
-			$conn->selectDB( $dbName );
 		}
+		$conn->selectDB( $dbName );
 		$this->setupSchemaVars();
 
 		return $status;
+	}
+
+	/**
+	 * Try to see if a given database exists
+	 * @param string $dbName Database name to check
+	 * @return bool
+	 */
+	private function databaseExists( $dbName ) {
+		$encDatabase = $this->db->addQuotes( $dbName );
+
+		return $this->db->query(
+			"SELECT 1 FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME = $encDatabase",
+			__METHOD__
+		)->numRows() > 0;
 	}
 
 	/**
@@ -672,7 +629,6 @@ class MysqlInstaller extends DatabaseInstaller {
 	}
 
 	public function getLocalSettings() {
-		$dbmysql5 = wfBoolToStr( $this->getVar( 'wgDBmysql5', true ) );
 		$prefix = LocalSettingsGenerator::escapePhpString( $this->getVar( 'wgDBprefix' ) );
 		$tblOpts = LocalSettingsGenerator::escapePhpString( $this->getTableOptions() );
 
@@ -680,9 +636,6 @@ class MysqlInstaller extends DatabaseInstaller {
 \$wgDBprefix = \"{$prefix}\";
 
 # MySQL table options to use during installation or update
-\$wgDBTableOptions = \"{$tblOpts}\";
-
-# Experimental charset support for MySQL 5.0.
-\$wgDBmysql5 = {$dbmysql5};";
+\$wgDBTableOptions = \"{$tblOpts}\";";
 	}
 }

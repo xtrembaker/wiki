@@ -2,8 +2,9 @@
 
 namespace MediaWiki\Widget\Search;
 
+use ISearchResultSet;
+use MediaWiki\MediaWikiServices;
 use Message;
-use SearchResultSet;
 use SpecialSearch;
 use Status;
 
@@ -32,25 +33,23 @@ class BasicSearchResultSetWidget {
 	/**
 	 * @param string $term The search term to highlight
 	 * @param int $offset The offset of the first result in the result set
-	 * @param SearchResultSet|null $titleResultSet Results of searching only page titles
-	 * @param SearchResultSet|null $textResultSet Results of general full text search.
+	 * @param ISearchResultSet|null $titleResultSet Results of searching only page titles
+	 * @param ISearchResultSet|null $textResultSet Results of general full text search.
 	 * @return string HTML
 	 */
 	public function render(
 		$term,
 		$offset,
-		SearchResultSet $titleResultSet = null,
-		SearchResultSet $textResultSet = null
+		ISearchResultSet $titleResultSet = null,
+		ISearchResultSet $textResultSet = null
 	) {
-		global $wgContLang;
-
 		$hasTitle = $titleResultSet ? $titleResultSet->numRows() > 0 : false;
 		$hasText = $textResultSet ? $textResultSet->numRows() > 0 : false;
 		$hasSecondary = $textResultSet
-			? $textResultSet->hasInterwikiResults( SearchResultSet::SECONDARY_RESULTS )
+			? $textResultSet->hasInterwikiResults( ISearchResultSet::SECONDARY_RESULTS )
 			: false;
 		$hasSecondaryInline = $textResultSet
-			? $textResultSet->hasInterwikiResults( SearchResultSet::INLINE_RESULTS )
+			? $textResultSet->hasInterwikiResults( ISearchResultSet::INLINE_RESULTS )
 			: false;
 
 		if ( !$hasTitle && !$hasText && !$hasSecondary && !$hasSecondaryInline ) {
@@ -72,16 +71,16 @@ class BasicSearchResultSetWidget {
 		}
 
 		if ( $hasSecondaryInline ) {
-			$iwResults = $textResultSet->getInterwikiResults( SearchResultSet::INLINE_RESULTS );
+			$iwResults = $textResultSet->getInterwikiResults( ISearchResultSet::INLINE_RESULTS );
 			foreach ( $iwResults as $interwiki => $results ) {
 				if ( $results instanceof Status || $results->numRows() === 0 ) {
 					// ignore bad interwikis for now
 					continue;
 				}
 				$out .=
-					"<p class='mw-search-interwiki-header mw-search-visualclear'>" .
+					"<h2 class='mw-search-interwiki-header mw-search-visualclear'>" .
 						$this->specialPage->msg( "search-interwiki-results-{$interwiki}" )->parse() .
-					"</p>";
+					"</h2>";
 				$out .= $this->renderResultSet( $results, $offset );
 			}
 		}
@@ -89,13 +88,13 @@ class BasicSearchResultSetWidget {
 		if ( $hasSecondary ) {
 			$out .= $this->sidebarWidget->render(
 				$term,
-				$textResultSet->getInterwikiResults( SearchResultSet::SECONDARY_RESULTS )
+				$textResultSet->getInterwikiResults( ISearchResultSet::SECONDARY_RESULTS )
 			);
 		}
 
 		// Convert the whole thing to desired language variant
 		// TODO: Move this up to Special:Search?
-		return $wgContLang->convert( $out );
+		return MediaWikiServices::getInstance()->getContentLanguage()->convert( $out );
 	}
 
 	/**
@@ -107,27 +106,20 @@ class BasicSearchResultSetWidget {
 	 * @return string HTML
 	 */
 	protected function header( Message $msg ) {
-		return
-			"<h2>" .
-				"<span class='mw-headline'>" . $msg->escaped() . "</span>" .
-			"</h2>";
+		return "<h2>" .
+			"<span class='mw-headline'>" . $msg->escaped() . "</span>" .
+		"</h2>";
 	}
 
 	/**
-	 * @param SearchResultSet $resultSet The search results to render
+	 * @param ISearchResultSet $resultSet The search results to render
 	 * @param int $offset Offset of the first result in $resultSet
 	 * @return string HTML
 	 */
-	protected function renderResultSet( SearchResultSet $resultSet, $offset ) {
-		global $wgContLang;
-
-		$terms = $wgContLang->convertForSearchResult( $resultSet->termMatches() );
-
+	protected function renderResultSet( ISearchResultSet $resultSet, $offset ) {
 		$hits = [];
-		$result = $resultSet->next();
-		while ( $result ) {
-			$hits[] .= $this->resultWidget->render( $result, $terms, $offset++ );
-			$result = $resultSet->next();
+		foreach ( $resultSet as $result ) {
+			$hits[] = $this->resultWidget->render( $result, $offset++ );
 		}
 
 		return "<ul class='mw-search-results'>" . implode( '', $hits ) . "</ul>";

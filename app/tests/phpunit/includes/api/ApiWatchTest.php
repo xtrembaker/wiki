@@ -5,13 +5,10 @@
  * @group Database
  * @group medium
  * @todo This test suite is severly broken and need a full review
+ *
+ * @covers ApiWatch
  */
 class ApiWatchTest extends ApiTestCase {
-	protected function setUp() {
-		parent::setUp();
-		$this->doLogin();
-	}
-
 	function getTokens() {
 		return $this->getTokenList( self::$users['sysop'] );
 	}
@@ -67,7 +64,7 @@ class ApiWatchTest extends ApiTestCase {
 				unset( $data[0]['query']['watchlist'][$index] );
 			}
 		}
-		$this->assertEquals( 0, count( $data[0]['query']['watchlist'] ) );
+		$this->assertSame( [], $data[0]['query']['watchlist'] );
 
 		return $data;
 	}

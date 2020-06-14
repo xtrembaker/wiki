@@ -1,6 +1,8 @@
 <?php
 
-class StringUtilsTest extends PHPUnit_Framework_TestCase {
+class StringUtilsTest extends PHPUnit\Framework\TestCase {
+
+	use MediaWikiCoversValidator;
 
 	/**
 	 * @covers StringUtils::isUtf8
@@ -121,6 +123,31 @@ class StringUtilsTest extends PHPUnit_Framework_TestCase {
 
 			'noncharacters 1' => [ $PASS, "\xef\xbf\xbe" ],
 			'noncharacters 2' => [ $PASS, "\xef\xbf\xbf" ],
+		];
+	}
+
+	/**
+	 * @param strin $input
+	 * @param bool $expected
+	 * @dataProvider provideRegexps
+	 * @covers StringUtils::isValidPCRERegex
+	 */
+	public function testIsValidPCRERegex( $input, $expected ) {
+		$this->assertSame( $expected, StringUtils::isValidPCRERegex( $input ) );
+	}
+
+	/**
+	 * Data provider for testIsValidPCRERegex
+	 * @return array
+	 */
+	public static function provideRegexps() {
+		return [
+			[ 'foo', false ],
+			[ '/foo/', true ],
+			[ '//', true ],
+			[ '/(foo/', false ],
+			[ '!(f[o]{2})!', true ],
+			[ '/foo\/', false ]
 		];
 	}
 }

@@ -63,8 +63,8 @@ class ApiFeedRecentChanges extends ApiBase {
 
 		$feedFormat = $this->params['feedformat'];
 		$specialClass = $this->params['target'] !== null
-			? 'SpecialRecentchangeslinked'
-			: 'SpecialRecentchanges';
+			? SpecialRecentChangesLinked::class
+			: SpecialRecentChanges::class;
 
 		$formatter = $this->getFeedObject( $feedFormat, $specialClass );
 
@@ -90,18 +90,18 @@ class ApiFeedRecentChanges extends ApiBase {
 	 * Return a ChannelFeed object.
 	 *
 	 * @param string $feedFormat Feed's format (either 'rss' or 'atom')
-	 * @param string $specialClass Relevant special page name (either 'SpecialRecentchanges' or
-	 *     'SpecialRecentchangeslinked')
+	 * @param string $specialClass Relevant special page name (either 'SpecialRecentChanges' or
+	 *     'SpecialRecentChangesLinked')
 	 * @return ChannelFeed
 	 */
 	public function getFeedObject( $feedFormat, $specialClass ) {
-		if ( $specialClass === 'SpecialRecentchangeslinked' ) {
+		if ( $specialClass === SpecialRecentChangesLinked::class ) {
 			$title = Title::newFromText( $this->params['target'] );
 			if ( !$title ) {
 				$this->dieWithError( [ 'apierror-invalidtitle', wfEscapeWikiText( $this->params['target'] ) ] );
 			}
 
-			$feed = new ChangesFeed( $feedFormat, false );
+			$feed = new ChangesFeed( $feedFormat );
 			$feedObj = $feed->getFeedObject(
 				$this->msg( 'recentchangeslinked-title', $title->getPrefixedText() )
 					->inContentLanguage()->text(),
@@ -109,7 +109,7 @@ class ApiFeedRecentChanges extends ApiBase {
 				SpecialPage::getTitleFor( 'Recentchangeslinked' )->getFullURL()
 			);
 		} else {
-			$feed = new ChangesFeed( $feedFormat, 'rcfeed' );
+			$feed = new ChangesFeed( $feedFormat );
 			$feedObj = $feed->getFeedObject(
 				$this->msg( 'recentchanges' )->inContentLanguage()->text(),
 				$this->msg( 'recentchanges-feed-description' )->inContentLanguage()->text(),
@@ -168,16 +168,6 @@ class ApiFeedRecentChanges extends ApiBase {
 			],
 			'showlinkedto' => false,
 		];
-
-		if ( $config->get( 'AllowCategorizedRecentChanges' ) ) {
-			$ret += [
-				'categories' => [
-					ApiBase::PARAM_TYPE => 'string',
-					ApiBase::PARAM_ISMULTI => true,
-				],
-				'categories_any' => false,
-			];
-		}
 
 		return $ret;
 	}

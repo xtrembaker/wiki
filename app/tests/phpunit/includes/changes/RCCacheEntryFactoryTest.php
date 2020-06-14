@@ -18,7 +18,7 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 	private $testRecentChangesHelper;
 
 	/**
-	 * @var LinkRenderer;
+	 * @var LinkRenderer
 	 */
 	private $linkRenderer;
 
@@ -57,11 +57,11 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 		);
 		$cacheEntry = $cacheEntryFactory->newFromRecentChange( $recentChange, false );
 
-		$this->assertInstanceOf( 'RCCacheEntry', $cacheEntry );
+		$this->assertInstanceOf( RCCacheEntry::class, $cacheEntry );
 
 		$this->assertEquals( false, $cacheEntry->watched, 'watched' );
 		$this->assertEquals( '21:21', $cacheEntry->timestamp, 'timestamp' );
-		$this->assertEquals( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
+		$this->assertSame( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
 		$this->assertEquals( false, $cacheEntry->unpatrolled, 'unpatrolled' );
 
 		$this->assertUserLinks( $user->getName(), $cacheEntry );
@@ -92,11 +92,11 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 		);
 		$cacheEntry = $cacheEntryFactory->newFromRecentChange( $recentChange, false );
 
-		$this->assertInstanceOf( 'RCCacheEntry', $cacheEntry );
+		$this->assertInstanceOf( RCCacheEntry::class, $cacheEntry );
 
 		$this->assertEquals( false, $cacheEntry->watched, 'watched' );
 		$this->assertEquals( '21:21', $cacheEntry->timestamp, 'timestamp' );
-		$this->assertEquals( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
+		$this->assertSame( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
 		$this->assertEquals( false, $cacheEntry->unpatrolled, 'unpatrolled' );
 
 		$this->assertDeleteLogLink( $cacheEntry );
@@ -126,11 +126,11 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 		);
 		$cacheEntry = $cacheEntryFactory->newFromRecentChange( $recentChange, false );
 
-		$this->assertInstanceOf( 'RCCacheEntry', $cacheEntry );
+		$this->assertInstanceOf( RCCacheEntry::class, $cacheEntry );
 
 		$this->assertEquals( false, $cacheEntry->watched, 'watched' );
 		$this->assertEquals( '21:21', $cacheEntry->timestamp, 'timestamp' );
-		$this->assertEquals( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
+		$this->assertSame( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
 		$this->assertEquals( false, $cacheEntry->unpatrolled, 'unpatrolled' );
 
 		$this->assertRevDel( $cacheEntry );
@@ -156,14 +156,15 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 
 		$this->assertValidHTML( $cacheEntry->usertalklink );
 		$this->assertRegExp(
-			'#^ <span class="mw-usertoollinks">\(.*<a .+>talk</a>.*\)</span>#',
+			'#^ <span class="mw-usertoollinks mw-changeslist-links">.*<span><a .+>talk</a></span>.*</span>#',
 			$cacheEntry->usertalklink,
 			'verify user talk link'
 		);
 
 		$this->assertValidHTML( $cacheEntry->usertalklink );
 		$this->assertRegExp(
-			'#^ <span class="mw-usertoollinks">\(.*<a .+>contribs</a>.*\)</span>$#',
+			'#^ <span class="mw-usertoollinks mw-changeslist-links">.*<span><a .+>' .
+				'contribs</a></span>.*</span>$#',
 			$cacheEntry->usertalklink,
 			'verify user tool links'
 		);

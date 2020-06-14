@@ -2,7 +2,7 @@
 /**
  * Testing logger
  *
- * Copyright (C) 2015 Brad Jorsch <bjorsch@wikimedia.org>
+ * Copyright (C) 2015 Wikimedia Foundation and contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,7 +20,6 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @author Brad Jorsch <bjorsch@wikimedia.org>
  */
 
 use Psr\Log\LogLevel;
@@ -39,10 +38,10 @@ class TestLogger extends \Psr\Log\AbstractLogger {
 
 	/**
 	 * @param bool $collect Whether to collect logs. @see setCollect()
-	 * @param callable $filter Filter logs before collecting/printing. Signature is
+	 * @param callable|null $filter Filter logs before collecting/printing. Signature is
 	 *  string|null function ( string $message, string $level, array $context );
-	 * @param bool $collectContext Whether to keep the context passed to log.
-	 *                             @since 1.29 @see setCollectContext()
+	 * @param bool $collectContext Whether to keep the context passed to log
+	 *             (since 1.29, @see setCollectContext()).
 	 */
 	public function __construct( $collect = false, $filter = null, $collectContext = false ) {
 		$this->collect = $collect;
@@ -74,8 +73,8 @@ class TestLogger extends \Psr\Log\AbstractLogger {
 
 	/**
 	 * Return the collected logs
-	 * @return array Array of array( string $level, string $message ), or
-	 *   array( string $level, string $message, array $context ) if $collectContext was true.
+	 * @return array Array of [ string $level, string $message ], or
+	 *   [ string $level, string $message, array $context ] if $collectContext was true.
 	 */
 	public function getBuffer() {
 		return $this->buffer;

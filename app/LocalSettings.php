@@ -18,8 +18,7 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 
 wfLoadSkin( 'Vector' );
 wfLoadSkin( 'MonoBook' );
-wfLoadSkin( 'Modern' );
-wfLoadSkin( 'CologneBlue' );
+wfLoadSkin( 'Timeless' );
 
 $conf_params = getConfParams();
 ## Uncomment this to disable output compression
@@ -113,7 +112,7 @@ $wgUpgradeKey = "1cad3a0c7a42f594";
 
 ## Default skin: you can change the default skin. Use the internal symbolic
 ## names, ie 'standard', 'nostalgia', 'cologneblue', 'monobook', 'vector':
-$wgDefaultSkin = "cologneblue";
+$wgDefaultSkin = "timeless";
 
 ## For attaching licensing metadata to pages, and displaying an
 ## appropriate copyright notice / icon. GNU Free Documentation
@@ -185,6 +184,13 @@ function getConfParams(){
     );*/
 }
 
+/**
+ * The debug log file must never be publicly accessible because it
+ * contains private data. But ensure that the directory is writeable by the
+ * PHP script running within your Web server.
+ * The filename is with the database name of the wiki.
+ */
+$wgDebugLogFile = "/var/www/wiki/logs/debug-{$wgDBname}.log";
 
 
 # End of automatically generated settings.

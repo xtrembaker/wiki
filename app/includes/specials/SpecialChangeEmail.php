@@ -22,6 +22,8 @@
  */
 
 use MediaWiki\Auth\AuthManager;
+use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\MediaWikiServices;
 
 /**
  * Let users change their email address.
@@ -54,16 +56,17 @@ class SpecialChangeEmail extends FormSpecialPage {
 	 * @param string $par
 	 */
 	function execute( $par ) {
-		$this->checkLoginSecurityLevel();
-
 		$out = $this->getOutput();
 		$out->disallowUserJs();
 
 		parent::execute( $par );
 	}
 
-	protected function checkExecutePermissions( User $user ) {
+	protected function getLoginSecurityLevel() {
+		return $this->getName();
+	}
 
+	protected function checkExecutePermissions( User $user ) {
 		if ( !AuthManager::singleton()->allowsPropertyChange( 'emailaddress' ) ) {
 			throw new ErrorPageError( 'changeemail', 'cannotchangeemail' );
 		}
@@ -72,7 +75,10 @@ class SpecialChangeEmail extends FormSpecialPage {
 
 		// This could also let someone check the current email address, so
 		// require both permissions.
-		if ( !$this->getUser()->isAllowed( 'viewmyprivateinfo' ) ) {
+		if ( !MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $this->getUser(), 'viewmyprivateinfo' )
+		) {
 			throw new PermissionsError( 'viewmyprivateinfo' );
 		}
 
@@ -152,8 +158,6 @@ class SpecialChangeEmail extends FormSpecialPage {
 	 * @return Status
 	 */
 	private function attemptChange( User $user, $newaddr ) {
-		$authManager = AuthManager::singleton();
-
 		if ( $newaddr != '' && !Sanitizer::validateEmail( $newaddr ) ) {
 			return Status::newFatal( 'invalidemailaddress' );
 		}
@@ -162,16 +166,29 @@ class SpecialChangeEmail extends FormSpecialPage {
 			return Status::newFatal( 'changeemail-nochange' );
 		}
 
+		// To prevent spam, rate limit adding a new address, but do
+		// not rate limit removing an address.
+		if ( $newaddr !== '' && $user->pingLimiter( 'changeemail' ) ) {
+			return Status::newFatal( 'actionthrottledtext' );
+		}
+
 		$oldaddr = $user->getEmail();
 		$status = $user->setEmailWithConfirmation( $newaddr );
 		if ( !$status->isGood() ) {
 			return $status;
 		}
 
+		LoggerFactory::getInstance( 'authentication' )->info(
+			'Changing email address for {user} from {oldemail} to {newemail}', [
+				'user' => $user->getName(),
+				'oldemail' => $oldaddr,
+				'newemail' => $newaddr,
+			]
+		);
+
 		Hooks::run( 'PrefsEmailAudit', [ $user, $oldaddr, $newaddr ] );
 
 		$user->saveSettings();
-		MediaWiki\Auth\AuthManager::callLegacyAuthPlugin( 'updateExternalDB', [ $user ] );
 
 		return $status;
 	}

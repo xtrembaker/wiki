@@ -1,9 +1,5 @@
 <?php
 /**
- *
- *
- * Created on Feb 4, 2009
- *
  * Copyright © 2009 Roan Kattouw "<Firstname>.<Lastname>@gmail.com"
  *
  * This program is free software; you can redistribute it and/or modify
@@ -33,7 +29,6 @@ class ApiImport extends ApiBase {
 
 	public function execute() {
 		$this->useTransactionalTimeLimit();
-
 		$user = $this->getUser();
 		$params = $this->extractRequestParams();
 
@@ -41,7 +36,7 @@ class ApiImport extends ApiBase {
 
 		$isUpload = false;
 		if ( isset( $params['interwikisource'] ) ) {
-			if ( !$user->isAllowed( 'import' ) ) {
+			if ( !$this->getPermissionManager()->userHasRight( $user, 'import' ) ) {
 				$this->dieWithError( 'apierror-cantimport' );
 			}
 			if ( !isset( $params['interwikipage'] ) ) {
@@ -53,12 +48,18 @@ class ApiImport extends ApiBase {
 				$params['fullhistory'],
 				$params['templates']
 			);
+			$usernamePrefix = $params['interwikisource'];
 		} else {
 			$isUpload = true;
-			if ( !$user->isAllowed( 'importupload' ) ) {
+			if ( !$this->getPermissionManager()->userHasRight( $user, 'importupload' ) ) {
 				$this->dieWithError( 'apierror-cantimport-upload' );
 			}
 			$source = ImportStreamSource::newFromUpload( 'xml' );
+			$usernamePrefix = (string)$params['interwikiprefix'];
+			if ( $usernamePrefix === '' ) {
+				$encParamName = $this->encodeParamName( 'interwikiprefix' );
+				$this->dieWithError( [ 'apierror-missingparam', $encParamName ] );
+			}
 		}
 		if ( !$source->isOK() ) {
 			$this->dieStatus( $source );
@@ -81,6 +82,7 @@ class ApiImport extends ApiBase {
 				$this->dieStatus( $statusRootPage );
 			}
 		}
+		$importer->setUsernamePrefix( $usernamePrefix, $params['assignknownusers'] );
 		$reporter = new ApiImportReporter(
 			$importer,
 			$isUpload,
@@ -141,6 +143,9 @@ class ApiImport extends ApiBase {
 			'xml' => [
 				ApiBase::PARAM_TYPE => 'upload',
 			],
+			'interwikiprefix' => [
+				ApiBase::PARAM_TYPE => 'string',
+			],
 			'interwikisource' => [
 				ApiBase::PARAM_TYPE => $this->getAllowedImportSources(),
 			],
@@ -150,6 +155,7 @@ class ApiImport extends ApiBase {
 			'namespace' => [
 				ApiBase::PARAM_TYPE => 'namespace'
 			],
+			'assignknownusers' => false,
 			'rootpage' => null,
 			'tags' => [
 				ApiBase::PARAM_TYPE => 'tags',
@@ -172,44 +178,5 @@ class ApiImport extends ApiBase {
 
 	public function getHelpUrls() {
 		return 'https://www.mediawiki.org/wiki/Special:MyLanguage/API:Import';
-	}
-}
-
-/**
- * Import reporter for the API
- * @ingroup API
- */
-class ApiImportReporter extends ImportReporter {
-	private $mResultArr = [];
-
-	/**
-	 * @param Title $title
-	 * @param Title $origTitle
-	 * @param int $revisionCount
-	 * @param int $successCount
-	 * @param array $pageInfo
-	 * @return void
-	 */
-	public function reportPage( $title, $origTitle, $revisionCount, $successCount, $pageInfo ) {
-		// Add a result entry
-		$r = [];
-
-		if ( $title === null ) {
-			# Invalid or non-importable title
-			$r['title'] = $pageInfo['title'];
-			$r['invalid'] = true;
-		} else {
-			ApiQueryBase::addTitleInfo( $r, $title );
-			$r['revisions'] = intval( $successCount );
-		}
-
-		$this->mResultArr[] = $r;
-
-		// Piggyback on the parent to do the logging
-		parent::reportPage( $title, $origTitle, $revisionCount, $successCount, $pageInfo );
-	}
-
-	public function getData() {
-		return $this->mResultArr;
 	}
 }

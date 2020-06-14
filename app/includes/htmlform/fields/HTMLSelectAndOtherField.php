@@ -11,6 +11,9 @@
  * @todo FIXME: If made 'required', only the text field should be compulsory.
  */
 class HTMLSelectAndOtherField extends HTMLSelectField {
+	/** @var string[] */
+	private $mFlatOptions;
+
 	public function __construct( $params ) {
 		if ( array_key_exists( 'other', $params ) ) {
 			// Do nothing
@@ -47,6 +50,10 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 			$textAttribs['class'][] = $this->mClass;
 		}
 
+		if ( isset( $this->mParams['maxlength-unit'] ) ) {
+			$textAttribs['data-mw-maxlength-unit'] = $this->mParams['maxlength-unit'];
+		}
+
 		$allowedParams = [
 			'required',
 			'autofocus',
@@ -54,6 +61,7 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 			'disabled',
 			'tabindex',
 			'maxlength', // gets dynamic with javascript, see mediawiki.htmlform.js
+			'maxlength-unit', // 'bytes' or 'codepoints', see mediawiki.htmlform.js
 		];
 
 		$textAttribs += $this->getAttributes( $allowedParams );
@@ -63,14 +71,113 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 		return "$select<br />\n$textbox";
 	}
 
+	protected function getOOUIModules() {
+		return [ 'mediawiki.widgets.SelectWithInputWidget' ];
+	}
+
 	public function getInputOOUI( $value ) {
-		return false;
+		$this->mParent->getOutput()->addModuleStyles( 'mediawiki.widgets.SelectWithInputWidget.styles' );
+
+		# TextInput
+		$textAttribs = [
+			'name' => $this->mName . '-other',
+			'value' => $value[2],
+		];
+
+		$allowedParams = [
+			'required',
+			'autofocus',
+			'multiple',
+			'disabled',
+			'tabindex',
+			'maxlength',
+		];
+
+		$textAttribs += OOUI\Element::configFromHtmlAttributes(
+			$this->getAttributes( $allowedParams )
+		);
+
+		if ( $this->mClass !== '' ) {
+			$textAttribs['classes'] = [ $this->mClass ];
+		}
+
+		# DropdownInput
+		$dropdownInputAttribs = [
+			'name' => $this->mName,
+			'id' => $this->mID . '-select',
+			'options' => $this->getOptionsOOUI(),
+			'value' => $value[1],
+		];
+
+		$allowedParams = [
+			'tabindex',
+			'disabled',
+		];
+
+		$dropdownInputAttribs += OOUI\Element::configFromHtmlAttributes(
+			$this->getAttributes( $allowedParams )
+		);
+
+		if ( $this->mClass !== '' ) {
+			$dropdownInputAttribs['classes'] = [ $this->mClass ];
+		}
+
+		$disabled = false;
+		if ( isset( $this->mParams[ 'disabled' ] ) && $this->mParams[ 'disabled' ] ) {
+			$disabled = true;
+		}
+
+		return $this->getInputWidget( [
+			'id' => $this->mID,
+			'disabled' => $disabled,
+			'textinput' => $textAttribs,
+			'dropdowninput' => $dropdownInputAttribs,
+			'or' => false,
+			'required' => $this->mParams[ 'required' ] ?? false,
+			'classes' => [ 'mw-htmlform-select-and-other-field' ],
+			'data' => [
+				'maxlengthUnit' => $this->mParams['maxlength-unit'] ?? 'bytes'
+			],
+		] );
+	}
+
+	public function getInputWidget( $params ) {
+		return new MediaWiki\Widget\SelectWithInputWidget( $params );
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getDefault() {
+		$default = parent::getDefault();
+
+		// Default values of empty form
+		$final = '';
+		$list = 'other';
+		$text = '';
+
+		if ( $default !== null ) {
+			$final = $default;
+			// Assume the default is a text value, with the 'other' option selected.
+			// Then check if that assumption is correct, and update $list and $text if not.
+			$text = $final;
+			foreach ( $this->mFlatOptions as $option ) {
+				$match = $option . $this->msg( 'colon-separator' )->inContentLanguage()->text();
+				if ( strpos( $final, $match ) === 0 ) {
+					$list = $option;
+					$text = substr( $final, strlen( $match ) );
+					break;
+				}
+			}
+		}
+
+		return [ $final, $list, $text ];
 	}
 
 	/**
 	 * @param WebRequest $request
 	 *
-	 * @return array("<overall message>","<select value>","<text field value>")
+	 * @return array ["<overall message>","<select value>","<text field value>"]
 	 */
 	public function loadDataFromRequest( $request ) {
 		if ( $request->getCheck( $this->mName ) ) {
@@ -89,26 +196,13 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 			} else {
 				$final = $list . $this->msg( 'colon-separator' )->inContentLanguage()->text() . $text;
 			}
-		} else {
-			$final = $this->getDefault();
-
-			$list = 'other';
-			$text = $final;
-			foreach ( $this->mFlatOptions as $option ) {
-				$match = $option . $this->msg( 'colon-separator' )->inContentLanguage()->text();
-				if ( strpos( $text, $match ) === 0 ) {
-					$list = $option;
-					$text = substr( $text, strlen( $match ) );
-					break;
-				}
-			}
+			return [ $final, $list, $text ];
 		}
-
-		return [ $final, $list, $text ];
+		return $this->getDefault();
 	}
 
 	public function getSize() {
-		return isset( $this->mParams['size'] ) ? $this->mParams['size'] : 45;
+		return $this->mParams['size'] ?? 45;
 	}
 
 	public function validate( $value, $alldata ) {
@@ -123,7 +217,7 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 
 		if ( isset( $this->mParams['required'] )
 			&& $this->mParams['required'] !== false
-			&& $value[1] === ''
+			&& $value[0] === ''
 		) {
 			return $this->msg( 'htmlform-required' );
 		}

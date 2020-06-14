@@ -1,6 +1,26 @@
 <?php
 
+use Wikimedia\TestingAccessWrapper;
+
 class LanguageTest extends LanguageClassesTestCase {
+	use LanguageNameUtilsTestTrait;
+
+	/** @var array Copy of $wgHooks from before we unset LanguageGetTranslatedLanguageNames */
+	private $origHooks;
+
+	public function setUp() {
+		global $wgHooks;
+
+		parent::setUp();
+
+		// Don't allow installed hooks to run, except if a test restores them via origHooks (needed
+		// for testIsKnownLanguageTag_cldr)
+		$this->origHooks = $wgHooks;
+		$newHooks = $wgHooks;
+		unset( $newHooks['LanguageGetTranslatedLanguageNames'] );
+		$this->setMwGlobals( 'wgHooks', $newHooks );
+	}
+
 	/**
 	 * @covers Language::convertDoubleWidth
 	 * @covers Language::normalizeForSearch
@@ -135,6 +155,18 @@ class LanguageTest extends LanguageClassesTestCase {
 			],
 			[
 				259199.55,
+				'avoidhours',
+				'3 d',
+				'formatTimePeriod() rounding (>48h), avoidhours'
+			],
+			[
+				259199.55,
+				[ 'avoid' => 'avoidhours', 'noabbrevs' => true ],
+				'3 days',
+				'formatTimePeriod() rounding (>48h), avoidhours'
+			],
+			[
+				259199.55,
 				'avoidminutes',
 				'3 d 0 h',
 				'formatTimePeriod() rounding (>48h), avoidminutes'
@@ -209,68 +241,102 @@ class LanguageTest extends LanguageClassesTestCase {
 	}
 
 	/**
-	 * @covers Language::truncate
+	 * @covers Language::truncateForDatabase
+	 * @covers Language::truncateInternal
 	 */
-	public function testTruncate() {
+	public function testTruncateForDatabase() {
 		$this->assertEquals(
 			"XXX",
-			$this->getLang()->truncate( "1234567890", 0, 'XXX' ),
+			$this->getLang()->truncateForDatabase( "1234567890", 0, 'XXX' ),
 			'truncate prefix, len 0, small ellipsis'
 		);
 
 		$this->assertEquals(
 			"12345XXX",
-			$this->getLang()->truncate( "1234567890", 8, 'XXX' ),
+			$this->getLang()->truncateForDatabase( "1234567890", 8, 'XXX' ),
 			'truncate prefix, small ellipsis'
 		);
 
 		$this->assertEquals(
 			"123456789",
-			$this->getLang()->truncate( "123456789", 5, 'XXXXXXXXXXXXXXX' ),
+			$this->getLang()->truncateForDatabase( "123456789", 5, 'XXXXXXXXXXXXXXX' ),
 			'truncate prefix, large ellipsis'
 		);
 
 		$this->assertEquals(
 			"XXX67890",
-			$this->getLang()->truncate( "1234567890", -8, 'XXX' ),
+			$this->getLang()->truncateForDatabase( "1234567890", -8, 'XXX' ),
 			'truncate suffix, small ellipsis'
 		);
 
 		$this->assertEquals(
 			"123456789",
-			$this->getLang()->truncate( "123456789", -5, 'XXXXXXXXXXXXXXX' ),
+			$this->getLang()->truncateForDatabase( "123456789", -5, 'XXXXXXXXXXXXXXX' ),
 			'truncate suffix, large ellipsis'
 		);
 		$this->assertEquals(
 			"123XXX",
-			$this->getLang()->truncate( "123                ", 9, 'XXX' ),
+			$this->getLang()->truncateForDatabase( "123                ", 9, 'XXX' ),
 			'truncate prefix, with spaces'
 		);
 		$this->assertEquals(
 			"12345XXX",
-			$this->getLang()->truncate( "12345            8", 11, 'XXX' ),
+			$this->getLang()->truncateForDatabase( "12345            8", 11, 'XXX' ),
 			'truncate prefix, with spaces and non-space ending'
 		);
 		$this->assertEquals(
 			"XXX234",
-			$this->getLang()->truncate( "1              234", -8, 'XXX' ),
+			$this->getLang()->truncateForDatabase( "1              234", -8, 'XXX' ),
 			'truncate suffix, with spaces'
 		);
 		$this->assertEquals(
 			"12345XXX",
-			$this->getLang()->truncate( "1234567890", 5, 'XXX', false ),
+			$this->getLang()->truncateForDatabase( "1234567890", 5, 'XXX', false ),
 			'truncate without adjustment'
 		);
 		$this->assertEquals(
 			"泰乐菌...",
-			$this->getLang()->truncate( "泰乐菌素123456789", 11, '...', false ),
+			$this->getLang()->truncateForDatabase( "泰乐菌素123456789", 11, '...', false ),
 			'truncate does not chop Unicode characters in half'
 		);
 		$this->assertEquals(
 			"\n泰乐菌...",
-			$this->getLang()->truncate( "\n泰乐菌素123456789", 12, '...', false ),
+			$this->getLang()->truncateForDatabase( "\n泰乐菌素123456789", 12, '...', false ),
 			'truncate does not chop Unicode characters in half if there is a preceding newline'
 		);
+	}
+
+	/**
+	 * @dataProvider provideTruncateData
+	 * @covers Language::truncateForVisual
+	 * @covers Language::truncateInternal
+	 */
+	public function testTruncateForVisual(
+		$expected, $string, $length, $ellipsis = '...', $adjustLength = true
+	) {
+		$this->assertEquals(
+			$expected,
+			$this->getLang()->truncateForVisual( $string, $length, $ellipsis, $adjustLength )
+		);
+	}
+
+	/**
+	 * @return array Format is ($expected, $string, $length, $ellipsis, $adjustLength)
+	 */
+	public static function provideTruncateData() {
+		return [
+			[ "XXX", "тестирам да ли ради", 0, "XXX" ],
+			[ "testnXXX", "testni scenarij", 8, "XXX" ],
+			[ "حالة اختبار", "حالة اختبار", 5, "XXXXXXXXXXXXXXX" ],
+			[ "XXXедент", "прецедент", -8, "XXX" ],
+			[ "XXപിൾ", "ആപ്പിൾ", -5, "XX" ],
+			[ "神秘XXX", "神秘                ", 9, "XXX" ],
+			[ "ΔημιουργXXX", "Δημιουργία           Σύμπαντος", 11, "XXX" ],
+			[ "XXXの家です", "地球は私たちの唯               の家です", -8, "XXX" ],
+			[ "زندگیXXX", "زندگی زیباست", 6, "XXX", false ],
+			[ "ცხოვრება...", "ცხოვრება არის საოცარი", 8, "...", false ],
+			[ "\nທ່ານ...", "\nທ່ານບໍ່ຮູ້ຫນັງສື", 5, "...", false ],
+		];
 	}
 
 	/**
@@ -460,85 +526,6 @@ class LanguageTest extends LanguageClassesTestCase {
 			Language::isWellFormedLanguageTag( 'pa_guru', true ),
 			'pa_guru is a well-formed language tag in lenient mode'
 		);
-	}
-
-	/**
-	 * Test Language::isValidBuiltInCode()
-	 * @dataProvider provideLanguageCodes
-	 * @covers Language::isValidBuiltInCode
-	 */
-	public function testBuiltInCodeValidation( $code, $expected, $message = '' ) {
-		$this->assertEquals( $expected,
-			(bool)Language::isValidBuiltInCode( $code ),
-			"validating code $code $message"
-		);
-	}
-
-	public static function provideLanguageCodes() {
-		return [
-			[ 'fr', true, 'Two letters, minor case' ],
-			[ 'EN', false, 'Two letters, upper case' ],
-			[ 'tyv', true, 'Three letters' ],
-			[ 'tokipona', true, 'long language code' ],
-			[ 'be-tarask', true, 'With dash' ],
-			[ 'be-x-old', true, 'With extension (two dashes)' ],
-			[ 'be_tarask', false, 'Reject underscores' ],
-		];
-	}
-
-	/**
-	 * Test Language::isKnownLanguageTag()
-	 * @dataProvider provideKnownLanguageTags
-	 * @covers Language::isKnownLanguageTag
-	 */
-	public function testKnownLanguageTag( $code, $message = '' ) {
-		$this->assertTrue(
-			(bool)Language::isKnownLanguageTag( $code ),
-			"validating code $code - $message"
-		);
-	}
-
-	public static function provideKnownLanguageTags() {
-		return [
-			[ 'fr', 'simple code' ],
-			[ 'bat-smg', 'an MW legacy tag' ],
-			[ 'sgs', 'an internal standard MW name, for which a legacy tag is used externally' ],
-		];
-	}
-
-	/**
-	 * @covers Language::isKnownLanguageTag
-	 */
-	public function testKnownCldrLanguageTag() {
-		if ( !class_exists( 'LanguageNames' ) ) {
-			$this->markTestSkipped( 'The LanguageNames class is not available. '
-				. 'The CLDR extension is probably not installed.' );
-		}
-
-		$this->assertTrue(
-			(bool)Language::isKnownLanguageTag( 'pal' ),
-			'validating code "pal" an ancient language, which probably will '
-				. 'not appear in Names.php, but appears in CLDR in English'
-		);
-	}
-
-	/**
-	 * Negative tests for Language::isKnownLanguageTag()
-	 * @dataProvider provideUnKnownLanguageTags
-	 * @covers Language::isKnownLanguageTag
-	 */
-	public function testUnknownLanguageTag( $code, $message = '' ) {
-		$this->assertFalse(
-			(bool)Language::isKnownLanguageTag( $code ),
-			"checking that code $code is invalid - $message"
-		);
-	}
-
-	public static function provideUnknownLanguageTags() {
-		return [
-			[ 'mw', 'non-existent two-letter code' ],
-			[ 'foo"<bar', 'very invalid language code' ],
-		];
 	}
 
 	/**
@@ -997,6 +984,13 @@ class LanguageTest extends LanguageClassesTestCase {
 				'Thai year'
 			],
 			[
+				'xkY',
+				'19410101090705',
+				'2484',
+				'2484',
+				'Thai year'
+			],
+			[
 				'xoY',
 				'20120102090705',
 				'101',
@@ -1009,6 +1003,27 @@ class LanguageTest extends LanguageClassesTestCase {
 				'平成24',
 				'平成24',
 				'nengo'
+			],
+			[
+				'xtY',
+				'20190430235959',
+				'平成31',
+				'平成31',
+				'nengo - last day of heisei'
+			],
+			[
+				'xtY',
+				'20190501000000',
+				'令和元',
+				'令和元',
+				'nengo - first day of reiwa'
+			],
+			[
+				'xtY',
+				'20200501000000',
+				'令和2',
+				'令和2',
+				'nengo - second year of reiwa'
 			],
 			[
 				'xrxkYY',
@@ -1077,27 +1092,27 @@ class LanguageTest extends LanguageClassesTestCase {
 				"1 gigabyte"
 			],
 			[
-				pow( 1024, 4 ),
+				1024 ** 4,
 				"1 TB",
 				"1 terabyte"
 			],
 			[
-				pow( 1024, 5 ),
+				1024 ** 5,
 				"1 PB",
 				"1 petabyte"
 			],
 			[
-				pow( 1024, 6 ),
+				1024 ** 6,
 				"1 EB",
 				"1,024 exabyte"
 			],
 			[
-				pow( 1024, 7 ),
+				1024 ** 7,
 				"1 ZB",
 				"1 zetabyte"
 			],
 			[
-				pow( 1024, 8 ),
+				1024 ** 8,
 				"1 YB",
 				"1 yottabyte"
 			],
@@ -1140,37 +1155,37 @@ class LanguageTest extends LanguageClassesTestCase {
 				"1 megabit per second"
 			],
 			[
-				pow( 10, 9 ),
+				10 ** 9,
 				"1 Gbps",
 				"1 gigabit per second"
 			],
 			[
-				pow( 10, 12 ),
+				10 ** 12,
 				"1 Tbps",
 				"1 terabit per second"
 			],
 			[
-				pow( 10, 15 ),
+				10 ** 15,
 				"1 Pbps",
 				"1 petabit per second"
 			],
 			[
-				pow( 10, 18 ),
+				10 ** 18,
 				"1 Ebps",
 				"1 exabit per second"
 			],
 			[
-				pow( 10, 21 ),
+				10 ** 21,
 				"1 Zbps",
 				"1 zetabit per second"
 			],
 			[
-				pow( 10, 24 ),
+				10 ** 24,
 				"1 Ybps",
 				"1 yottabit per second"
 			],
 			[
-				pow( 10, 27 ),
+				10 ** 27,
 				"1,000 Ybps",
 				"1,000 yottabits per second"
 			],
@@ -1327,7 +1342,7 @@ class LanguageTest extends LanguageClassesTestCase {
 	}
 
 	public static function provideCheckTitleEncodingData() {
-		// @codingStandardsIgnoreStart Ignore Generic.Files.LineLength.TooLong
+		// phpcs:disable Generic.Files.LineLength
 		return [
 			[ "" ],
 			[ "United States of America" ], // 7bit ASCII
@@ -1378,7 +1393,7 @@ class LanguageTest extends LanguageClassesTestCase {
 				)
 			]
 		];
-		// @codingStandardsIgnoreEnd
+		// phpcs:enable
 	}
 
 	/**
@@ -1560,9 +1575,9 @@ class LanguageTest extends LanguageClassesTestCase {
 	 * @covers Language::embedBidi()
 	 */
 	public function testEmbedBidi() {
-		$lre = "\xE2\x80\xAA"; // U+202A LEFT-TO-RIGHT EMBEDDING
-		$rle = "\xE2\x80\xAB"; // U+202B RIGHT-TO-LEFT EMBEDDING
-		$pdf = "\xE2\x80\xAC"; // U+202C POP DIRECTIONAL FORMATTING
+		$lre = "\u{202A}"; // U+202A LEFT-TO-RIGHT EMBEDDING
+		$rle = "\u{202B}"; // U+202B RIGHT-TO-LEFT EMBEDDING
+		$pdf = "\u{202C}"; // U+202C POP DIRECTIONAL FORMATTING
 		$lang = $this->getLang();
 		$this->assertEquals(
 			'123',
@@ -1631,6 +1646,34 @@ class LanguageTest extends LanguageClassesTestCase {
 	}
 
 	/**
+	 * @dataProvider provideFormatNum
+	 * @covers Language::formatNum
+	 */
+	public function testFormatNum(
+		$translateNumerals, $langCode, $number, $nocommafy, $expected
+	) {
+		$this->setMwGlobals( [ 'wgTranslateNumerals' => $translateNumerals ] );
+		$lang = Language::factory( $langCode );
+		$formattedNum = $lang->formatNum( $number, $nocommafy );
+		$this->assertType( 'string', $formattedNum );
+		$this->assertEquals( $expected, $formattedNum );
+	}
+
+	public function provideFormatNum() {
+		return [
+			[ true, 'en', 100, false, '100' ],
+			[ true, 'en', 101, true, '101' ],
+			[ false, 'en', 103, false, '103' ],
+			[ false, 'en', 104, true, '104' ],
+			[ true, 'en', '105', false, '105' ],
+			[ true, 'en', '106', true, '106' ],
+			[ false, 'en', '107', false, '107' ],
+			[ false, 'en', '108', true, '108' ],
+		];
+	}
+
+	/**
+	 * @covers Language::parseFormattedNumber
 	 * @dataProvider parseFormattedNumberProvider
 	 */
 	public function testParseFormattedNumber( $langCode, $number ) {
@@ -1696,7 +1739,7 @@ class LanguageTest extends LanguageClassesTestCase {
 		$s = $lang->getMessageFromDB( 'word-separator' );
 		$c = $lang->getMessageFromDB( 'comma-separator' );
 
-		$this->assertEquals( '', $lang->listToText( [] ) );
+		$this->assertSame( '', $lang->listToText( [] ) );
 		$this->assertEquals( 'a', $lang->listToText( [ 'a' ] ) );
 		$this->assertEquals( "a{$and}{$s}b", $lang->listToText( [ 'a', 'b' ] ) );
 		$this->assertEquals( "a{$c}b{$and}{$s}c", $lang->listToText( [ 'a', 'b', 'c' ] ) );
@@ -1704,20 +1747,28 @@ class LanguageTest extends LanguageClassesTestCase {
 	}
 
 	/**
-	 * @dataProvider provideIsSupportedLanguage
-	 * @covers Language::isSupportedLanguage
+	 * @covers Language::clearCaches
 	 */
-	public function testIsSupportedLanguage( $code, $expected, $comment ) {
-		$this->assertEquals( $expected, Language::isSupportedLanguage( $code ), $comment );
-	}
+	public function testClearCaches() {
+		$languageClass = TestingAccessWrapper::newFromClass( Language::class );
 
-	public static function provideIsSupportedLanguage() {
-		return [
-			[ 'en', true, 'is supported language' ],
-			[ 'fi', true, 'is supported language' ],
-			[ 'bunny', false, 'is not supported language' ],
-			[ 'FI', false, 'is not supported language, input should be in lower case' ],
-		];
+		// Populate $mLangObjCache
+		$lang = Language::factory( 'en' );
+		$this->assertNotCount( 0, Language::$mLangObjCache );
+
+		// Populate $fallbackLanguageCache
+		Language::getFallbacksIncludingSiteLanguage( 'en' );
+		$this->assertNotCount( 0, $languageClass->fallbackLanguageCache );
+
+		// Populate $grammarTransformations
+		$lang->getGrammarTransformations();
+		$this->assertNotNull( $languageClass->grammarTransformations );
+
+		Language::clearCaches();
+
+		$this->assertCount( 0, Language::$mLangObjCache );
+		$this->assertCount( 0, $languageClass->fallbackLanguageCache );
+		$this->assertNull( $languageClass->grammarTransformations );
 	}
 
 	/**
@@ -1739,9 +1790,8 @@ class LanguageTest extends LanguageClassesTestCase {
 			[ 'zh', 'zh', 'zh is defined as the parent language of zh, '
 				. 'because zh converter can convert zh-cn to zh' ],
 			[ 'zh-invalid', null, 'do not be fooled by arbitrarily composed language codes' ],
-			[ 'en-gb', null, 'en does not have converter' ],
-			[ 'en', null, 'en does not have converter. Although FakeConverter '
-					. 'handles en -> en conversion but it is useless' ],
+			[ 'de-formal', null, 'de does not have converter' ],
+			[ 'de', null, 'de does not have converter' ],
 		];
 	}
 
@@ -1770,16 +1820,136 @@ class LanguageTest extends LanguageClassesTestCase {
 		];
 	}
 
+	/**
+	 * @covers Language::hasVariant
+	 */
+	public function testHasVariant() {
+		// See LanguageSrTest::testHasVariant() for additional tests
+		$en = Language::factory( 'en' );
+		$this->assertTrue( $en->hasVariant( 'en' ), 'base is always a variant' );
+		$this->assertFalse( $en->hasVariant( 'en-bogus' ), 'bogus en variant' );
+
+		$bogus = Language::factory( 'bogus' );
+		$this->assertTrue( $bogus->hasVariant( 'bogus' ), 'base is always a variant' );
+	}
+
+	/**
+	 * @covers Language::equals
+	 */
 	public function testEquals() {
-		$en1 = new Language();
-		$en1->setCode( 'en' );
-
+		$en1 = Language::factory( 'en' );
 		$en2 = Language::factory( 'en' );
-		$en2->setCode( 'en' );
-
-		$this->assertTrue( $en1->equals( $en2 ), 'en equals en' );
+		$en3 = new Language();
+		$this->assertTrue( $en1->equals( $en2 ), 'en1 equals en2' );
+		$this->assertTrue( $en2->equals( $en3 ), 'en2 equals en3' );
+		$this->assertTrue( $en3->equals( $en1 ), 'en3 equals en1' );
 
 		$fr = Language::factory( 'fr' );
 		$this->assertFalse( $en1->equals( $fr ), 'en not equals fr' );
+
+		$ar1 = Language::factory( 'ar' );
+		$ar2 = new LanguageAr();
+		$this->assertTrue( $ar1->equals( $ar2 ), 'ar equals ar' );
+	}
+
+	/**
+	 * @dataProvider provideUcfirst
+	 * @covers Language::ucfirst
+	 */
+	public function testUcfirst( $orig, $expected, $desc, $overrides = false ) {
+		$lang = new Language();
+		if ( is_array( $overrides ) ) {
+			$this->setMwGlobals( [ 'wgOverrideUcfirstCharacters' => $overrides ] );
+		}
+		$this->assertSame( $lang->ucfirst( $orig ), $expected, $desc );
+	}
+
+	public static function provideUcfirst() {
+		return [
+			[ 'alice', 'Alice', 'simple ASCII string', false ],
+			[ 'århus',  'Århus', 'unicode string', false ],
+			//overrides do not affect ASCII characters
+			[ 'foo', 'Foo', 'ASCII is not overriden', [ 'f' => 'b' ] ],
+			// but they do affect non-ascii ones
+			[ 'èl', 'Ll' , 'Non-ASCII is overridden', [ 'è' => 'L' ] ],
+		];
+	}
+
+	// The following methods are for LanguageNameUtilsTestTrait
+
+	private function isSupportedLanguage( $code ) {
+		return Language::isSupportedLanguage( $code );
+	}
+
+	private function isValidCode( $code ) {
+		return Language::isValidCode( $code );
+	}
+
+	private function isValidBuiltInCode( $code ) {
+		return Language::isValidBuiltInCode( $code );
+	}
+
+	private function isKnownLanguageTag( $code ) {
+		return Language::isKnownLanguageTag( $code );
+	}
+
+	/**
+	 * Call getLanguageName() and getLanguageNames() using the Language static methods.
+	 *
+	 * @param array $options To set globals for testing Language
+	 * @param string $expected
+	 * @param string $code
+	 * @param mixed ...$otherArgs Optionally, pass $inLanguage and/or $include.
+	 */
+	private function assertGetLanguageNames( array $options, $expected, $code, ...$otherArgs ) {
+		if ( $options ) {
+			foreach ( $options as $key => $val ) {
+				$this->setMwGlobals( "wg$key", $val );
+			}
+			$this->resetServices();
+		}
+		$this->assertSame( $expected,
+			Language::fetchLanguageNames( ...$otherArgs )[strtolower( $code )] ?? '' );
+		$this->assertSame( $expected, Language::fetchLanguageName( $code, ...$otherArgs ) );
+	}
+
+	private function getLanguageNames( ...$args ) {
+		return Language::fetchLanguageNames( ...$args );
+	}
+
+	private function getLanguageName( ...$args ) {
+		return Language::fetchLanguageName( ...$args );
+	}
+
+	private static function getFileName( ...$args ) {
+		return Language::getFileName( ...$args );
+	}
+
+	private static function getMessagesFileName( $code ) {
+		return Language::getMessagesFileName( $code );
+	}
+
+	private static function getJsonMessagesFileName( $code ) {
+		return Language::getJsonMessagesFileName( $code );
+	}
+
+	/**
+	 * @todo This really belongs in the cldr extension's tests.
+	 *
+	 * @covers MediaWiki\Languages\LanguageNameUtils::isKnownLanguageTag
+	 * @covers Language::isKnownLanguageTag
+	 */
+	public function testIsKnownLanguageTag_cldr() {
+		if ( !class_exists( 'LanguageNames' ) ) {
+			$this->markTestSkipped( 'The LanguageNames class is not available. '
+				. 'The CLDR extension is probably not installed.' );
+		}
+
+		// We need to restore the extension's hook that we removed.
+		$this->setMwGlobals( 'wgHooks', $this->origHooks );
+
+		// "pal" is an ancient language, which probably will not appear in Names.php, but appears in
+		// CLDR in English
+		$this->assertTrue( Language::isKnownLanguageTag( 'pal' ) );
 	}
 }

@@ -22,12 +22,14 @@
  * @author Rob Church <robchur@gmail.com>
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Special page lists pages without language links
  *
  * @ingroup SpecialPage
  */
-class WithoutInterwikiPage extends PageQueryPage {
+class SpecialWithoutInterwiki extends PageQueryPage {
 	private $prefix = '';
 
 	function __construct( $name = 'Withoutinterwiki' ) {
@@ -87,11 +89,11 @@ class WithoutInterwikiPage extends PageQueryPage {
 			'fields' => [
 				'namespace' => 'page_namespace',
 				'title' => 'page_title',
-				'value' => 'page_title'
 			],
 			'conds' => [
 				'll_title IS NULL',
-				'page_namespace' => MWNamespace::getContentNamespaces(),
+				'page_namespace' => MediaWikiServices::getInstance()->getNamespaceInfo()->
+					getContentNamespaces(),
 				'page_is_redirect' => 0
 			],
 			'join_conds' => [ 'langlinks' => [ 'LEFT JOIN', 'll_from = page_id' ] ]

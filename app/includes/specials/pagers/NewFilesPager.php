@@ -22,9 +22,10 @@
 /**
  * @ingroup Pager
  */
+use MediaWiki\Linker\LinkRenderer;
 use MediaWiki\MediaWikiServices;
 
-class NewFilesPager extends ReverseChronologicalPager {
+class NewFilesPager extends RangeChronologicalPager {
 
 	/**
 	 * @var ImageGalleryBase
@@ -39,34 +40,46 @@ class NewFilesPager extends ReverseChronologicalPager {
 	/**
 	 * @param IContextSource $context
 	 * @param FormOptions $opts
+	 * @param LinkRenderer $linkRenderer
 	 */
-	function __construct( IContextSource $context, FormOptions $opts ) {
-		$this->opts = $opts;
+	public function __construct( IContextSource $context, FormOptions $opts,
+		LinkRenderer $linkRenderer
+	) {
+		parent::__construct( $context, $linkRenderer );
 
+		$this->opts = $opts;
 		$this->setLimit( $opts->getValue( 'limit' ) );
 
-		parent::__construct( $context );
+		$startTimestamp = '';
+		$endTimestamp = '';
+		if ( $opts->getValue( 'start' ) ) {
+			$startTimestamp = $opts->getValue( 'start' ) . ' 00:00:00';
+		}
+		if ( $opts->getValue( 'end' ) ) {
+			$endTimestamp = $opts->getValue( 'end' ) . ' 23:59:59';
+		}
+		$this->getDateRangeCond( $startTimestamp, $endTimestamp );
 	}
 
 	function getQueryInfo() {
 		$opts = $this->opts;
-		$conds = $jconds = [];
-		$tables = [ 'image' ];
-		$fields = [ 'img_name', 'img_user', 'img_timestamp' ];
+		$conds = [];
+		$actorQuery = ActorMigration::newMigration()->getJoin( 'img_user' );
+		$tables = [ 'image' ] + $actorQuery['tables'];
+		$fields = [ 'img_name', 'img_timestamp' ] + $actorQuery['fields'];
 		$options = [];
+		$jconds = $actorQuery['joins'];
 
 		$user = $opts->getValue( 'user' );
 		if ( $user !== '' ) {
-			$userId = User::idFromName( $user );
-			if ( $userId ) {
-				$conds['img_user'] = $userId;
-			} else {
-				$conds['img_user_text'] = $user;
-			}
+			$conds[] = ActorMigration::newMigration()
+				->getWhere( wfGetDB( DB_REPLICA ), 'img_user', User::newFromName( $user, false ) )['conds'];
 		}
 
 		if ( !$opts->getValue( 'showbots' ) ) {
-			$groupsWithBotPermission = User::getGroupsWithPermission( 'bot' );
+			$groupsWithBotPermission = MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->getGroupsWithPermission( 'bot' );
 
 			if ( count( $groupsWithBotPermission ) ) {
 				$dbr = wfGetDB( DB_REPLICA );
@@ -76,7 +89,7 @@ class NewFilesPager extends ReverseChronologicalPager {
 					'LEFT JOIN',
 					[
 						'ug_group' => $groupsWithBotPermission,
-						'ug_user = img_user',
+						'ug_user = ' . $actorQuery['fields']['img_user'],
 						'ug_expiry IS NULL OR ug_expiry >= ' . $dbr->addQuotes( $dbr->timestamp() )
 					]
 				];
@@ -87,13 +100,14 @@ class NewFilesPager extends ReverseChronologicalPager {
 			$tables[] = 'recentchanges';
 			$conds['rc_type'] = RC_LOG;
 			$conds['rc_log_type'] = 'upload';
-			$conds['rc_patrolled'] = 0;
+			$conds['rc_patrolled'] = RecentChange::PRC_UNPATROLLED;
 			$conds['rc_namespace'] = NS_FILE;
+
 			$jconds['recentchanges'] = [
-				'INNER JOIN',
+				'JOIN',
 				[
 					'rc_title = img_name',
-					'rc_user = img_user',
+					'rc_actor = ' . $actorQuery['fields']['img_actor'],
 					'rc_timestamp = img_timestamp'
 				]
 			];
@@ -101,6 +115,10 @@ class NewFilesPager extends ReverseChronologicalPager {
 			// It sometimes decides to query `recentchanges` first and filesort the result set later
 			// to get the right ordering. T124205 / https://mariadb.atlassian.net/browse/MDEV-8880
 			$options[] = 'STRAIGHT_JOIN';
+		}
+
+		if ( $opts->getValue( 'mediatype' ) ) {
+			$conds['img_media_type'] = $opts->getValue( 'mediatype' );
 		}
 
 		$likeVal = $opts->getValue( 'like' );
@@ -132,7 +150,7 @@ class NewFilesPager extends ReverseChronologicalPager {
 		return 'img_timestamp';
 	}
 
-	function getStartBody() {
+	protected function getStartBody() {
 		if ( !$this->gallery ) {
 			// Note that null for mode is taken to mean use default.
 			$mode = $this->getRequest()->getVal( 'gallerymode', null );
@@ -147,7 +165,7 @@ class NewFilesPager extends ReverseChronologicalPager {
 		return '';
 	}
 
-	function getEndBody() {
+	protected function getEndBody() {
 		return $this->gallery->toHTML();
 	}
 
@@ -156,7 +174,7 @@ class NewFilesPager extends ReverseChronologicalPager {
 		$user = User::newFromId( $row->img_user );
 
 		$title = Title::makeTitle( NS_FILE, $name );
-		$ul = MediaWikiServices::getInstance()->getLinkRenderer()->makeLink(
+		$ul = $this->getLinkRenderer()->makeLink(
 			$user->getUserPage(),
 			$user->getName()
 		);
@@ -168,5 +186,6 @@ class NewFilesPager extends ReverseChronologicalPager {
 			. htmlspecialchars( $time )
 			. "</i><br />\n"
 		);
+		return '';
 	}
 }

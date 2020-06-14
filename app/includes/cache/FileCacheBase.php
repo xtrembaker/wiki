@@ -179,9 +179,9 @@ abstract class FileCacheBase {
 	 * @return void
 	 */
 	public function clearCache() {
-		MediaWiki\suppressWarnings();
+		Wikimedia\suppressWarnings();
 		unlink( $this->cachePath() );
-		MediaWiki\restoreWarnings();
+		Wikimedia\restoreWarnings();
 		$this->mCached = false;
 	}
 
@@ -230,31 +230,26 @@ abstract class FileCacheBase {
 	 */
 	public function incrMissesRecent( WebRequest $request ) {
 		if ( mt_rand( 0, self::MISS_FACTOR - 1 ) == 0 ) {
-			$cache = ObjectCache::getLocalClusterInstance();
 			# Get a large IP range that should include the user  even if that
 			# person's IP address changes
 			$ip = $request->getIP();
 			if ( !IP::isValid( $ip ) ) {
 				return;
 			}
+
 			$ip = IP::isIPv6( $ip )
 				? IP::sanitizeRange( "$ip/32" )
 				: IP::sanitizeRange( "$ip/16" );
 
 			# Bail out if a request already came from this range...
-			$key = wfMemcKey( static::class, 'attempt', $this->mType, $this->mKey, $ip );
-			if ( $cache->get( $key ) ) {
+			$cache = ObjectCache::getLocalClusterInstance();
+			$key = $cache->makeKey( static::class, 'attempt', $this->mType, $this->mKey, $ip );
+			if ( !$cache->add( $key, 1, self::MISS_TTL_SEC ) ) {
 				return; // possibly the same user
 			}
-			$cache->set( $key, 1, self::MISS_TTL_SEC );
 
 			# Increment the number of cache misses...
-			$key = $this->cacheMissKey();
-			if ( $cache->get( $key ) === false ) {
-				$cache->set( $key, 1, self::MISS_TTL_SEC );
-			} else {
-				$cache->incr( $key );
-			}
+			$cache->incrWithInit( $this->cacheMissKey( $cache ), self::MISS_TTL_SEC );
 		}
 	}
 
@@ -265,13 +260,14 @@ abstract class FileCacheBase {
 	public function getMissesRecent() {
 		$cache = ObjectCache::getLocalClusterInstance();
 
-		return self::MISS_FACTOR * $cache->get( $this->cacheMissKey() );
+		return self::MISS_FACTOR * $cache->get( $this->cacheMissKey( $cache ) );
 	}
 
 	/**
+	 * @param BagOStuff $cache Instance that the key will be used with
 	 * @return string
 	 */
-	protected function cacheMissKey() {
-		return wfMemcKey( static::class, 'misses', $this->mType, $this->mKey );
+	protected function cacheMissKey( BagOStuff $cache ) {
+		return $cache->makeKey( static::class, 'misses', $this->mType, $this->mKey );
 	}
 }

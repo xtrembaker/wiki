@@ -2,7 +2,21 @@
 
 use MediaWiki\Session\SessionManager;
 
-class FauxRequestTest extends PHPUnit_Framework_TestCase {
+class FauxRequestTest extends PHPUnit\Framework\TestCase {
+
+	use MediaWikiCoversValidator;
+	use PHPUnit4And6Compat;
+
+	public function setUp() {
+		parent::setUp();
+		$this->orgWgServer = $GLOBALS['wgServer'];
+	}
+
+	public function tearDown() {
+		$GLOBALS['wgServer'] = $this->orgWgServer;
+		parent::tearDown();
+	}
+
 	/**
 	 * @covers FauxRequest::__construct
 	 */
@@ -36,16 +50,22 @@ class FauxRequestTest extends PHPUnit_Framework_TestCase {
 	public function testGetText() {
 		$req = new FauxRequest( [ 'x' => 'Value' ] );
 		$this->assertEquals( 'Value', $req->getText( 'x' ) );
-		$this->assertEquals( '', $req->getText( 'z' ) );
+		$this->assertSame( '', $req->getText( 'z' ) );
 	}
 
-	// Integration test for parent method.
+	/**
+	 * Integration test for parent method
+	 * @covers FauxRequest::getVal
+	 */
 	public function testGetVal() {
 		$req = new FauxRequest( [ 'crlf' => "A\r\nb" ] );
 		$this->assertSame( "A\r\nb", $req->getVal( 'crlf' ), 'CRLF' );
 	}
 
-	// Integration test for parent method.
+	/**
+	 * Integration test for parent method
+	 * @covers FauxRequest::getRawVal
+	 */
 	public function testGetRawVal() {
 		$req = new FauxRequest( [
 			'x' => 'Value',
@@ -138,7 +158,7 @@ class FauxRequestTest extends PHPUnit_Framework_TestCase {
 	/**
 	 * @covers FauxRequest::getRequestURL
 	 */
-	public function testGetRequestURL() {
+	public function testGetRequestURL_disallowed() {
 		$req = new FauxRequest();
 		$this->setExpectedException( MWException::class );
 		$req->getRequestURL();
@@ -152,6 +172,45 @@ class FauxRequestTest extends PHPUnit_Framework_TestCase {
 		$req = new FauxRequest();
 		$req->setRequestURL( 'https://example.org' );
 		$this->assertEquals( 'https://example.org', $req->getRequestURL() );
+	}
+
+	/**
+	 * @covers FauxRequest::getFullRequestURL
+	 */
+	public function testGetFullRequestURL_disallowed() {
+		$GLOBALS['wgServer'] = '//wiki.test';
+		$req = new FauxRequest();
+
+		$this->setExpectedException( MWException::class );
+		$req->getFullRequestURL();
+	}
+
+	/**
+	 * @covers FauxRequest::getFullRequestURL
+	 */
+	public function testGetFullRequestURL_http() {
+		$GLOBALS['wgServer'] = '//wiki.test';
+		$req = new FauxRequest();
+		$req->setRequestURL( '/path' );
+
+		$this->assertSame(
+			'http://wiki.test/path',
+			$req->getFullRequestURL()
+		);
+	}
+
+	/**
+	 * @covers FauxRequest::getFullRequestURL
+	 */
+	public function testGetFullRequestURL_https() {
+		$GLOBALS['wgServer'] = '//wiki.test';
+		$req = new FauxRequest( [], false, null, 'https' );
+		$req->setRequestURL( '/path' );
+
+		$this->assertSame(
+			'https://wiki.test/path',
+			$req->getFullRequestURL()
+		);
 	}
 
 	/**
@@ -228,8 +287,8 @@ class FauxRequestTest extends PHPUnit_Framework_TestCase {
 	 */
 	public function testDummies() {
 		$req = new FauxRequest();
-		$this->assertEquals( '', $req->getRawQueryString() );
-		$this->assertEquals( '', $req->getRawPostString() );
-		$this->assertEquals( '', $req->getRawInput() );
+		$this->assertSame( '', $req->getRawQueryString() );
+		$this->assertSame( '', $req->getRawPostString() );
+		$this->assertSame( '', $req->getRawInput() );
 	}
 }

@@ -47,14 +47,14 @@ class ApiCSPReport extends ApiBase {
 
 		$this->verifyPostBodyOk();
 		$report = $this->getReport();
-		$flags = $this->getFlags( $report );
+		$flags = $this->getFlags( $report, $userAgent );
 
 		$warningText = $this->generateLogLine( $flags, $report );
 		$this->logReport( $flags, $warningText, [
 			// XXX Is it ok to put untrusted data into log??
 			'csp-report' => $report,
 			'method' => __METHOD__,
-			'user' => $this->getUser()->getName(),
+			'user_id' => $this->getUser()->getId() ?: 'logged-out',
 			'user-agent' => $userAgent,
 			'source' => $this->getParameter( 'source' ),
 		] );
@@ -63,9 +63,9 @@ class ApiCSPReport extends ApiBase {
 
 	/**
 	 * Log CSP report, with a different severity depending on $flags
-	 * @param $flags Array Flags for this report
-	 * @param $logLine String text of log entry
-	 * @param $context Array logging context
+	 * @param array $flags Flags for this report
+	 * @param string $logLine text of log entry
+	 * @param array $context logging context
 	 */
 	private function logReport( $flags, $logLine, $context ) {
 		if ( in_array( 'false-positive', $flags ) ) {
@@ -80,10 +80,11 @@ class ApiCSPReport extends ApiBase {
 	/**
 	 * Get extra notes about the report.
 	 *
-	 * @param $report Array The CSP report
-	 * @return Array
+	 * @param array $report The CSP report
+	 * @param string $userAgent
+	 * @return array
 	 */
-	private function getFlags( $report ) {
+	private function getFlags( $report, $userAgent ) {
 		$reportOnly = $this->getParameter( 'reportonly' );
 		$source = $this->getParameter( 'source' );
 		$falsePositives = $this->getConfig()->get( 'CSPFalsePositiveUrls' );
@@ -97,15 +98,58 @@ class ApiCSPReport extends ApiBase {
 		}
 
 		if (
-			( isset( $report['blocked-uri'] ) &&
-			isset( $falsePositives[$report['blocked-uri']] ) )
-			|| ( isset( $report['source-file'] ) &&
-			isset( $falsePositives[$report['source-file']] ) )
+			(
+				ContentSecurityPolicy::falsePositiveBrowser( $userAgent ) &&
+				$report['blocked-uri'] === "self"
+			) ||
+			(
+				isset( $report['blocked-uri'] ) &&
+				$this->matchUrlPattern( $report['blocked-uri'], $falsePositives )
+			) ||
+			(
+				isset( $report['source-file'] ) &&
+				$this->matchUrlPattern( $report['source-file'], $falsePositives )
+			)
 		) {
-			// Report caused by Ad-Ware
+			// False positive due to:
+			// https://bugzilla.mozilla.org/show_bug.cgi?id=1026520
+
 			$flags[] = 'false-positive';
 		}
 		return $flags;
+	}
+
+	/**
+	 * @param string $url
+	 * @param string[] $patterns
+	 * @return bool
+	 */
+	private function matchUrlPattern( $url, array $patterns ) {
+		if ( isset( $patterns[ $url ] ) ) {
+			return true;
+		}
+
+		$bits = wfParseUrl( $url );
+		unset( $bits['user'], $bits['pass'], $bits['query'], $bits['fragment'] );
+		$bits['path'] = '';
+		$serverUrl = wfAssembleUrl( $bits );
+		if ( isset( $patterns[$serverUrl] ) ) {
+			// The origin of the url matches a pattern,
+			// e.g. "https://example.org" matches "https://example.org/foo/b?a#r"
+			return true;
+		}
+		foreach ( $patterns as $pattern => $val ) {
+			// We only use this pattern if it ends in a slash, this prevents
+			// "/foos" from matching "/foo", and "https://good.combo.bad" matching
+			// "https://good.com".
+			if ( substr( $pattern, -1 ) === '/' && strpos( $url, $pattern ) === 0 ) {
+				// The pattern starts with the same as the url
+				// e.g. "https://example.org/foo/" matches "https://example.org/foo/b?a#r"
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -115,7 +159,7 @@ class ApiCSPReport extends ApiBase {
 		$req = $this->getRequest();
 		$contentType = $req->getHeader( 'content-type' );
 		if ( $contentType !== 'application/json'
-			&& $contentType !=='application/csp-report'
+			&& $contentType !== 'application/csp-report'
 		) {
 			$this->error( 'wrongformat', __METHOD__ );
 		}
@@ -127,7 +171,7 @@ class ApiCSPReport extends ApiBase {
 	/**
 	 * Get the report from post body and turn into associative array.
 	 *
-	 * @return Array
+	 * @return array
 	 */
 	private function getReport() {
 		$postBody = $this->getRequest()->getRawInput();
@@ -155,30 +199,47 @@ class ApiCSPReport extends ApiBase {
 	/**
 	 * Get text of log line.
 	 *
-	 * @param $flags Array of additional markers for this report
-	 * @param $report Array the csp report
-	 * @return String Text to put in log
+	 * @param array $flags of additional markers for this report
+	 * @param array $report the csp report
+	 * @return string Text to put in log
 	 */
 	private function generateLogLine( $flags, $report ) {
 		$flagText = '';
 		if ( $flags ) {
-			$flagText = '[' . implode( $flags, ', ' ) . ']';
+			$flagText = '[' . implode( ', ', $flags ) . ']';
 		}
 
-		$blockedFile = isset( $report['blocked-uri'] ) ? $report['blocked-uri'] : 'n/a';
-		$page = isset( $report['document-uri'] ) ? $report['document-uri'] : 'n/a';
-		$line = isset( $report['line-number'] ) ? ':' . $report['line-number'] : '';
+		$blockedOrigin = isset( $report['blocked-uri'] )
+			? $this->originFromUrl( $report['blocked-uri'] )
+			: 'n/a';
+		$page = $report['document-uri'] ?? 'n/a';
+		$line = isset( $report['line-number'] )
+			? ':' . $report['line-number']
+			: '';
 		$warningText = $flagText .
-			' Received CSP report: <' . $blockedFile .
-			'> blocked from being loaded on <' . $page . '>' . $line;
+			' Received CSP report: <' . $blockedOrigin . '>' .
+			' blocked from being loaded on <' . $page . '>' . $line;
 		return $warningText;
+	}
+
+	/**
+	 * @param string $url
+	 * @return string
+	 */
+	private function originFromUrl( $url ) {
+		$bits = wfParseUrl( $url );
+		unset( $bits['user'], $bits['pass'], $bits['query'], $bits['fragment'] );
+		$bits['path'] = '';
+		$serverUrl = wfAssembleUrl( $bits );
+		// e.g. "https://example.org" from "https://example.org/foo/b?a#r"
+		return $serverUrl;
 	}
 
 	/**
 	 * Stop processing the request, and output/log an error
 	 *
-	 * @param $code String error code
-	 * @param $method String method that made error
+	 * @param string $code error code
+	 * @param string $method method that made error
 	 * @throws ApiUsageException Always
 	 */
 	private function error( $code, $method ) {
@@ -186,9 +247,9 @@ class ApiCSPReport extends ApiBase {
 			'method' => $method,
 			'user-agent' => $this->getRequest()->getHeader( 'user-agent' )
 		] );
-		// 500 so it shows up in browser's developer console.
+		// Return 400 on error for user agents to display, e.g. to the console.
 		$this->dieWithError(
-			[ 'apierror-csp-report', wfEscapeWikiText( $code ) ], 'cspreport-' . $code, [], 500
+			[ 'apierror-csp-report', wfEscapeWikiText( $code ) ], 'cspreport-' . $code, [], 400
 		);
 	}
 
@@ -216,6 +277,7 @@ class ApiCSPReport extends ApiBase {
 
 	/**
 	 * Mark as internal. This isn't meant to be used by normal api users
+	 * @return bool
 	 */
 	public function isInternal() {
 		return true;
@@ -223,6 +285,7 @@ class ApiCSPReport extends ApiBase {
 
 	/**
 	 * Even if you don't have read rights, we still want your report.
+	 * @return bool
 	 */
 	public function isReadMode() {
 		return false;
@@ -232,6 +295,7 @@ class ApiCSPReport extends ApiBase {
 	 * Doesn't touch db, so max lag should be rather irrelavent.
 	 *
 	 * Also, this makes sure that reports aren't lost during lag events.
+	 * @return bool
 	 */
 	public function shouldCheckMaxLag() {
 		return false;

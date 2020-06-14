@@ -20,9 +20,13 @@
  * @file
  * @ingroup Deployment
  */
+
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\LBFactorySingle;
 use Wikimedia\Rdbms\Database;
 use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\DBExpectedError;
+use Wikimedia\Rdbms\DBConnectionError;
 
 /**
  * Base class for DBMS-specific installation helper classes.
@@ -35,11 +39,19 @@ abstract class DatabaseInstaller {
 	/**
 	 * The Installer object.
 	 *
-	 * @todo Naming this parent is confusing, 'installer' would be clearer.
-	 *
 	 * @var WebInstaller
 	 */
 	public $parent;
+
+	/**
+	 * @var string Set by subclasses
+	 */
+	public static $minimumVersion;
+
+	/**
+	 * @var string Set by subclasses
+	 */
+	protected static $notMinimumVersionMessage;
 
 	/**
 	 * The database connection.
@@ -61,6 +73,23 @@ abstract class DatabaseInstaller {
 	 * @var array
 	 */
 	protected $globalNames = [];
+
+	/**
+	 * Whether the provided version meets the necessary requirements for this type
+	 *
+	 * @param string $serverVersion Output of Database::getServerVersion()
+	 * @return Status
+	 * @since 1.30
+	 */
+	public static function meetsMinimumRequirement( $serverVersion ) {
+		if ( version_compare( $serverVersion, static::$minimumVersion ) < 0 ) {
+			return Status::newFatal(
+				static::$notMinimumVersionMessage, static::$minimumVersion, $serverVersion
+			);
+		}
+
+		return Status::newGood();
+	}
 
 	/**
 	 * Return the internal name, e.g. 'mysql', or 'sqlite'.
@@ -148,6 +177,7 @@ abstract class DatabaseInstaller {
 	 * This will return a cached connection if one is available.
 	 *
 	 * @return Status
+	 * @suppress PhanUndeclaredMethod
 	 */
 	public function getConnection() {
 		if ( $this->db ) {
@@ -312,6 +342,7 @@ abstract class DatabaseInstaller {
 	public function setupSchemaVars() {
 		$status = $this->getConnection();
 		if ( $status->isOK() ) {
+			// @phan-suppress-next-line PhanUndeclaredMethod
 			$status->value->setSchemaVars( $this->getSchemaVars() );
 		} else {
 			$msg = __METHOD__ . ': unexpected error while establishing'
@@ -332,11 +363,11 @@ abstract class DatabaseInstaller {
 			throw new MWException( __METHOD__ . ': unexpected DB connection error' );
 		}
 
-		\MediaWiki\MediaWikiServices::resetGlobalInstance();
-		$services = \MediaWiki\MediaWikiServices::getInstance();
+		MediaWikiServices::resetGlobalInstance();
+		$services = MediaWikiServices::getInstance();
 
 		$connection = $status->value;
-		$services->redefineService( 'DBLoadBalancerFactory', function() use ( $connection ) {
+		$services->redefineService( 'DBLoadBalancerFactory', function () use ( $connection ) {
 			return LBFactorySingle::newFromConnection( $connection );
 		} );
 	}
@@ -344,6 +375,7 @@ abstract class DatabaseInstaller {
 	/**
 	 * Perform database upgrades
 	 *
+	 * @suppress SecurityCheck-XSS Escaping provided by $this->outputHandler
 	 * @return bool
 	 */
 	public function doUpgrade() {
@@ -355,6 +387,7 @@ abstract class DatabaseInstaller {
 		$up = DatabaseUpdater::newForDB( $this->db );
 		try {
 			$up->doUpdates();
+			$up->purgeCache();
 		} catch ( MWException $e ) {
 			echo "\nAn error occurred:\n";
 			echo $e->getText();
@@ -364,7 +397,6 @@ abstract class DatabaseInstaller {
 			echo $e->getMessage();
 			$ret = false;
 		}
-		$up->purgeCache();
 		ob_end_flush();
 
 		return $ret;
@@ -417,8 +449,7 @@ abstract class DatabaseInstaller {
 	 * @return string
 	 */
 	public function getReadableName() {
-		// Messages: config-type-mysql, config-type-postgres, config-type-sqlite,
-		// config-type-oracle
+		// Messages: config-type-mysql, config-type-postgres, config-type-sqlite
 		return wfMessage( 'config-type-' . $this->getName() )->text();
 	}
 
@@ -593,7 +624,12 @@ abstract class DatabaseInstaller {
 			return false;
 		}
 
-		if ( !$this->db->selectDB( $this->getVar( 'wgDBname' ) ) ) {
+		try {
+			$this->db->selectDB( $this->getVar( 'wgDBname' ) );
+		} catch ( DBConnectionError $e ) {
+			// Don't catch DBConnectionError
+			throw $e;
+		} catch ( DBExpectedError $e ) {
 			return false;
 		}
 
@@ -654,7 +690,7 @@ abstract class DatabaseInstaller {
 			$this->getPasswordBox( 'wgDBpassword', 'config-db-password' ) .
 			$this->parent->getHelpBox( 'config-db-web-help' );
 		if ( $noCreateMsg ) {
-			$s .= $this->parent->getWarningBox( wfMessage( $noCreateMsg )->plain() );
+			$s .= Html::warningBox( wfMessage( $noCreateMsg )->plain(), 'config-warning-box' );
 		} else {
 			$s .= $this->getCheckBox( '_CreateDBAccount', 'config-db-web-create' );
 		}
@@ -697,16 +733,16 @@ abstract class DatabaseInstaller {
 		}
 		$this->db->selectDB( $this->getVar( 'wgDBname' ) );
 
-		if ( $this->db->selectRow( 'interwiki', '*', [], __METHOD__ ) ) {
+		if ( $this->db->selectRow( 'interwiki', '1', [], __METHOD__ ) ) {
 			$status->warning( 'config-install-interwiki-exists' );
 
 			return $status;
 		}
 		global $IP;
-		MediaWiki\suppressWarnings();
+		Wikimedia\suppressWarnings();
 		$rows = file( "$IP/maintenance/interwiki.list",
 			FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
-		MediaWiki\restoreWarnings();
+		Wikimedia\restoreWarnings();
 		$interwikis = [];
 		if ( !$rows ) {
 			return Status::newFatal( 'config-install-interwiki-list' );

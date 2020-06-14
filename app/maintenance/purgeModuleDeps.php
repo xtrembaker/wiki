@@ -1,7 +1,5 @@
 <?php
 /**
- * Remove all cache entries for ResourceLoader modules from the database.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -19,7 +17,6 @@
  *
  * @file
  * @ingroup Maintenance
- * @author Timo Tijhof
  */
 
 use Wikimedia\Rdbms\IDatabase;
@@ -27,7 +24,7 @@ use Wikimedia\Rdbms\IDatabase;
 require_once __DIR__ . '/Maintenance.php';
 
 /**
- * Maintenance script to purge the module_deps database cache table.
+ * Maintenance script to purge the module_deps database cache table for ResourceLoader.
  *
  * @ingroup Maintenance
  */
@@ -48,7 +45,7 @@ class PurgeModuleDeps extends Maintenance {
 
 		$modDeps = $dbw->tableName( 'module_deps' );
 		$i = 1;
-		foreach ( array_chunk( $rows, $this->mBatchSize ) as $chunk ) {
+		foreach ( array_chunk( $rows, $this->getBatchSize() ) as $chunk ) {
 			// WHERE ( mod=A AND skin=A ) OR ( mod=A AND skin=B) ..
 			$conds = array_map( function ( stdClass $row ) use ( $dbw ) {
 				return $dbw->makeList( (array)$row, IDatabase::LIST_AND );
@@ -68,5 +65,5 @@ class PurgeModuleDeps extends Maintenance {
 	}
 }
 
-$maintClass = 'PurgeModuleDeps';
+$maintClass = PurgeModuleDeps::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

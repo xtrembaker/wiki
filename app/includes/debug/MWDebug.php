@@ -68,6 +68,30 @@ class MWDebug {
 	protected static $deprecationWarnings = [];
 
 	/**
+	 * @internal For use by Setup.php only.
+	 */
+	public static function setup() {
+		global $wgDebugToolbar,
+			$wgUseCdn, $wgUseFileCache, $wgCommandLineMode;
+
+		if (
+			// Easy to forget to falsify $wgDebugToolbar for static caches.
+			// If file cache or CDN cache is on, just disable this (DWIMD).
+			$wgUseCdn ||
+			$wgUseFileCache ||
+			// Keep MWDebug off on CLI. This prevents MWDebug from eating up
+			// all the memory for logging SQL queries in maintenance scripts.
+			$wgCommandLineMode
+		) {
+			return;
+		}
+
+		if ( $wgDebugToolbar ) {
+			self::init();
+		}
+	}
+
+	/**
 	 * Enabled the debugger and load resource module.
 	 * This is called by Setup.php when $wgDebugToolbar is true.
 	 *
@@ -185,7 +209,7 @@ class MWDebug {
 	 * @param string $function Function that is deprecated.
 	 * @param string|bool $version Version in which the function was deprecated.
 	 * @param string|bool $component Component to which the function belongs.
-	 *    If false, it is assumbed the function is in MediaWiki core.
+	 *    If false, it is assumed the function is in MediaWiki core.
 	 * @param int $callerOffset How far up the callstack is the original
 	 *    caller. 2 = function that called the function that called
 	 *    MWDebug::deprecated() (Added in 1.20).
@@ -347,14 +371,13 @@ class MWDebug {
 	 * @since 1.19
 	 * @param string $sql
 	 * @param string $function
-	 * @param bool $isMaster
 	 * @param float $runTime Query run time
-	 * @return int ID number of the query to pass to queryTime or -1 if the
-	 *  debugger is disabled
+	 * @param string $dbhost
+	 * @return bool True if debugger is enabled, false otherwise
 	 */
-	public static function query( $sql, $function, $isMaster, $runTime ) {
+	public static function query( $sql, $function, $runTime, $dbhost ) {
 		if ( !self::$enabled ) {
-			return -1;
+			return false;
 		}
 
 		// Replace invalid UTF-8 chars with a square UTF-8 character
@@ -383,13 +406,12 @@ class MWDebug {
 		$sql = UtfNormal\Validator::cleanUp( $sql );
 
 		self::$query[] = [
-			'sql' => $sql,
+			'sql' => "$dbhost: $sql",
 			'function' => $function,
-			'master' => (bool)$isMaster,
 			'time' => $runTime,
 		];
 
-		return count( self::$query ) - 1;
+		return true;
 	}
 
 	/**
@@ -425,13 +447,14 @@ class MWDebug {
 		$html = '';
 
 		if ( self::$enabled ) {
-			MWDebug::log( 'MWDebug output complete' );
+			self::log( 'MWDebug output complete' );
 			$debugInfo = self::getDebugInfo( $context );
 
 			// Cannot use OutputPage::addJsConfigVars because those are already outputted
 			// by the time this method is called.
 			$html = ResourceLoader::makeInlineScript(
-				ResourceLoader::makeConfigSetScript( [ 'debugInfo' => $debugInfo ] )
+				ResourceLoader::makeConfigSetScript( [ 'debugInfo' => $debugInfo ] ),
+				$context->getOutput()->getCSPNonce()
 			);
 		}
 
@@ -495,7 +518,7 @@ class MWDebug {
 			}
 		}
 
-		MWDebug::log( 'MWDebug output complete' );
+		self::log( 'MWDebug output complete' );
 		$debugInfo = self::getDebugInfo( $context );
 
 		ApiResult::setIndexedTagName( $debugInfo, 'debuginfo' );
@@ -517,7 +540,7 @@ class MWDebug {
 			return [];
 		}
 
-		global $wgVersion, $wgRequestTime;
+		global $wgVersion;
 		$request = $context->getRequest();
 
 		// HHVM's reported memory usage from memory_get_peak_usage()
@@ -540,7 +563,7 @@ class MWDebug {
 			'gitRevision' => GitInfo::headSHA1(),
 			'gitBranch' => $branch,
 			'gitViewUrl' => GitInfo::headViewUrl(),
-			'time' => microtime( true ) - $wgRequestTime,
+			'time' => $request->getElapsedTime(),
 			'log' => self::$log,
 			'debugLog' => self::$debug,
 			'queries' => self::$query,

@@ -19,9 +19,11 @@
  *
  * @file
  * @author Niklas Laxström
- * @license http://www.gnu.org/copyleft/gpl.html GNU General Public License 2.0 or later
+ * @license GPL-2.0-or-later
  * @since 1.22
  */
+
+use MediaWiki\MediaWikiServices;
 
 /**
  * This class formats move log entries.
@@ -60,7 +62,9 @@ class MoveLogFormatter extends LogFormatter {
 	public function getActionLinks() {
 		if ( $this->entry->isDeleted( LogPage::DELETED_ACTION ) // Action is hidden
 			|| $this->entry->getSubtype() !== 'move'
-			|| !$this->context->getUser()->isAllowed( 'move' )
+			|| !MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $this->context->getUser(), 'move' )
 		) {
 			return '';
 		}
@@ -71,9 +75,9 @@ class MoveLogFormatter extends LogFormatter {
 			return '';
 		}
 
-		$revert = Linker::linkKnown(
+		$revert = $this->getLinkRenderer()->makeKnownLink(
 			SpecialPage::getTitleFor( 'Movepage' ),
-			$this->msg( 'revertmove' )->escaped(),
+			$this->msg( 'revertmove' )->text(),
 			[],
 			[
 				'wpOldTitle' => $destTitle->getPrefixedDBkey(),

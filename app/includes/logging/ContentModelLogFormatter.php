@@ -14,13 +14,15 @@ class ContentModelLogFormatter extends LogFormatter {
 	public function getActionLinks() {
 		if ( $this->entry->isDeleted( LogPage::DELETED_ACTION ) // Action is hidden
 			|| $this->entry->getSubtype() !== 'change'
-			|| !$this->context->getUser()->isAllowed( 'editcontentmodel' )
+			|| !MediaWikiServices::getInstance()
+				->getPermissionManager()
+				->userHasRight( $this->context->getUser(), 'editcontentmodel' )
 		) {
 			return '';
 		}
 
 		$params = $this->extractParameters();
-		$revert = MediaWikiServices::getInstance()->getLinkRenderer()->makeKnownLink(
+		$revert = $this->getLinkRenderer()->makeKnownLink(
 			SpecialPage::getTitleFor( 'ChangeContentModel' ),
 			$this->msg( 'logentry-contentmodel-change-revertlink' )->text(),
 			[],

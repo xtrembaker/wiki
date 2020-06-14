@@ -30,7 +30,10 @@ use Wikimedia\WaitConditionLoop;
 use BagOStuff;
 
 /**
- * Class for ensuring a consistent ordering of events as seen by the user, despite replication.
+ * Helper class for mitigating DB replication lag in order to provide "session consistency"
+ *
+ * This helps to ensure a consistent ordering of events as seen by an client
+ *
  * Kind of like Hawking's [[Chronology Protection Agency]].
  */
 class ChronologyProtector implements LoggerAwareInterface {
@@ -43,10 +46,12 @@ class ChronologyProtector implements LoggerAwareInterface {
 	protected $key;
 	/** @var string Hash of client parameters */
 	protected $clientId;
-	/** @var float|null Minimum UNIX timestamp of 1+ expected startup positions */
-	protected $waitForPosTime;
+	/** @var string[] Map of client information fields for logging */
+	protected $clientLogInfo;
+	/** @var int|null Expected minimum index of the last write to the position store */
+	protected $waitForPosIndex;
 	/** @var int Max seconds to wait on positions to appear */
-	protected $waitForPosTimeout = self::POS_WAIT_TIMEOUT;
+	protected $waitForPosStoreTimeout = self::POS_STORE_WAIT_TIMEOUT;
 	/** @var bool Whether to no-op all method calls */
 	protected $enabled = true;
 	/** @var bool Whether to check and wait on positions */
@@ -61,27 +66,51 @@ class ChronologyProtector implements LoggerAwareInterface {
 	/** @var float[] Map of (DB master name => 1) */
 	protected $shutdownTouchDBs = [];
 
-	/** @var integer Seconds to store positions */
+	/** @var int Seconds to store positions */
 	const POSITION_TTL = 60;
-	/** @var integer Max time to wait for positions to appear */
-	const POS_WAIT_TIMEOUT = 5;
+	/** @var int Seconds to store position write index cookies (safely less than POSITION_TTL) */
+	const POSITION_COOKIE_TTL = 10;
+	/** @var int Max time to wait for positions to appear */
+	const POS_STORE_WAIT_TIMEOUT = 5;
 
 	/**
 	 * @param BagOStuff $store
-	 * @param array $client Map of (ip: <IP>, agent: <user-agent>)
-	 * @param float $posTime UNIX timestamp
+	 * @param array $client Map of (ip: <IP>, agent: <user-agent> [, clientId: <hash>] )
+	 * @param int|null $posIndex Write counter index
+	 * @param string $secret Secret string for HMAC hashing [optional]
 	 * @since 1.27
 	 */
-	public function __construct( BagOStuff $store, array $client, $posTime = null ) {
+	public function __construct( BagOStuff $store, array $client, $posIndex, $secret = '' ) {
 		$this->store = $store;
-		$this->clientId = md5( $client['ip'] . "\n" . $client['agent'] );
-		$this->key = $store->makeGlobalKey( __CLASS__, $this->clientId, 'v1' );
-		$this->waitForPosTime = $posTime;
+		if ( isset( $client['clientId'] ) ) {
+			$this->clientId = $client['clientId'];
+		} else {
+			$this->clientId = ( $secret != '' )
+				? hash_hmac( 'md5', $client['ip'] . "\n" . $client['agent'], $secret )
+				: md5( $client['ip'] . "\n" . $client['agent'] );
+		}
+		$this->key = $store->makeGlobalKey( __CLASS__, $this->clientId, 'v2' );
+		$this->waitForPosIndex = $posIndex;
+
+		$this->clientLogInfo = [
+			'clientIP' => $client['ip'],
+			'clientAgent' => $client['agent'],
+			'clientId' => $client['clientId'] ?? null
+		];
+
 		$this->logger = new NullLogger();
 	}
 
 	public function setLogger( LoggerInterface $logger ) {
 		$this->logger = $logger;
+	}
+
+	/**
+	 * @return string Client ID hash
+	 * @since 1.32
+	 */
+	public function getClientId() {
+		return $this->clientId;
 	}
 
 	/**
@@ -101,56 +130,60 @@ class ChronologyProtector implements LoggerAwareInterface {
 	}
 
 	/**
-	 * Initialise a ILoadBalancer to give it appropriate chronology protection.
+	 * Apply the "session consistency" DB replication position to a new ILoadBalancer
 	 *
-	 * If the stash has a previous master position recorded, this will try to
-	 * make sure that the next query to a replica DB of that master will see changes up
+	 * If the stash has a previous master position recorded, this will try to make
+	 * sure that the next query to a replica DB of that master will see changes up
 	 * to that position by delaying execution. The delay may timeout and allow stale
 	 * data if no non-lagged replica DBs are available.
+	 *
+	 * This method should only be called from LBFactory.
 	 *
 	 * @param ILoadBalancer $lb
 	 * @return void
 	 */
-	public function initLB( ILoadBalancer $lb ) {
-		if ( !$this->enabled || $lb->getServerCount() <= 1 ) {
-			return; // non-replicated setup or disabled
+	public function applySessionReplicationPosition( ILoadBalancer $lb ) {
+		if ( !$this->enabled ) {
+			return; // disabled
 		}
 
-		$this->initPositions();
-
 		$masterName = $lb->getServerName( $lb->getWriterIndex() );
-		if (
-			isset( $this->startupPositions[$masterName] ) &&
-			$this->startupPositions[$masterName] instanceof DBMasterPos
-		) {
-			$pos = $this->startupPositions[$masterName];
-			$this->logger->info( __METHOD__ . ": LB for '$masterName' set to pos $pos\n" );
+		$startupPositions = $this->getStartupMasterPositions();
+
+		$pos = $startupPositions[$masterName] ?? null;
+		if ( $pos instanceof DBMasterPos ) {
+			$this->logger->debug( __METHOD__ . ": pos for DB '$masterName' set to '$pos'\n" );
 			$lb->waitFor( $pos );
 		}
 	}
 
 	/**
-	 * Notify the ChronologyProtector that the ILoadBalancer is about to shut
-	 * down. Saves replication positions.
+	 * Save the "session consistency" DB replication position for an end-of-life ILoadBalancer
+	 *
+	 * This saves the replication position of the master DB if this request made writes to it.
+	 *
+	 * This method should only be called from LBFactory.
 	 *
 	 * @param ILoadBalancer $lb
 	 * @return void
 	 */
-	public function shutdownLB( ILoadBalancer $lb ) {
+	public function storeSessionReplicationPosition( ILoadBalancer $lb ) {
 		if ( !$this->enabled ) {
-			return; // not enabled
+			return; // disabled
 		} elseif ( !$lb->hasOrMadeRecentMasterChanges( INF ) ) {
 			// Only save the position if writes have been done on the connection
 			return;
 		}
 
 		$masterName = $lb->getServerName( $lb->getWriterIndex() );
-		if ( $lb->getServerCount() > 1 ) {
-			$pos = $lb->getMasterPos();
-			$this->logger->info( __METHOD__ . ": LB for '$masterName' has pos $pos\n" );
-			$this->shutdownPositions[$masterName] = $pos;
+		if ( $lb->hasStreamingReplicaServers() ) {
+			$pos = $lb->getReplicaResumePos();
+			if ( $pos ) {
+				$this->logger->debug( __METHOD__ . ": LB for '$masterName' has pos $pos\n" );
+				$this->shutdownPositions[$masterName] = $pos;
+			}
 		} else {
-			$this->logger->info( __METHOD__ . ": DB '$masterName' touched\n" );
+			$this->logger->debug( __METHOD__ . ": DB '$masterName' touched\n" );
 		}
 		$this->shutdownTouchDBs[$masterName] = 1;
 	}
@@ -161,9 +194,10 @@ class ChronologyProtector implements LoggerAwareInterface {
 	 *
 	 * @param callable|null $workCallback Work to do instead of waiting on syncing positions
 	 * @param string $mode One of (sync, async); whether to wait on remote datacenters
+	 * @param int|null &$cpIndex DB position key write counter; incremented on update
 	 * @return DBMasterPos[] Empty on success; returns the (db name => position) map on failure
 	 */
-	public function shutdown( callable $workCallback = null, $mode = 'sync' ) {
+	public function shutdown( callable $workCallback = null, $mode = 'sync', &$cpIndex = null ) {
 		if ( !$this->enabled ) {
 			return [];
 		}
@@ -179,26 +213,33 @@ class ChronologyProtector implements LoggerAwareInterface {
 			);
 		}
 
-		if ( !count( $this->shutdownPositions ) ) {
+		if ( $this->shutdownPositions === [] ) {
+			$this->logger->debug( __METHOD__ . ": no master positions to save\n" );
+
 			return []; // nothing to save
 		}
 
-		$this->logger->info( __METHOD__ . ": saving master pos for " .
+		$this->logger->debug(
+			__METHOD__ . ": saving master pos for " .
 			implode( ', ', array_keys( $this->shutdownPositions ) ) . "\n"
 		);
 
-		// CP-protected writes should overwhemingly go to the master datacenter, so get DC-local
-		// lock to merge the values. Use a DC-local get() and a synchronous all-DC set(). This
-		// makes it possible for the BagOStuff class to write in parallel to all DCs with one RTT.
+		// CP-protected writes should overwhelmingly go to the master datacenter, so merge the
+		// positions with a DC-local lock, a DC-local get(), and an all-DC set() with WRITE_SYNC.
+		// If set() returns success, then any get() should be able to see the new positions.
 		if ( $store->lock( $this->key, 3 ) ) {
 			if ( $workCallback ) {
-				// Let the store run the work before blocking on a replication sync barrier. By the
-				// time it's done with the work, the barrier should be fast if replication caught up.
+				// Let the store run the work before blocking on a replication sync barrier.
+				// If replication caught up while the work finished, the barrier will be fast.
 				$store->addBusyCallback( $workCallback );
 			}
 			$ok = $store->set(
 				$this->key,
-				self::mergePositions( $store->get( $this->key ), $this->shutdownPositions ),
+				$this->mergePositions(
+					$store->get( $this->key ),
+					$this->shutdownPositions,
+					$cpIndex
+				),
 				self::POSITION_TTL,
 				( $mode === 'sync' ) ? $store::WRITE_SYNC : 0
 			);
@@ -208,6 +249,7 @@ class ChronologyProtector implements LoggerAwareInterface {
 		}
 
 		if ( !$ok ) {
+			$cpIndex = null; // nothing saved
 			$bouncedPositions = $this->shutdownPositions;
 			// Raced out too many times or stash is down
 			$this->logger->warning( __METHOD__ . ": failed to save master pos for " .
@@ -247,91 +289,99 @@ class ChronologyProtector implements LoggerAwareInterface {
 	/**
 	 * Load in previous master positions for the client
 	 */
-	protected function initPositions() {
+	protected function getStartupMasterPositions() {
 		if ( $this->initialized ) {
-			return;
+			return $this->startupPositions;
 		}
 
 		$this->initialized = true;
-		if ( $this->wait ) {
-			// If there is an expectation to see master positions with a certain min
-			// timestamp, then block until they appear, or until a timeout is reached.
-			if ( $this->waitForPosTime > 0.0 ) {
-				$data = null;
-				$loop = new WaitConditionLoop(
-					function () use ( &$data ) {
-						$data = $this->store->get( $this->key );
+		$this->logger->debug( __METHOD__ . ": client ID is {$this->clientId} (read)\n" );
 
-						return ( self::minPosTime( $data ) >= $this->waitForPosTime )
+		if ( $this->wait ) {
+			// If there is an expectation to see master positions from a certain write
+			// index or higher, then block until it appears, or until a timeout is reached.
+			// Since the write index restarts each time the key is created, it is possible that
+			// a lagged store has a matching key write index. However, in that case, it should
+			// already be expired and thus treated as non-existing, maintaining correctness.
+			if ( $this->waitForPosIndex > 0 ) {
+				$data = null;
+				$indexReached = null; // highest index reached in the position store
+				$loop = new WaitConditionLoop(
+					function () use ( &$data, &$indexReached ) {
+						$data = $this->store->get( $this->key );
+						if ( !is_array( $data ) ) {
+							return WaitConditionLoop::CONDITION_CONTINUE; // not found yet
+						} elseif ( !isset( $data['writeIndex'] ) ) {
+							return WaitConditionLoop::CONDITION_REACHED; // b/c
+						}
+						$indexReached = max( $data['writeIndex'], $indexReached );
+
+						return ( $data['writeIndex'] >= $this->waitForPosIndex )
 							? WaitConditionLoop::CONDITION_REACHED
 							: WaitConditionLoop::CONDITION_CONTINUE;
 					},
-					$this->waitForPosTimeout
+					$this->waitForPosStoreTimeout
 				);
 				$result = $loop->invoke();
 				$waitedMs = $loop->getLastWaitTime() * 1e3;
 
 				if ( $result == $loop::CONDITION_REACHED ) {
-					$msg = "expected and found pos time {$this->waitForPosTime} ({$waitedMs}ms)";
-					$this->logger->debug( $msg );
+					$this->logger->debug(
+						__METHOD__ . ": expected and found position index.",
+						[
+							'cpPosIndex' => $this->waitForPosIndex,
+							'waitTimeMs' => $waitedMs
+						] + $this->clientLogInfo
+					);
 				} else {
-					$msg = "expected but missed pos time {$this->waitForPosTime} ({$waitedMs}ms)";
-					$this->logger->info( $msg );
+					$this->logger->warning(
+						__METHOD__ . ": expected but failed to find position index.",
+						[
+							'cpPosIndex' => $this->waitForPosIndex,
+							'indexReached' => $indexReached,
+							'waitTimeMs' => $waitedMs
+						] + $this->clientLogInfo
+					);
 				}
 			} else {
 				$data = $this->store->get( $this->key );
 			}
 
 			$this->startupPositions = $data ? $data['positions'] : [];
-			$this->logger->info( __METHOD__ . ": key is {$this->key} (read)\n" );
+			$this->logger->debug( __METHOD__ . ": key is {$this->key} (read)\n" );
 		} else {
 			$this->startupPositions = [];
-			$this->logger->info( __METHOD__ . ": key is {$this->key} (unread)\n" );
-		}
-	}
-
-	/**
-	 * @param array|bool $data
-	 * @return float|null
-	 */
-	private static function minPosTime( $data ) {
-		if ( !isset( $data['positions'] ) ) {
-			return null;
+			$this->logger->debug( __METHOD__ . ": key is {$this->key} (unread)\n" );
 		}
 
-		$min = null;
-		foreach ( $data['positions'] as $pos ) {
-			if ( $pos instanceof DBMasterPos ) {
-				$min = $min ? min( $pos->asOfTime(), $min ) : $pos->asOfTime();
-			}
-		}
-
-		return $min;
+		return $this->startupPositions;
 	}
 
 	/**
 	 * @param array|bool $curValue
 	 * @param DBMasterPos[] $shutdownPositions
+	 * @param int|null &$cpIndex
 	 * @return array
 	 */
-	private static function mergePositions( $curValue, array $shutdownPositions ) {
-		/** @var $curPositions DBMasterPos[] */
-		if ( $curValue === false ) {
-			$curPositions = $shutdownPositions;
-		} else {
-			$curPositions = $curValue['positions'];
-			// Use the newest positions for each DB master
-			foreach ( $shutdownPositions as $db => $pos ) {
-				if (
-					!isset( $curPositions[$db] ) ||
-					!( $curPositions[$db] instanceof DBMasterPos ) ||
-					$pos->asOfTime() > $curPositions[$db]->asOfTime()
-				) {
-					$curPositions[$db] = $pos;
-				}
+	protected function mergePositions( $curValue, array $shutdownPositions, &$cpIndex = null ) {
+		/** @var DBMasterPos[] $curPositions */
+		$curPositions = $curValue['positions'] ?? [];
+		// Use the newest positions for each DB master
+		foreach ( $shutdownPositions as $db => $pos ) {
+			if (
+				!isset( $curPositions[$db] ) ||
+				!( $curPositions[$db] instanceof DBMasterPos ) ||
+				$pos->asOfTime() > $curPositions[$db]->asOfTime()
+			) {
+				$curPositions[$db] = $pos;
 			}
 		}
 
-		return [ 'positions' => $curPositions ];
+		$cpIndex = $curValue['writeIndex'] ?? 0;
+
+		return [
+			'positions' => $curPositions,
+			'writeIndex' => ++$cpIndex
+		];
 	}
 }

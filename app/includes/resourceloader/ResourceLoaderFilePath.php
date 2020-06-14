@@ -1,8 +1,5 @@
 <?php
 /**
- * An object to represent a path to a JavaScript/CSS file, along with a remote
- * and local base path, for use with ResourceLoaderFileModule.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -24,9 +21,11 @@
 /**
  * An object to represent a path to a JavaScript/CSS file, along with a remote
  * and local base path, for use with ResourceLoaderFileModule.
+ *
+ * @ingroup ResourceLoader
+ * @since 1.17
  */
 class ResourceLoaderFilePath {
-	/* Protected Members */
 
 	/** @var string Local base path */
 	protected $localBasePath;
@@ -35,10 +34,9 @@ class ResourceLoaderFilePath {
 	protected $remoteBasePath;
 
 	/**
-	 * @var string Path to the file */
+	 * @var string Path to the file
+	 */
 	protected $path;
-
-	/* Methods */
 
 	/**
 	 * @param string $path Path to the file.
@@ -63,6 +61,20 @@ class ResourceLoaderFilePath {
 	 */
 	public function getRemotePath() {
 		return "{$this->remoteBasePath}/{$this->path}";
+	}
+
+	/**
+	 * @return string
+	 */
+	public function getLocalBasePath() {
+		return $this->localBasePath;
+	}
+
+	/**
+	 * @return string
+	 */
+	public function getRemoteBasePath() {
+		return $this->remoteBasePath;
 	}
 
 	/**

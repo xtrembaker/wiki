@@ -22,7 +22,7 @@
  * @author Rob Church <robchur@gmail.com>
  */
 
-use Wikimedia\Rdbms\ResultWrapper;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
@@ -31,7 +31,7 @@ use Wikimedia\Rdbms\IDatabase;
  *
  * @ingroup SpecialPage
  */
-class MostlinkedTemplatesPage extends QueryPage {
+class SpecialMostLinkedTemplates extends QueryPage {
 	function __construct( $name = 'Mostlinkedtemplates' ) {
 		parent::__construct( $name );
 	}
@@ -79,7 +79,7 @@ class MostlinkedTemplatesPage extends QueryPage {
 	 * Pre-cache page existence to speed up link generation
 	 *
 	 * @param IDatabase $db
-	 * @param ResultWrapper $res
+	 * @param IResultWrapper $res
 	 */
 	public function preprocessResults( $db, $res ) {
 		$this->executeLBFromResultWrapper( $res );

@@ -5,7 +5,6 @@
  * @file
  * @ingroup Extensions
  */
-// @codingStandardsIgnoreFile
 
 $specialPageAliases = [];
 
@@ -84,6 +83,7 @@ $specialPageAliases['ckb'] = [
 /** Czech (čeština) */
 $specialPageAliases['cs'] = [
 	'Gadgets' => [ 'Udělátka' ],
+	'GadgetUsage' => [ 'Využití_udělátek' ],
 ];
 
 /** German (Deutsch) */
@@ -114,6 +114,7 @@ $specialPageAliases['eo'] = [
 /** Spanish (español) */
 $specialPageAliases['es'] = [
 	'Gadgets' => [ 'Accesorios', 'Artilugios' ],
+	'GadgetUsage' => [ 'Uso_de_accesorios', 'Uso_de_artilugios' ],
 ];
 
 /** Estonian (eesti) */
@@ -257,6 +258,12 @@ $specialPageAliases['mt'] = [
 	'Gadgets' => [ 'Aġġeġġi', 'Aċċessorji' ],
 ];
 
+/** Neapolitan (napulitano) */
+$specialPageAliases['nap'] = [
+	'Gadgets' => [ 'Pazzielle' ],
+	'GadgetUsage' => [ 'PazziellaAuso' ],
+];
+
 /** Norwegian Bokmål (norsk bokmål) */
 $specialPageAliases['nb'] = [
 	'Gadgets' => [ 'Tilleggsfunksjoner' ],
@@ -300,6 +307,7 @@ $specialPageAliases['ro'] = [
 /** Russian (русский) */
 $specialPageAliases['ru'] = [
 	'Gadgets' => [ 'Гаджеты' ],
+	'GadgetUsage' => [ 'Использование_гаджетов' ],
 ];
 
 /** Sanskrit (संस्कृतम्) */
@@ -307,9 +315,21 @@ $specialPageAliases['sa'] = [
 	'Gadgets' => [ 'सुविधा_(गॅजेट)' ],
 ];
 
+/** Santali (ᱥᱟᱱᱛᱟᱲᱤ) */
+$specialPageAliases['sat'] = [
+	'Gadgets' => [ 'ᱥᱟᱢᱟᱱᱚᱢᱠᱚ' ],
+	'GadgetUsage' => [ 'ᱥᱟᱢᱟᱱᱚᱢ_ᱵᱮᱵᱷᱟᱨᱟᱠᱟᱱ' ],
+];
+
 /** Sicilian (sicilianu) */
 $specialPageAliases['scn'] = [
 	'Gadgets' => [ 'Accessori' ],
+];
+
+/** Shan (ၵႂၢမ်းတႆးလူင်) */
+$specialPageAliases['shn'] = [
+	'Gadgets' => [ 'ၶိုင်ႈပိတ်းပွတ်း' ],
+	'GadgetUsage' => [ 'လွင်ႈၸႂ်ႉတိုဝ်းၶိူင်ႈပိတ်းပွတ်း' ],
 ];
 
 /** Sinhala (සිංහල) */
@@ -329,7 +349,14 @@ $specialPageAliases['sl'] = [
 
 /** Serbian (Cyrillic script) (српски (ћирилица)‎) */
 $specialPageAliases['sr-ec'] = [
-	'Gadgets' => [ 'Гаџети', 'Геџети' ],
+	'Gadgets' => [ 'Справице', 'Гаџети', 'Геџети' ],
+	'GadgetUsage' => [ 'УпотребаСправица', 'УпотребаГаџета', 'УпотребаГеџета' ],
+];
+
+/** Serbian (Latin script) (srpski (latinica)‎) */
+$specialPageAliases['sr-el'] = [
+	'Gadgets' => [ 'Spravice', 'Gadžeti', 'Gedžeti' ],
+	'GadgetUsage' => [ 'UpotrebaSpravica', 'UpotrebaGadžeta', 'UpotrebaGedžeta' ],
 ];
 
 /** Swedish (svenska) */
@@ -360,6 +387,12 @@ $specialPageAliases['tt-cyrl'] = [
 /** Ukrainian (українська) */
 $specialPageAliases['uk'] = [
 	'Gadgets' => [ 'Додатки', 'Гаджеты' ],
+];
+
+/** Urdu (اردو) */
+$specialPageAliases['ur'] = [
+	'Gadgets' => [ 'آلات' ],
+	'GadgetUsage' => [ 'آلات_کا_استعمال' ],
 ];
 
 /** Venetian (vèneto) */

@@ -16,7 +16,6 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @license GPL-2.0+
  * @author Kunal Mehta <legoktm@member.fsf.org>
  */
 namespace MediaWiki\Linker;
@@ -28,7 +27,7 @@ use HtmlArmor;
 use LinkCache;
 use Linker;
 use MediaWiki\MediaWikiServices;
-use MWNamespace;
+use NamespaceInfo;
 use Sanitizer;
 use Title;
 use TitleFormatter;
@@ -71,6 +70,11 @@ class LinkRenderer {
 	private $linkCache;
 
 	/**
+	 * @var NamespaceInfo
+	 */
+	private $nsInfo;
+
+	/**
 	 * Whether to run the legacy Linker hooks
 	 *
 	 * @var bool
@@ -80,10 +84,14 @@ class LinkRenderer {
 	/**
 	 * @param TitleFormatter $titleFormatter
 	 * @param LinkCache $linkCache
+	 * @param NamespaceInfo $nsInfo
 	 */
-	public function __construct( TitleFormatter $titleFormatter, LinkCache $linkCache ) {
+	public function __construct(
+		TitleFormatter $titleFormatter, LinkCache $linkCache, NamespaceInfo $nsInfo
+	) {
 		$this->titleFormatter = $titleFormatter;
 		$this->linkCache = $linkCache;
+		$this->nsInfo = $nsInfo;
 	}
 
 	/**
@@ -205,7 +213,7 @@ class LinkRenderer {
 			$realHtml = $html = null;
 		}
 		if ( !Hooks::run( 'LinkBegin',
-			[ $dummy, $title, &$html, &$extraAttribs, &$query, &$options, &$ret ] )
+			[ $dummy, $title, &$html, &$extraAttribs, &$query, &$options, &$ret ], '1.28' )
 		) {
 			return $ret;
 		}
@@ -246,7 +254,7 @@ class LinkRenderer {
 	 * @return string
 	 */
 	public function makePreloadedLink(
-		LinkTarget $target, $text = null, $classes, array $extraAttribs = [], array $query = []
+		LinkTarget $target, $text = null, $classes = '', array $extraAttribs = [], array $query = []
 	) {
 		// Run begin hook
 		$ret = $this->runBeginHook( $target, $text, $extraAttribs, $query, true );
@@ -294,7 +302,7 @@ class LinkRenderer {
 		return $this->makePreloadedLink(
 			$target,
 			$text,
-			$classes ? implode( ' ', $classes ) : '',
+			implode( ' ', $classes ),
 			$extraAttribs,
 			$query
 		);
@@ -374,7 +382,7 @@ class LinkRenderer {
 			$title = Title::newFromLinkTarget( $target );
 			$options = $this->getLegacyOptions( $isKnown );
 			if ( !Hooks::run( 'LinkEnd',
-				[ $dummy, $title, $options, &$html, &$attribs, &$ret ] )
+				[ $dummy, $title, $options, &$html, &$attribs, &$ret ], '1.28' )
 			) {
 				return $ret;
 			}
@@ -469,8 +477,9 @@ class LinkRenderer {
 		if ( $this->linkCache->getGoodLinkFieldObj( $target, 'redirect' ) ) {
 			# Page is a redirect
 			return 'mw-redirect';
-		} elseif ( $this->stubThreshold > 0 && MWNamespace::isContent( $target->getNamespace() )
-			&& $this->linkCache->getGoodLinkFieldObj( $target, 'length' ) < $this->stubThreshold
+		} elseif (
+			$this->stubThreshold > 0 && $this->nsInfo->isContent( $target->getNamespace() ) &&
+			$this->linkCache->getGoodLinkFieldObj( $target, 'length' ) < $this->stubThreshold
 		) {
 			# Page is a stub
 			return 'stub';

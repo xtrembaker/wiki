@@ -21,6 +21,8 @@
  * @ingroup RevisionDelete
  */
 
+use MediaWiki\Revision\RevisionRecord;
+
 /**
  * General controller for RevDel, used by both SpecialRevisiondelete and
  * ApiRevisionDelete.
@@ -29,11 +31,11 @@
 class RevisionDeleter {
 	/** List of known revdel types, with their corresponding list classes */
 	private static $allowedTypes = [
-		'revision' => 'RevDelRevisionList',
-		'archive' => 'RevDelArchiveList',
-		'oldimage' => 'RevDelFileList',
-		'filearchive' => 'RevDelArchivedFileList',
-		'logging' => 'RevDelLogList',
+		'revision' => RevDelRevisionList::class,
+		'archive' => RevDelArchiveList::class,
+		'oldimage' => RevDelFileList::class,
+		'filearchive' => RevDelArchivedFileList::class,
+		'logging' => RevDelLogList::class,
 	];
 
 	/** Type map to support old log entries */
@@ -98,7 +100,7 @@ class RevisionDeleter {
 	 * @param int $field The bitmask describing the single option.
 	 * @param int $diff The xor of the old and new bitfields.
 	 * @param int $new The new bitfield
-	 * @param array $arr The array to update.
+	 * @param array &$arr The array to update.
 	 */
 	protected static function checkItem( $desc, $field, $diff, $new, &$arr ) {
 		if ( $diff & $field ) {
@@ -129,14 +131,14 @@ class RevisionDeleter {
 		$ret = [ 0 => [], 1 => [], 2 => [] ];
 		// Build bitfield changes in language
 		self::checkItem( 'revdelete-content',
-			Revision::DELETED_TEXT, $diff, $n, $ret );
+			RevisionRecord::DELETED_TEXT, $diff, $n, $ret );
 		self::checkItem( 'revdelete-summary',
-			Revision::DELETED_COMMENT, $diff, $n, $ret );
+			RevisionRecord::DELETED_COMMENT, $diff, $n, $ret );
 		self::checkItem( 'revdelete-uname',
-			Revision::DELETED_USER, $diff, $n, $ret );
+			RevisionRecord::DELETED_USER, $diff, $n, $ret );
 		// Restriction application to sysops
-		if ( $diff & Revision::DELETED_RESTRICTED ) {
-			if ( $n & Revision::DELETED_RESTRICTED ) {
+		if ( $diff & RevisionRecord::DELETED_RESTRICTED ) {
+			if ( $n & RevisionRecord::DELETED_RESTRICTED ) {
 				$ret[2][] = 'revdelete-restricted';
 			} else {
 				$ret[2][] = 'revdelete-unrestricted';
@@ -234,7 +236,7 @@ class RevisionDeleter {
 	 * @since 1.22
 	 * @param array $bitPars ExtractBitParams() params
 	 * @param int $oldfield Current bitfield
-	 * @return integer
+	 * @return int
 	 */
 	public static function extractBitfield( array $bitPars, $oldfield ) {
 		// Build the actual new rev_deleted bitfield

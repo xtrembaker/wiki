@@ -46,7 +46,7 @@ class SkinTemplate extends Skin {
 	 * @var string For QuickTemplate, the name of the subclass which will
 	 *   actually fill the template.  Child classes should override the default.
 	 */
-	public $template = 'QuickTemplate';
+	public $template = QuickTemplate::class;
 
 	public $thispage;
 	public $titletxt;
@@ -57,41 +57,15 @@ class SkinTemplate extends Skin {
 	public $userpageUrlDetails;
 
 	/**
-	 * Add specific styles for this skin
-	 *
-	 * @param OutputPage $out
-	 */
-	public function setupSkinUserCss( OutputPage $out ) {
-		$moduleStyles = [
-			'mediawiki.legacy.shared',
-			'mediawiki.legacy.commonPrint',
-			'mediawiki.sectionAnchor'
-		];
-		if ( $out->isSyndicated() ) {
-			$moduleStyles[] = 'mediawiki.feedlink';
-		}
-
-		// Deprecated since 1.26: Unconditional loading of mediawiki.ui.button
-		// on every page is deprecated. Express a dependency instead.
-		if ( strpos( $out->getHTML(), 'mw-ui-button' ) !== false ) {
-			$moduleStyles[] = 'mediawiki.ui.button';
-		}
-
-		$out->addModuleStyles( $moduleStyles );
-	}
-
-	/**
 	 * Create the template engine object; we feed it a bunch of data
 	 * and eventually it spits out some HTML. Should have interface
 	 * roughly equivalent to PHPTAL 0.7.
 	 *
 	 * @param string $classname
-	 * @param bool|string $repository Subdirectory where we keep template files
-	 * @param bool|string $cache_dir
 	 * @return QuickTemplate
 	 * @private
 	 */
-	function setupTemplate( $classname, $repository = false, $cache_dir = false ) {
+	function setupTemplate( $classname ) {
 		return new $classname( $this->getConfig() );
 	}
 
@@ -174,7 +148,7 @@ class SkinTemplate extends Skin {
 					)->text();
 				}
 
-				$ilInterwikiCodeBCP47 = wfBCP47( $ilInterwikiCode );
+				$ilInterwikiCodeBCP47 = LanguageCode::bcp47( $ilInterwikiCode );
 				$languageLink = [
 					'href' => $languageLinkTitle->getFullURL(),
 					'text' => $ilLangName,
@@ -195,12 +169,15 @@ class SkinTemplate extends Skin {
 		return $languageLinks;
 	}
 
+	/**
+	 * @return QuickTemplate
+	 */
 	protected function setupTemplateForOutput() {
 		$request = $this->getRequest();
 		$user = $this->getUser();
 		$title = $this->getTitle();
 
-		$tpl = $this->setupTemplate( $this->template, 'skins' );
+		$tpl = $this->setupTemplate( $this->template );
 
 		$this->thispage = $title->getPrefixedDBkey();
 		$this->titletxt = $title->getPrefixedText();
@@ -228,21 +205,10 @@ class SkinTemplate extends Skin {
 	}
 
 	/**
-	 * initialize various variables and generate the template
-	 *
-	 * @param OutputPage $out
+	 * Initialize various variables and generate the template
 	 */
-	function outputPage( OutputPage $out = null ) {
-		Profiler::instance()->setTemplated( true );
-
-		$oldContext = null;
-		if ( $out !== null ) {
-			// Deprecated since 1.20, note added in 1.25
-			wfDeprecated( __METHOD__, '1.25' );
-			$oldContext = $this->getContext();
-			$this->setContext( $out->getContext() );
-		}
-
+	function outputPage() {
+		Profiler::instance()->setAllowOutput();
 		$out = $this->getOutput();
 
 		$this->initPage( $out );
@@ -252,10 +218,6 @@ class SkinTemplate extends Skin {
 
 		// result may be an error
 		$this->printOrError( $res );
-
-		if ( $oldContext ) {
-			$this->setContext( $oldContext );
-		}
 	}
 
 	/**
@@ -269,11 +231,13 @@ class SkinTemplate extends Skin {
 		# An ID that includes the actual body text; without categories, contentSub, ...
 		$realBodyAttribs = [ 'id' => 'mw-content-text' ];
 
-		# Add a mw-content-ltr/rtl class to be able to style based on text direction
-		# when the content is different from the UI language, i.e.:
-		# not for special pages or file pages AND only when viewing
-		if ( !in_array( $title->getNamespace(), [ NS_SPECIAL, NS_FILE ] ) &&
-			Action::getActionName( $this ) === 'view' ) {
+		# Add a mw-content-ltr/rtl class to be able to style based on text
+		# direction when the content is different from the UI language (only
+		# when viewing)
+		# Most information on special pages and file pages is in user language,
+		# rather than content language, so those will not get this
+		if ( Action::getActionName( $this ) === 'view' &&
+			( !$title->inNamespaces( NS_SPECIAL, NS_FILE ) || $title->isRedirect() ) ) {
 			$pageLang = $title->getPageViewLanguage();
 			$realBodyAttribs['lang'] = $pageLang->getHtmlCode();
 			$realBodyAttribs['dir'] = $pageLang->getDir();
@@ -290,7 +254,7 @@ class SkinTemplate extends Skin {
 	 * @return QuickTemplate The template to be executed by outputPage
 	 */
 	protected function prepareQuickTemplate() {
-		global $wgContLang, $wgScript, $wgStylePath, $wgMimeType, $wgJsMimeType,
+		global $wgScript, $wgStylePath, $wgMimeType,
 			$wgSitename, $wgLogo, $wgMaxCredits,
 			$wgShowCreditsIfMax, $wgArticlePath,
 			$wgScriptPath, $wgServer;
@@ -304,8 +268,8 @@ class SkinTemplate extends Skin {
 		$tpl->set( 'pagetitle', $out->getHTMLTitle() );
 		$tpl->set( 'displaytitle', $out->mPageLinkTitle );
 
-		$tpl->setRef( 'thispage', $this->thispage );
-		$tpl->setRef( 'titleprefixeddbkey', $this->thispage );
+		$tpl->set( 'thispage', $this->thispage );
+		$tpl->set( 'titleprefixeddbkey', $this->thispage );
 		$tpl->set( 'titletext', $title->getText() );
 		$tpl->set( 'articleid', $title->getArticleID() );
 
@@ -334,32 +298,31 @@ class SkinTemplate extends Skin {
 					'href' => $link
 				];
 			}
-			$tpl->setRef( 'feeds', $feeds );
+			$tpl->set( 'feeds', $feeds );
 		} else {
 			$tpl->set( 'feeds', false );
 		}
 
-		$tpl->setRef( 'mimetype', $wgMimeType );
-		$tpl->setRef( 'jsmimetype', $wgJsMimeType );
+		$tpl->set( 'mimetype', $wgMimeType );
 		$tpl->set( 'charset', 'UTF-8' );
-		$tpl->setRef( 'wgScript', $wgScript );
-		$tpl->setRef( 'skinname', $this->skinname );
+		$tpl->set( 'wgScript', $wgScript );
+		$tpl->set( 'skinname', $this->skinname );
 		$tpl->set( 'skinclass', static::class );
-		$tpl->setRef( 'skin', $this );
-		$tpl->setRef( 'stylename', $this->stylename );
+		$tpl->set( 'skin', $this );
+		$tpl->set( 'stylename', $this->stylename );
 		$tpl->set( 'printable', $out->isPrintable() );
 		$tpl->set( 'handheld', $request->getBool( 'handheld' ) );
-		$tpl->setRef( 'loggedin', $this->loggedin );
+		$tpl->set( 'loggedin', $this->loggedin );
 		$tpl->set( 'notspecialpage', !$title->isSpecialPage() );
-		$tpl->set( 'searchaction', $this->escapeSearchLink() );
+		$tpl->set( 'searchaction', $this->getSearchLink() );
 		$tpl->set( 'searchtitle', SpecialPage::getTitleFor( 'Search' )->getPrefixedDBkey() );
 		$tpl->set( 'search', trim( $request->getVal( 'search' ) ) );
-		$tpl->setRef( 'stylepath', $wgStylePath );
-		$tpl->setRef( 'articlepath', $wgArticlePath );
-		$tpl->setRef( 'scriptpath', $wgScriptPath );
-		$tpl->setRef( 'serverurl', $wgServer );
-		$tpl->setRef( 'logopath', $wgLogo );
-		$tpl->setRef( 'sitename', $wgSitename );
+		$tpl->set( 'stylepath', $wgStylePath );
+		$tpl->set( 'articlepath', $wgArticlePath );
+		$tpl->set( 'scriptpath', $wgScriptPath );
+		$tpl->set( 'serverurl', $wgServer );
+		$tpl->set( 'logopath', $wgLogo );
+		$tpl->set( 'sitename', $wgSitename );
 
 		$userLang = $this->getLanguage();
 		$userLangCode = $userLang->getHtmlCode();
@@ -372,8 +335,8 @@ class SkinTemplate extends Skin {
 		$tpl->set( 'capitalizeallnouns', $userLang->capitalizeAllNouns() ? ' capitalize-all-nouns' : '' );
 		$tpl->set( 'showjumplinks', true ); // showjumplinks preference has been removed
 		$tpl->set( 'username', $this->loggedin ? $this->username : null );
-		$tpl->setRef( 'userpage', $this->userpage );
-		$tpl->setRef( 'userpageurl', $this->userpageUrlDetails['href'] );
+		$tpl->set( 'userpage', $this->userpage );
+		$tpl->set( 'userpageurl', $this->userpageUrlDetails['href'] );
 		$tpl->set( 'userlang', $userLangCode );
 
 		// Users can have their language set differently than the
@@ -385,7 +348,11 @@ class SkinTemplate extends Skin {
 		// heading for the page title. Defaults to empty string.
 		$tpl->set( 'prebodyhtml', '' );
 
-		if ( $userLangCode !== $wgContLang->getHtmlCode() || $userLangDir !== $wgContLang->getDir() ) {
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
+		if (
+			$userLangCode !== $contLang->getHtmlCode() ||
+			$userLangDir !== $contLang->getDir()
+		) {
 			$escUserlang = htmlspecialchars( $userLangCode );
 			$escUserdir = htmlspecialchars( $userLangDir );
 			// Attributes must be in double quotes because htmlspecialchars() doesn't
@@ -403,16 +370,22 @@ class SkinTemplate extends Skin {
 		$tpl->set( 'lastmod', false );
 		$tpl->set( 'credits', false );
 		$tpl->set( 'numberofwatchingusers', false );
-		if ( $out->isArticle() && $title->exists() ) {
-			if ( $this->isRevisionCurrent() ) {
+		if ( $title->exists() ) {
+			if ( $out->isArticle() && $out->isRevisionCurrent() ) {
 				if ( $wgMaxCredits != 0 ) {
-					$tpl->set( 'credits', Action::factory( 'credits', $this->getWikiPage(),
-						$this->getContext() )->getCredits( $wgMaxCredits, $wgShowCreditsIfMax ) );
+					/** @var CreditsAction $action */
+					$action = Action::factory(
+						'credits', $this->getWikiPage(), $this->getContext() );
+					'@phan-var CreditsAction $action';
+					$tpl->set( 'credits',
+						$action->getCredits( $wgMaxCredits, $wgShowCreditsIfMax ) );
 				} else {
 					$tpl->set( 'lastmod', $this->lastModified() );
 				}
 			}
-			$tpl->set( 'copyright', $this->getCopyright() );
+			if ( $out->showsCopyright() ) {
+				$tpl->set( 'copyright', $this->getCopyright() );
+			}
 		}
 
 		$tpl->set( 'copyrightico', $this->getCopyrightIcon() );
@@ -460,11 +433,11 @@ class SkinTemplate extends Skin {
 		$tpl->set( 'printfooter', $this->printSource() );
 		// Wrap the bodyText with #mw-content-text element
 		$out->mBodytext = $this->wrapHTML( $title, $out->mBodytext );
-		$tpl->setRef( 'bodytext', $out->mBodytext );
+		$tpl->set( 'bodytext', $out->mBodytext );
 
 		$language_urls = $this->getLanguages();
 		if ( count( $language_urls ) ) {
-			$tpl->setRef( 'language_urls', $language_urls );
+			$tpl->set( 'language_urls', $language_urls );
 		} else {
 			$tpl->set( 'language_urls', false );
 		}
@@ -473,8 +446,8 @@ class SkinTemplate extends Skin {
 		$tpl->set( 'personal_urls', $this->buildPersonalUrls() );
 		$content_navigation = $this->buildContentNavigationUrls();
 		$content_actions = $this->buildContentActionUrls( $content_navigation );
-		$tpl->setRef( 'content_navigation', $content_navigation );
-		$tpl->setRef( 'content_actions', $content_actions );
+		$tpl->set( 'content_navigation', $content_navigation );
+		$tpl->set( 'content_actions', $content_actions );
 
 		$tpl->set( 'sidebar', $this->buildSidebar() );
 		$tpl->set( 'nav_urls', $this->buildNavUrls() );
@@ -487,7 +460,7 @@ class SkinTemplate extends Skin {
 
 		$tpl->set( 'debug', '' );
 		$tpl->set( 'debughtml', $this->generateDebugHTML() );
-		$tpl->set( 'reporttime', wfReportTime() );
+		$tpl->set( 'reporttime', wfReportTime( $out->getCSPNonce() ) );
 
 		// Avoid PHP 7.1 warning of passing $this by reference
 		$skinTemplate = $this;
@@ -522,13 +495,48 @@ class SkinTemplate extends Skin {
 	 * @return string
 	 */
 	public function getPersonalToolsList() {
+		return $this->makePersonalToolsList();
+	}
+
+	/**
+	 * Get the HTML for the personal tools list
+	 *
+	 * @since 1.31
+	 *
+	 * @param array|null $personalTools
+	 * @param array $options
+	 * @return string
+	 */
+	public function makePersonalToolsList( $personalTools = null, $options = [] ) {
 		$tpl = $this->setupTemplateForOutput();
 		$tpl->set( 'personal_urls', $this->buildPersonalUrls() );
 		$html = '';
-		foreach ( $tpl->getPersonalTools() as $key => $item ) {
-			$html .= $tpl->makeListItem( $key, $item );
+
+		if ( $personalTools === null ) {
+			$personalTools = ( $tpl instanceof BaseTemplate )
+				? $tpl->getPersonalTools()
+				: [];
 		}
+
+		foreach ( $personalTools as $key => $item ) {
+			$html .= $tpl->makeListItem( $key, $item, $options );
+		}
+
 		return $html;
+	}
+
+	/**
+	 * Get personal tools for the user
+	 *
+	 * @since 1.31
+	 *
+	 * @return array Array of personal tools
+	 */
+	public function getStructuredPersonalTools() {
+		$tpl = $this->setupTemplateForOutput();
+		$tpl->set( 'personal_urls', $this->buildPersonalUrls() );
+
+		return ( $tpl instanceof BaseTemplate ) ? $tpl->getPersonalTools() : [];
 	}
 
 	/**
@@ -578,6 +586,7 @@ class SkinTemplate extends Skin {
 		$request = $this->getRequest();
 		$pageurl = $title->getLocalURL();
 		$authManager = AuthManager::singleton();
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
 
 		/* set up the default links for the personal toolbar */
 		$personal_urls = [];
@@ -586,27 +595,29 @@ class SkinTemplate extends Skin {
 		# $this->getTitle() will just give Special:Badtitle, which is
 		# not especially useful as a returnto parameter. Use the title
 		# from the request instead, if there was one.
-		if ( $this->getUser()->isAllowed( 'read' ) ) {
+		if ( $permissionManager->userHasRight( $this->getUser(), 'read' ) ) {
 			$page = $this->getTitle();
 		} else {
 			$page = Title::newFromText( $request->getVal( 'title', '' ) );
 		}
 		$page = $request->getVal( 'returnto', $page );
-		$a = [];
+		$returnto = [];
 		if ( strval( $page ) !== '' ) {
-			$a['returnto'] = $page;
+			$returnto['returnto'] = $page;
 			$query = $request->getVal( 'returntoquery', $this->thisquery );
+			$paramsArray = wfCgiToArray( $query );
+			$query = wfArrayToCgi( $paramsArray );
 			if ( $query != '' ) {
-				$a['returntoquery'] = $query;
+				$returnto['returntoquery'] = $query;
 			}
 		}
 
-		$returnto = wfArrayToCgi( $a );
 		if ( $this->loggedin ) {
 			$personal_urls['userpage'] = [
 				'text' => $this->username,
 				'href' => &$this->userpageUrlDetails['href'],
 				'class' => $this->userpageUrlDetails['exists'] ? false : 'new',
+				'exists' => $this->userpageUrlDetails['exists'],
 				'active' => ( $this->userpageUrlDetails['href'] == $pageurl ),
 				'dir' => 'auto'
 			];
@@ -615,6 +626,7 @@ class SkinTemplate extends Skin {
 				'text' => $this->msg( 'mytalk' )->text(),
 				'href' => &$usertalkUrlDetails['href'],
 				'class' => $usertalkUrlDetails['exists'] ? false : 'new',
+				'exists' => $usertalkUrlDetails['exists'],
 				'active' => ( $usertalkUrlDetails['href'] == $pageurl )
 			];
 			$href = self::makeSpecialUrl( 'Preferences' );
@@ -624,7 +636,7 @@ class SkinTemplate extends Skin {
 				'active' => ( $href == $pageurl )
 			];
 
-			if ( $this->getUser()->isAllowed( 'viewmywatchlist' ) ) {
+			if ( $permissionManager->userHasRight( $this->getUser(), 'viewmywatchlist' ) ) {
 				$href = self::makeSpecialUrl( 'Watchlist' );
 				$personal_urls['watchlist'] = [
 					'text' => $this->msg( 'mywatchlist' )->text(),
@@ -642,7 +654,9 @@ class SkinTemplate extends Skin {
 			# so it doesn't contain the original alias-with-subpage.
 			$origTitle = Title::newFromText( $request->getText( 'title' ) );
 			if ( $origTitle instanceof Title && $origTitle->isSpecialPage() ) {
-				list( $spName, $spPar ) = SpecialPageFactory::resolveAlias( $origTitle->getText() );
+				list( $spName, $spPar ) =
+					MediaWikiServices::getInstance()->getSpecialPageFactory()->
+						resolveAlias( $origTitle->getText() );
 				$active = $spName == 'Contributions'
 					&& ( ( $spPar && $spPar == $this->username )
 						|| $request->getText( 'target' ) == $this->username );
@@ -661,10 +675,11 @@ class SkinTemplate extends Skin {
 			if ( $request->getSession()->canSetUser() ) {
 				$personal_urls['logout'] = [
 					'text' => $this->msg( 'pt-userlogout' )->text(),
+					'data-mw' => 'interface',
 					'href' => self::makeSpecialUrl( 'Userlogout',
-						// userlogout link must always contain an & character, otherwise we might not be able
+						// Note: userlogout link must always contain an & character, otherwise we might not be able
 						// to detect a buggy precaching proxy (T19790)
-						$title->isSpecial( 'Preferences' ) ? 'noreturnto' : $returnto ),
+						( $title->isSpecial( 'Preferences' ) ? [] : $returnto ) ),
 					'active' => false
 				];
 			}
@@ -675,9 +690,8 @@ class SkinTemplate extends Skin {
 				$useCombinedLoginLink = false;
 			}
 
-			$loginlink = $this->getUser()->isAllowed( 'createaccount' ) && $useCombinedLoginLink
-				? 'nav-login-createaccount'
-				: 'pt-login';
+			$loginlink = $permissionManager->userHasRight( $this->getUser(), 'createaccount' )
+						 && $useCombinedLoginLink ? 'nav-login-createaccount' : 'pt-login';
 
 			$login_url = [
 				'text' => $this->msg( $loginlink )->text(),
@@ -692,7 +706,7 @@ class SkinTemplate extends Skin {
 			];
 
 			// No need to show Talk and Contributions to anons if they can't contribute!
-			if ( User::groupHasPermission( '*', 'edit' ) ) {
+			if ( $permissionManager->groupHasPermission( '*', 'edit' ) ) {
 				// Because of caching, we can't link directly to the IP talk and
 				// contributions pages. Instead we use the special page shortcuts
 				// (which work correctly regardless of caching). This means we can't
@@ -713,21 +727,21 @@ class SkinTemplate extends Skin {
 
 			if (
 				$authManager->canCreateAccounts()
-				&& $this->getUser()->isAllowed( 'createaccount' )
+				&& $permissionManager->userHasRight( $this->getUser(), 'createaccount' )
 				&& !$useCombinedLoginLink
 			) {
 				$personal_urls['createaccount'] = $createaccount_url;
 			}
 
 			if ( $authManager->canAuthenticateNow() ) {
-				$key = User::groupHasPermission( '*', 'read' )
+				$key = $permissionManager->groupHasPermission( '*', 'read' )
 					? 'login'
 					: 'login-private';
 				$personal_urls[$key] = $login_url;
 			}
 		}
 
-		Hooks::run( 'PersonalUrls', [ &$personal_urls, &$title, $this ] );
+		Hooks::runWithoutAbort( 'PersonalUrls', [ &$personal_urls, &$title, $this ] );
 		return $personal_urls;
 	}
 
@@ -747,8 +761,10 @@ class SkinTemplate extends Skin {
 		if ( $selected ) {
 			$classes[] = 'selected';
 		}
+		$exists = true;
 		if ( $checkEdit && !$title->isKnown() ) {
 			$classes[] = 'new';
+			$exists = false;
 			if ( $query !== '' ) {
 				$query = 'action=edit&redlink=1&' . $query;
 			} else {
@@ -756,7 +772,8 @@ class SkinTemplate extends Skin {
 			}
 		}
 
-		$linkClass = MediaWikiServices::getInstance()->getLinkRenderer()->getLinkClasses( $title );
+		$services = MediaWikiServices::getInstance();
+		$linkClass = $services->getLinkRenderer()->getLinkClasses( $title );
 
 		// wfMessageFallback will nicely accept $message as an array of fallbacks
 		// or just a single key
@@ -768,9 +785,9 @@ class SkinTemplate extends Skin {
 		if ( $msg->exists() ) {
 			$text = $msg->text();
 		} else {
-			global $wgContLang;
-			$text = $wgContLang->getConverter()->convertNamespace(
-				MWNamespace::getSubject( $title->getNamespace() ) );
+			$text = $services->getContentLanguage()->getConverter()->
+				convertNamespace( $services->getNamespaceInfo()->
+					getSubject( $title->getNamespace() ) );
 		}
 
 		// Avoid PHP 7.1 warning of passing $this by reference
@@ -786,6 +803,7 @@ class SkinTemplate extends Skin {
 			'class' => implode( ' ', $classes ),
 			'text' => $text,
 			'href' => $title->getLocalURL( $query ),
+			'exists' => $exists,
 			'primary' => true ];
 		if ( $linkClass !== '' ) {
 			$result['link-class'] = $linkClass;
@@ -809,6 +827,9 @@ class SkinTemplate extends Skin {
 
 	/**
 	 * @todo is this even used?
+	 * @param string $name
+	 * @param string $urlaction
+	 * @return array
 	 */
 	function makeArticleUrlDetails( $name, $urlaction = '' ) {
 		$title = Title::newFromText( $name );
@@ -864,6 +885,7 @@ class SkinTemplate extends Skin {
 		$out = $this->getOutput();
 		$request = $this->getRequest();
 		$user = $this->getUser();
+		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
 
 		$content_navigation = [
 			'namespaces' => [],
@@ -875,7 +897,7 @@ class SkinTemplate extends Skin {
 		// parameters
 		$action = $request->getVal( 'action', 'view' );
 
-		$userCanRead = $title->quickUserCan( 'read', $user );
+		$userCanRead = $permissionManager->quickUserCan( 'read', $user, $title );
 
 		// Avoid PHP 7.1 warning of passing $this by reference
 		$skinTemplate = $this;
@@ -945,8 +967,9 @@ class SkinTemplate extends Skin {
 				}
 
 				// Checks if user can edit the current page if it exists or create it otherwise
-				if ( $title->quickUserCan( 'edit', $user )
-					&& ( $title->exists() || $title->quickUserCan( 'create', $user ) )
+				if ( $permissionManager->quickUserCan( 'edit', $user, $title ) &&
+					 ( $title->exists() ||
+						 $permissionManager->quickUserCan( 'create', $user, $title ) )
 				) {
 					// Builds CSS class for talk page links
 					$isTalkClass = $isTalk ? ' istalk' : '';
@@ -955,7 +978,7 @@ class SkinTemplate extends Skin {
 					// Whether to show the "Add a new section" tab
 					// Checks if this is a current rev of talk page and is not forced to be hidden
 					$showNewSection = !$out->forceHideNewSectionLink()
-						&& ( ( $isTalk && $this->isRevisionCurrent() ) || $out->showNewSectionLink() );
+						&& ( ( $isTalk && $out->isRevisionCurrent() ) || $out->showNewSectionLink() );
 					$section = $request->getVal( 'section' );
 
 					if ( $title->exists()
@@ -1011,7 +1034,7 @@ class SkinTemplate extends Skin {
 						'href' => $title->getLocalURL( 'action=history' ),
 					];
 
-					if ( $title->quickUserCan( 'delete', $user ) ) {
+					if ( $permissionManager->quickUserCan( 'delete', $user, $title ) ) {
 						$content_navigation['actions']['delete'] = [
 							'class' => ( $onPage && $action == 'delete' ) ? 'selected' : false,
 							'text' => wfMessageFallback( "$skname-action-delete", 'delete' )
@@ -1020,7 +1043,7 @@ class SkinTemplate extends Skin {
 						];
 					}
 
-					if ( $title->quickUserCan( 'move', $user ) ) {
+					if ( $permissionManager->quickUserCan( 'move', $user, $title ) ) {
 						$moveTitle = SpecialPage::getTitleFor( 'Movepage', $title->getPrefixedDBkey() );
 						$content_navigation['actions']['move'] = [
 							'class' => $this->getTitle()->isSpecial( 'Movepage' ) ? 'selected' : false,
@@ -1031,13 +1054,14 @@ class SkinTemplate extends Skin {
 					}
 				} else {
 					// article doesn't exist or is deleted
-					if ( $user->isAllowed( 'deletedhistory' ) ) {
+					if ( $permissionManager->quickUserCan( 'deletedhistory', $user, $title ) ) {
 						$n = $title->isDeleted();
 						if ( $n ) {
 							$undelTitle = SpecialPage::getTitleFor( 'Undelete', $title->getPrefixedDBkey() );
 							// If the user can't undelete but can view deleted
 							// history show them a "View .. deleted" tab instead.
-							$msgKey = $user->isAllowed( 'undelete' ) ? 'undelete' : 'viewdeleted';
+							$msgKey = $permissionManager->quickUserCan( 'undelete',
+								$user, $title ) ? 'undelete' : 'viewdeleted';
 							$content_navigation['actions']['undelete'] = [
 								'class' => $this->getTitle()->isSpecial( 'Undelete' ) ? 'selected' : false,
 								'text' => wfMessageFallback( "$skname-action-$msgKey", "{$msgKey}_short" )
@@ -1048,8 +1072,9 @@ class SkinTemplate extends Skin {
 					}
 				}
 
-				if ( $title->quickUserCan( 'protect', $user ) && $title->getRestrictionTypes() &&
-					MWNamespace::getRestrictionLevels( $title->getNamespace(), $user ) !== [ '' ]
+				if ( $permissionManager->quickUserCan( 'protect', $user, $title ) &&
+					 $title->getRestrictionTypes() &&
+					 $permissionManager->getNamespaceRestrictionLevels( $title->getNamespace(), $user ) !== [ '' ]
 				) {
 					$mode = $title->isProtected() ? 'unprotect' : 'protect';
 					$content_navigation['actions'][$mode] = [
@@ -1061,7 +1086,9 @@ class SkinTemplate extends Skin {
 				}
 
 				// Checks if the user is logged in
-				if ( $this->loggedin && $user->isAllowedAll( 'viewmywatchlist', 'editmywatchlist' ) ) {
+				if ( $this->loggedin && $permissionManager->userHasAllRights( $user,
+						'viewmywatchlist', 'editmywatchlist' )
+				) {
 					/**
 					 * The following actions use messages which, if made particular to
 					 * the any specific skins, would break the Ajax code which makes this
@@ -1078,22 +1105,30 @@ class SkinTemplate extends Skin {
 						),
 						// uses 'watch' or 'unwatch' message
 						'text' => $this->msg( $mode )->text(),
-						'href' => $title->getLocalURL( [ 'action' => $mode ] )
+						'href' => $title->getLocalURL( [ 'action' => $mode ] ),
+						// Set a data-mw=interface attribute, which the mediawiki.page.ajax
+						// module will look for to make sure it's a trusted link
+						'data' => [
+							'mw' => 'interface',
+						],
 					];
 				}
 			}
 
 			// Avoid PHP 7.1 warning of passing $this by reference
 			$skinTemplate = $this;
-			Hooks::run( 'SkinTemplateNavigation', [ &$skinTemplate, &$content_navigation ] );
+			Hooks::runWithoutAbort(
+				'SkinTemplateNavigation',
+				[ &$skinTemplate, &$content_navigation ]
+			);
 
 			if ( $userCanRead && !$wgDisableLangConversion ) {
 				$pageLang = $title->getPageLanguage();
-				// Gets list of language variants
-				$variants = $pageLang->getVariants();
 				// Checks that language conversion is enabled and variants exist
 				// And if it is not in the special namespace
-				if ( count( $variants ) > 1 ) {
+				if ( $pageLang->hasVariants() ) {
+					// Gets list of language variants
+					$variants = $pageLang->getVariants();
 					// Gets preferred variant (note that user preference is
 					// only possible for wiki content language variant)
 					$preferred = $pageLang->getPreferredVariant();
@@ -1112,8 +1147,8 @@ class SkinTemplate extends Skin {
 							'class' => ( $code == $preferred ) ? 'selected' : false,
 							'text' => $varname,
 							'href' => $title->getLocalURL( [ 'variant' => $code ] + $params ),
-							'lang' => wfBCP47( $code ),
-							'hreflang' => wfBCP47( $code ),
+							'lang' => LanguageCode::bcp47( $code ),
+							'hreflang' => LanguageCode::bcp47( $code ),
 						];
 					}
 				}
@@ -1129,14 +1164,15 @@ class SkinTemplate extends Skin {
 
 			// Avoid PHP 7.1 warning of passing $this by reference
 			$skinTemplate = $this;
-			Hooks::run( 'SkinTemplateNavigation::SpecialPage',
+			Hooks::runWithoutAbort( 'SkinTemplateNavigation::SpecialPage',
 				[ &$skinTemplate, &$content_navigation ] );
 		}
 
 		// Avoid PHP 7.1 warning of passing $this by reference
 		$skinTemplate = $this;
 		// Equiv to SkinTemplateContentActions
-		Hooks::run( 'SkinTemplateNavigation::Universal', [ &$skinTemplate, &$content_navigation ] );
+		Hooks::runWithoutAbort( 'SkinTemplateNavigation::Universal',
+			[ &$skinTemplate, &$content_navigation ] );
 
 		// Setup xml ids and tooltip info
 		foreach ( $content_navigation as $section => &$links ) {
@@ -1246,6 +1282,7 @@ class SkinTemplate extends Skin {
 		$nav_urls['contributions'] = false;
 		$nav_urls['log'] = false;
 		$nav_urls['blockip'] = false;
+		$nav_urls['mute'] = false;
 		$nav_urls['emailuser'] = false;
 		$nav_urls['userrights'] = false;
 
@@ -1261,7 +1298,7 @@ class SkinTemplate extends Skin {
 
 		if ( $out->isArticle() ) {
 			// Also add a "permalink" while we're at it
-			$revid = $this->getRevisionId();
+			$revid = $this->getOutput()->getRevisionId();
 			if ( $revid ) {
 				$nav_urls['permalink'] = [
 					'text' => $this->msg( 'permalink' )->text(),
@@ -1307,7 +1344,10 @@ class SkinTemplate extends Skin {
 				'href' => self::makeSpecialUrlSubpage( 'Log', $rootUser )
 			];
 
-			if ( $this->getUser()->isAllowed( 'block' ) ) {
+			if ( MediawikiServices::getInstance()
+					->getPermissionManager()
+					->userHasRight( $this->getUser(), 'block' )
+			) {
 				$nav_urls['blockip'] = [
 					'text' => $this->msg( 'blockip', $rootUser )->text(),
 					'href' => self::makeSpecialUrlSubpage( 'Block', $rootUser )
@@ -1323,6 +1363,13 @@ class SkinTemplate extends Skin {
 			}
 
 			if ( !$user->isAnon() ) {
+				if ( $this->getUser()->isRegistered() && $this->getConfig()->get( 'EnableSpecialMute' ) ) {
+					$nav_urls['mute'] = [
+						'text' => $this->msg( 'mute-preferences' )->text(),
+						'href' => self::makeSpecialUrlSubpage( 'Mute', $rootUser )
+					];
+				}
+
 				$sur = new UserrightsPage;
 				$sur->setContext( $this->getContext() );
 				$canChange = $sur->userCanChangeRights( $user );

@@ -1,23 +1,24 @@
 <?php
 
 namespace RemexHtml\TreeBuilder;
+
 use RemexHtml\PropGuard;
 use RemexHtml\Tokenizer\Attributes;
-use RemexHtml\Tokenizer\TokenHandler;
 
 abstract class InsertionMode {
+	use PropGuard;
+
 	const SELF_CLOSE_ERROR = 'unacknowledged self closing tag';
 
+	/** @var TreeBuilder */
 	protected $builder;
+
+	/** @var Dispatcher */
 	protected $dispatcher;
 
 	public function __construct( TreeBuilder $builder, Dispatcher $dispatcher ) {
 		$this->builder = $builder;
 		$this->dispatcher = $dispatcher;
-	}
-
-	public function __set( $name, $value ) {
-		PropGuard::set( $this, $name, $value );
 	}
 
 	public function doctype( $name, $public, $system, $quirks, $sourceStart, $sourceLength ) {
@@ -95,7 +96,6 @@ abstract class InsertionMode {
 	}
 
 	protected function stripNulls( $callback, $text, $start, $length, $sourceStart, $sourceLength ) {
-		$originalLength = $length;
 		$errorOffset = $sourceStart - $start;
 		while ( $length > 0 ) {
 			$validLength = strcspn( $text, "\0", $start, $length );
@@ -114,9 +114,11 @@ abstract class InsertionMode {
 	}
 
 	abstract public function characters( $text, $start, $length, $sourceStart, $sourceLength );
+
 	abstract public function startTag( $name, Attributes $attrs, $selfClose,
 		$sourceStart, $sourceLength );
+
 	abstract public function endTag( $name, $sourceStart, $sourceLength );
+
 	abstract public function endDocument( $pos );
 }
-

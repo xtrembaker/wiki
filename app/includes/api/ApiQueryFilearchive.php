@@ -2,8 +2,6 @@
 /**
  * API for MediaWiki 1.12+
  *
- * Created on May 10, 2010
- *
  * Copyright © 2010 Sam Reed
  * Copyright © 2008 Vasiliev Victor vasilvv@gmail.com,
  * based on ApiQueryAllPages.php
@@ -26,6 +24,8 @@
  * @file
  */
 
+use MediaWiki\Revision\RevisionRecord;
+
 /**
  * Query module to enumerate all deleted files.
  *
@@ -38,11 +38,9 @@ class ApiQueryFilearchive extends ApiQueryBase {
 	}
 
 	public function execute() {
-		// Before doing anything at all, let's check permissions
-		$this->checkUserRightsAny( 'deletedhistory' );
-
 		$user = $this->getUser();
 		$db = $this->getDB();
+		$commentStore = CommentStore::getStore();
 
 		$params = $this->extractRequestParams();
 
@@ -59,19 +57,21 @@ class ApiQueryFilearchive extends ApiQueryBase {
 		$fld_bitdepth = isset( $prop['bitdepth'] );
 		$fld_archivename = isset( $prop['archivename'] );
 
-		$this->addTables( 'filearchive' );
+		if ( $fld_description &&
+			!$this->getPermissionManager()->userHasRight( $user, 'deletedhistory' )
+		) {
+			$this->dieWithError( 'apierror-cantview-deleted-description', 'permissiondenied' );
+		}
+		if ( $fld_metadata &&
+			!$this->getPermissionManager()->userHasAnyRight( $user, 'deletedtext', 'undelete' )
+		) {
+			$this->dieWithError( 'apierror-cantview-deleted-metadata', 'permissiondenied' );
+		}
 
-		$this->addFields( ArchivedFile::selectFields() );
-		$this->addFields( [ 'fa_id', 'fa_name', 'fa_timestamp', 'fa_deleted' ] );
-		$this->addFieldsIf( 'fa_sha1', $fld_sha1 );
-		$this->addFieldsIf( [ 'fa_user', 'fa_user_text' ], $fld_user );
-		$this->addFieldsIf( [ 'fa_height', 'fa_width', 'fa_size' ], $fld_dimensions || $fld_size );
-		$this->addFieldsIf( 'fa_description', $fld_description );
-		$this->addFieldsIf( [ 'fa_major_mime', 'fa_minor_mime' ], $fld_mime );
-		$this->addFieldsIf( 'fa_media_type', $fld_mediatype );
-		$this->addFieldsIf( 'fa_metadata', $fld_metadata );
-		$this->addFieldsIf( 'fa_bits', $fld_bitdepth );
-		$this->addFieldsIf( 'fa_archive_name', $fld_archivename );
+		$fileQuery = ArchivedFile::getQueryInfo();
+		$this->addTables( $fileQuery['tables'] );
+		$this->addFields( $fileQuery['fields'] );
+		$this->addJoinConds( $fileQuery['joins'] );
 
 		if ( !is_null( $params['continue'] ) ) {
 			$cont = explode( '|', $params['continue'] );
@@ -118,19 +118,20 @@ class ApiQueryFilearchive extends ApiQueryBase {
 			}
 			if ( $sha1 ) {
 				$this->addWhereFld( 'fa_sha1', $sha1 );
+				// Paranoia: avoid brute force searches (T19342)
+				if ( !$this->getPermissionManager()->userHasRight( $user, 'deletedtext' ) ) {
+					$bitmask = File::DELETED_FILE;
+				} elseif ( !$this->getPermissionManager()
+					->userHasAnyRight( $user, 'suppressrevision', 'viewsuppressed' )
+				) {
+					$bitmask = File::DELETED_FILE | File::DELETED_RESTRICTED;
+				} else {
+					$bitmask = 0;
+				}
+				if ( $bitmask ) {
+					$this->addWhere( $this->getDB()->bitAnd( 'fa_deleted', $bitmask ) . " != $bitmask" );
+				}
 			}
-		}
-
-		// Exclude files this user can't view.
-		if ( !$user->isAllowed( 'deletedtext' ) ) {
-			$bitmask = File::DELETED_FILE;
-		} elseif ( !$user->isAllowedAny( 'suppressrevision', 'viewsuppressed' ) ) {
-			$bitmask = File::DELETED_FILE | File::DELETED_RESTRICTED;
-		} else {
-			$bitmask = 0;
-		}
-		if ( $bitmask ) {
-			$this->addWhere( $this->getDB()->bitAnd( 'fa_deleted', $bitmask ) . " != $bitmask" );
 		}
 
 		$limit = $params['limit'];
@@ -156,6 +157,8 @@ class ApiQueryFilearchive extends ApiQueryBase {
 				break;
 			}
 
+			$canViewFile = RevisionRecord::userCanBitfield( $row->fa_deleted, File::DELETED_FILE, $user );
+
 			$file = [];
 			$file['id'] = (int)$row->fa_id;
 			$file['name'] = $row->fa_name;
@@ -163,27 +166,27 @@ class ApiQueryFilearchive extends ApiQueryBase {
 			self::addTitleInfo( $file, $title );
 
 			if ( $fld_description &&
-				Revision::userCanBitfield( $row->fa_deleted, File::DELETED_COMMENT, $user )
+				RevisionRecord::userCanBitfield( $row->fa_deleted, File::DELETED_COMMENT, $user )
 			) {
-				$file['description'] = $row->fa_description;
+				$file['description'] = $commentStore->getComment( 'fa_description', $row )->text;
 				if ( isset( $prop['parseddescription'] ) ) {
 					$file['parseddescription'] = Linker::formatComment(
-						$row->fa_description, $title );
+						$file['description'], $title );
 				}
 			}
 			if ( $fld_user &&
-				Revision::userCanBitfield( $row->fa_deleted, File::DELETED_USER, $user )
+				RevisionRecord::userCanBitfield( $row->fa_deleted, File::DELETED_USER, $user )
 			) {
 				$file['userid'] = (int)$row->fa_user;
 				$file['user'] = $row->fa_user_text;
 			}
-			if ( $fld_sha1 ) {
+			if ( $fld_sha1 && $canViewFile ) {
 				$file['sha1'] = Wikimedia\base_convert( $row->fa_sha1, 36, 16, 40 );
 			}
 			if ( $fld_timestamp ) {
 				$file['timestamp'] = wfTimestamp( TS_ISO_8601, $row->fa_timestamp );
 			}
-			if ( $fld_size || $fld_dimensions ) {
+			if ( ( $fld_size || $fld_dimensions ) && $canViewFile ) {
 				$file['size'] = $row->fa_size;
 
 				$pageCount = ArchivedFile::newFromRow( $row )->pageCount();
@@ -194,18 +197,18 @@ class ApiQueryFilearchive extends ApiQueryBase {
 				$file['height'] = $row->fa_height;
 				$file['width'] = $row->fa_width;
 			}
-			if ( $fld_mediatype ) {
+			if ( $fld_mediatype && $canViewFile ) {
 				$file['mediatype'] = $row->fa_media_type;
 			}
-			if ( $fld_metadata ) {
+			if ( $fld_metadata && $canViewFile ) {
 				$file['metadata'] = $row->fa_metadata
 					? ApiQueryImageInfo::processMetaData( unserialize( $row->fa_metadata ), $result )
 					: null;
 			}
-			if ( $fld_bitdepth ) {
+			if ( $fld_bitdepth && $canViewFile ) {
 				$file['bitdepth'] = $row->fa_bits;
 			}
-			if ( $fld_mime ) {
+			if ( $fld_mime && $canViewFile ) {
 				$file['mime'] = "$row->fa_major_mime/$row->fa_minor_mime";
 			}
 			if ( $fld_archivename && !is_null( $row->fa_archive_name ) ) {

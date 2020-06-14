@@ -40,14 +40,11 @@ class UploadFromStash extends UploadBase {
 	private $repo;
 
 	/**
-	 * @param User|bool $user Default: false
+	 * @param User|bool $user Default: false Sometimes this won't exist, as when running from cron.
 	 * @param UploadStash|bool $stash Default: false
 	 * @param FileRepo|bool $repo Default: false
 	 */
 	public function __construct( $user = false, $stash = false, $repo = false ) {
-		// user object. sometimes this won't exist, as when running from cron.
-		$this->user = $user;
-
 		if ( $repo ) {
 			$this->repo = $repo;
 		} else {
@@ -63,7 +60,7 @@ class UploadFromStash extends UploadBase {
 				wfDebug( __METHOD__ . " creating new UploadStash instance with no user\n" );
 			}
 
-			$this->stash = new UploadStash( $this->repo, $this->user );
+			$this->stash = new UploadStash( $this->repo, $user );
 		}
 	}
 
@@ -113,7 +110,7 @@ class UploadFromStash extends UploadBase {
 	}
 
 	/**
-	 * @param WebRequest $request
+	 * @param WebRequest &$request
 	 */
 	public function initializeFromRequest( &$request ) {
 		// sends wpSessionKey as a default when wpFileKey is missing

@@ -23,7 +23,7 @@
 
 require_once __DIR__ . '/Maintenance.php';
 
-use Wikimedia\Rdbms\ResultWrapper;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
@@ -61,7 +61,7 @@ class ConvertUserOptions extends Maintenance {
 				__METHOD__,
 				[
 					'ORDER BY' => 'user_id',
-					'LIMIT' => $this->mBatchSize,
+					'LIMIT' => $this->getBatchSize(),
 				]
 			);
 			$id = $this->convertOptionBatch( $res, $dbw );
@@ -76,7 +76,7 @@ class ConvertUserOptions extends Maintenance {
 	}
 
 	/**
-	 * @param ResultWrapper $res
+	 * @param IResultWrapper $res
 	 * @param IDatabase $dbw
 	 * @return null|int
 	 */
@@ -120,5 +120,5 @@ class ConvertUserOptions extends Maintenance {
 	}
 }
 
-$maintClass = "ConvertUserOptions";
+$maintClass = ConvertUserOptions::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

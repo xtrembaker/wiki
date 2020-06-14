@@ -20,7 +20,7 @@
  * @file
  * @ingroup Maintenance
  * @author Rob Church <robchur@gmail.com>
- * @licence GNU General Public Licence 2.0 or later
+ * @license GPL-2.0-or-later
  */
 
 require_once __DIR__ . '/Maintenance.php';
@@ -79,22 +79,28 @@ class ReassignEdits extends Maintenance {
 
 		# Count things
 		$this->output( "Checking current edits..." );
+		$revQueryInfo = ActorMigration::newMigration()->getWhere( $dbw, 'rev_user', $from );
 		$res = $dbw->select(
-			'revision',
+			[ 'revision' ] + $revQueryInfo['tables'],
 			'COUNT(*) AS count',
-			$this->userConditions( $from, 'rev_user', 'rev_user_text' ),
-			__METHOD__
+			$revQueryInfo['conds'],
+			__METHOD__,
+			[],
+			$revQueryInfo['joins']
 		);
 		$row = $dbw->fetchObject( $res );
 		$cur = $row->count;
 		$this->output( "found {$cur}.\n" );
 
 		$this->output( "Checking deleted edits..." );
+		$arQueryInfo = ActorMigration::newMigration()->getWhere( $dbw, 'ar_user', $from, false );
 		$res = $dbw->select(
-			'archive',
+			[ 'archive' ] + $arQueryInfo['tables'],
 			'COUNT(*) AS count',
-			$this->userConditions( $from, 'ar_user', 'ar_user_text' ),
-			__METHOD__
+			$arQueryInfo['conds'],
+			__METHOD__,
+			[],
+			$arQueryInfo['joins']
 		);
 		$row = $dbw->fetchObject( $res );
 		$del = $row->count;
@@ -103,11 +109,14 @@ class ReassignEdits extends Maintenance {
 		# Don't count recent changes if we're not supposed to
 		if ( $rc ) {
 			$this->output( "Checking recent changes..." );
+			$rcQueryInfo = ActorMigration::newMigration()->getWhere( $dbw, 'rc_user', $from, false );
 			$res = $dbw->select(
-				'recentchanges',
+				[ 'recentchanges' ] + $rcQueryInfo['tables'],
 				'COUNT(*) AS count',
-				$this->userConditions( $from, 'rc_user', 'rc_user_text' ),
-				__METHOD__
+				$rcQueryInfo['conds'],
+				__METHOD__,
+				[],
+				$rcQueryInfo['joins']
 			);
 			$row = $dbw->fetchObject( $res );
 			$rec = $row->count;
@@ -123,17 +132,23 @@ class ReassignEdits extends Maintenance {
 			if ( $total ) {
 				# Reassign edits
 				$this->output( "\nReassigning current edits..." );
-				$dbw->update( 'revision', $this->userSpecification( $to, 'rev_user', 'rev_user_text' ),
-					$this->userConditions( $from, 'rev_user', 'rev_user_text' ), __METHOD__ );
+				$dbw->update(
+					'revision_actor_temp',
+					[ 'revactor_actor' => $to->getActorId( $dbw ) ],
+					[ 'revactor_actor' => $from->getActorId() ],
+					__METHOD__
+				);
 				$this->output( "done.\nReassigning deleted edits..." );
-				$dbw->update( 'archive', $this->userSpecification( $to, 'ar_user', 'ar_user_text' ),
-					$this->userConditions( $from, 'ar_user', 'ar_user_text' ), __METHOD__ );
+				$dbw->update( 'archive',
+					[ 'ar_actor' => $to->getActorId( $dbw ) ],
+					[ $arQueryInfo['conds'] ], __METHOD__ );
 				$this->output( "done.\n" );
 				# Update recent changes if required
 				if ( $rc ) {
 					$this->output( "Updating recent changes..." );
-					$dbw->update( 'recentchanges', $this->userSpecification( $to, 'rc_user', 'rc_user_text' ),
-						$this->userConditions( $from, 'rc_user', 'rc_user_text' ), __METHOD__ );
+					$dbw->update( 'recentchanges',
+						[ 'rc_actor' => $to->getActorId( $dbw ) ],
+						[ $rcQueryInfo['conds'] ], __METHOD__ );
 					$this->output( "done.\n" );
 				}
 			}
@@ -142,34 +157,6 @@ class ReassignEdits extends Maintenance {
 		$this->commitTransaction( $dbw, __METHOD__ );
 
 		return (int)$total;
-	}
-
-	/**
-	 * Return the most efficient set of user conditions
-	 * i.e. a user => id mapping, or a user_text => text mapping
-	 *
-	 * @param User $user User for the condition
-	 * @param string $idfield Field name containing the identifier
-	 * @param string $utfield Field name containing the user text
-	 * @return array
-	 */
-	private function userConditions( &$user, $idfield, $utfield ) {
-		return $user->getId()
-			? [ $idfield => $user->getId() ]
-			: [ $utfield => $user->getName() ];
-	}
-
-	/**
-	 * Return user specifications
-	 * i.e. user => id, user_text => text
-	 *
-	 * @param User $user User for the spec
-	 * @param string $idfield Field name containing the identifier
-	 * @param string $utfield Field name containing the user text
-	 * @return array
-	 */
-	private function userSpecification( &$user, $idfield, $utfield ) {
-		return [ $idfield => $user->getId(), $utfield => $user->getName() ];
 	}
 
 	/**
@@ -186,7 +173,7 @@ class ReassignEdits extends Maintenance {
 		} else {
 			$user = User::newFromName( $username );
 			if ( !$user ) {
-				$this->error( "Invalid username", true );
+				$this->fatalError( "Invalid username" );
 			}
 		}
 		$user->load();
@@ -195,5 +182,5 @@ class ReassignEdits extends Maintenance {
 	}
 }
 
-$maintClass = "ReassignEdits";
+$maintClass = ReassignEdits::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

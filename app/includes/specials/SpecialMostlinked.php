@@ -25,7 +25,7 @@
  * @author Rob Church <robchur@gmail.com>
  */
 
-use Wikimedia\Rdbms\ResultWrapper;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
@@ -33,7 +33,7 @@ use Wikimedia\Rdbms\IDatabase;
  *
  * @ingroup SpecialPage
  */
-class MostlinkedPage extends QueryPage {
+class SpecialMostLinked extends QueryPage {
 	function __construct( $name = 'Mostlinked' ) {
 		parent::__construct( $name );
 	}
@@ -78,7 +78,7 @@ class MostlinkedPage extends QueryPage {
 	 * Pre-fill the link cache
 	 *
 	 * @param IDatabase $db
-	 * @param ResultWrapper $res
+	 * @param IResultWrapper $res
 	 */
 	function preprocessResults( $db, $res ) {
 		$this->executeLBFromResultWrapper( $res );
