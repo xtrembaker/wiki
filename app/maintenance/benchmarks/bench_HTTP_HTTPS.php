@@ -24,6 +24,8 @@
  * @author  Platonides
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Benchmarker.php';
 
 /**
@@ -45,7 +47,8 @@ class BenchHttpHttps extends Benchmarker {
 	}
 
 	private function doRequest( $proto ) {
-		Http::get( "$proto://localhost/", [], __METHOD__ );
+		MediaWikiServices::getInstance()->getHttpRequestFactory()->
+			get( "$proto://localhost/", [], __METHOD__ );
 	}
 
 	// bench function 1
@@ -59,5 +62,5 @@ class BenchHttpHttps extends Benchmarker {
 	}
 }
 
-$maintClass = 'BenchHttpHttps';
+$maintClass = BenchHttpHttps::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

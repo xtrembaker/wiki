@@ -1,8 +1,5 @@
 <?php
 /**
- *
- * Created on January 3rd, 2013
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -21,6 +18,11 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+
+/**
+ * @ingroup API
+ */
 class ApiImageRotate extends ApiBase {
 	private $mPageSet = null;
 
@@ -36,14 +38,12 @@ class ApiImageRotate extends ApiBase {
 		$pageSet = $this->getPageSet();
 		$pageSet->execute();
 
-		$result = [];
-
 		$result = $pageSet->getInvalidTitlesAndRevisions( [
 			'invalidTitles', 'special', 'missingIds', 'missingRevIds', 'interwikiTitles',
 		] );
 
 		// Check if user can add tags
-		if ( count( $params['tags'] ) ) {
+		if ( $params['tags'] ) {
 			$ableToTag = ChangeTags::canAddTagsAccompanyingChange( $params['tags'], $this->getUser() );
 			if ( !$ableToTag->isOK() ) {
 				$this->dieStatus( $ableToTag );
@@ -61,7 +61,9 @@ class ApiImageRotate extends ApiBase {
 				}
 			}
 
-			$file = wfFindFile( $title, [ 'latest' => true ] );
+			$file = MediaWikiServices::getInstance()->getRepoGroup()->findFile(
+				$title, [ 'latest' => true ]
+			);
 			if ( !$file ) {
 				$r['result'] = 'Failure';
 				$r['errors'] = $this->getErrorFormatter()->arrayFromStatus(
@@ -101,8 +103,10 @@ class ApiImageRotate extends ApiBase {
 				continue;
 			}
 			$ext = strtolower( pathinfo( "$srcPath", PATHINFO_EXTENSION ) );
-			$tmpFile = TempFSFile::factory( 'rotate_', $ext, wfTempDir() );
+			$tmpFile = MediaWikiServices::getInstance()->getTempFSFileFactory()
+				->newTempFSFile( 'rotate_', $ext );
 			$dstPath = $tmpFile->getPath();
+			// @phan-suppress-next-line PhanUndeclaredMethod
 			$err = $handler->rotate( $file, [
 				'srcPath' => $srcPath,
 				'dstPath' => $dstPath,
@@ -112,6 +116,7 @@ class ApiImageRotate extends ApiBase {
 				$comment = wfMessage(
 					'rotate-comment'
 				)->numParams( $rotation )->inContentLanguage()->text();
+				// @phan-suppress-next-line PhanUndeclaredMethod
 				$status = $file->upload(
 					$dstPath,
 					$comment,

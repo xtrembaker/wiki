@@ -20,6 +20,7 @@
  */
 
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\RevisionRecord;
 
 /**
  * Item class for a logging table row with its associated change tags.
@@ -44,8 +45,14 @@ class ChangeTagsLogItem extends RevisionItemBase {
 		return 'log_user_text';
 	}
 
+	public function getAuthorActorField() {
+		return 'log_actor';
+	}
+
 	public function canView() {
-		return LogEventsList::userCan( $this->row, Revision::DELETED_RESTRICTED, $this->list->getUser() );
+		return LogEventsList::userCan(
+			$this->row, RevisionRecord::SUPPRESSED_ALL, $this->list->getUser()
+		);
 	}
 
 	public function canViewContent() {
@@ -81,7 +88,7 @@ class ChangeTagsLogItem extends RevisionItemBase {
 		$loglink = $this->list->msg( 'parentheses' )->rawParams( $loglink )->escaped();
 		// User links and action text
 		$action = $formatter->getActionText();
-		// Comment
+
 		$comment = $this->list->getLanguage()->getDirMark() .
 			$formatter->getComment();
 

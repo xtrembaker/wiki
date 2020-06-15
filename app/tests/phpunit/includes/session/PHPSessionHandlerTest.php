@@ -15,15 +15,6 @@ class PHPSessionHandlerTest extends MediaWikiTestCase {
 	private function getResetter( &$rProp = null ) {
 		$reset = [];
 
-		// Ignore "headers already sent" warnings during this test
-		set_error_handler( function ( $errno, $errstr ) use ( &$warnings ) {
-			if ( preg_match( '/headers already sent/', $errstr ) ) {
-				return true;
-			}
-			return false;
-		} );
-		$reset[] = new \Wikimedia\ScopedCallback( 'restore_error_handler' );
-
 		$rProp = new \ReflectionProperty( PHPSessionHandler::class, 'instance' );
 		$rProp->setAccessible( true );
 		if ( $rProp->getValue() ) {
@@ -80,7 +71,10 @@ class PHPSessionHandlerTest extends MediaWikiTestCase {
 		ini_set( 'session.use_trans_sid', 1 );
 
 		$store = new TestBagOStuff();
-		$logger = new \TestLogger();
+		// Tolerate debug message, anything else is unexpected
+		$logger = new \TestLogger( false, function ( $m ) {
+			return preg_match( '/^SessionManager using store/', $m ) ? null : $m;
+		} );
 		$manager = new SessionManager( [
 			'store' => $store,
 			'logger' => $logger,
@@ -109,7 +103,7 @@ class PHPSessionHandlerTest extends MediaWikiTestCase {
 		$reset[] = $this->getResetter( $rProp );
 
 		$this->setMwGlobals( [
-			'wgSessionProviders' => [ [ 'class' => 'DummySessionProvider' ] ],
+			'wgSessionProviders' => [ [ 'class' => \DummySessionProvider::class ] ],
 			'wgObjectCacheSessionExpiry' => 2,
 		] );
 
@@ -126,13 +120,13 @@ class PHPSessionHandlerTest extends MediaWikiTestCase {
 		$wrap = TestingAccessWrapper::newFromObject( $rProp->getValue() );
 		$reset[] = new \Wikimedia\ScopedCallback(
 			[ $wrap, 'setEnableFlags' ],
-			[ $wrap->enable ? $wrap->warn ? 'warn' : 'enable' : 'disable' ]
+			[ $wrap->enable ? ( $wrap->warn ? 'warn' : 'enable' ) : 'disable' ]
 		);
 		$wrap->setEnableFlags( 'warn' );
 
-		\MediaWiki\suppressWarnings();
+		\Wikimedia\suppressWarnings();
 		ini_set( 'session.serialize_handler', $handler );
-		\MediaWiki\restoreWarnings();
+		\Wikimedia\restoreWarnings();
 		if ( ini_get( 'session.serialize_handler' ) !== $handler ) {
 			$this->markTestSkipped( "Cannot set session.serialize_handler to \"$handler\"" );
 		}
@@ -156,6 +150,7 @@ class PHPSessionHandlerTest extends MediaWikiTestCase {
 		$expect = [ 'AuthenticationSessionTest' => $rand ];
 		session_write_close();
 		$this->assertSame( [
+			[ LogLevel::DEBUG, 'SessionManager using store MediaWiki\Session\TestBagOStuff' ],
 			[ LogLevel::WARNING, 'Something wrote to $_SESSION!' ],
 		], $logger->getBuffer() );
 

@@ -20,12 +20,15 @@
  * @defgroup Maintenance Maintenance
  */
 
+define( 'MW_ENTRY_POINT', 'cli' );
+
 // Bail on old versions of PHP, or if composer has not been run yet to install
 // dependencies.
 require_once __DIR__ . '/../includes/PHPVersionCheck.php';
-wfEntryPointCheck( 'cli' );
+wfEntryPointCheck( 'text' );
 
-use Wikimedia\Rdbms\DBReplicationWaitError;
+use MediaWiki\Shell\Shell;
+use Wikimedia\Rdbms\IResultWrapper;
 
 /**
  * @defgroup MaintenanceArchive Maintenance archives
@@ -34,9 +37,20 @@ use Wikimedia\Rdbms\DBReplicationWaitError;
 
 // Define this so scripts can easily find doMaintenance.php
 define( 'RUN_MAINTENANCE_IF_MAIN', __DIR__ . '/doMaintenance.php' );
+
+/**
+ * @deprecated since 1.31
+ */
 define( 'DO_MAINTENANCE', RUN_MAINTENANCE_IF_MAIN ); // original name, harmless
 
 $maintClass = false;
+
+// Some extensions rely on MW_INSTALL_PATH to find core files to include. Setting it here helps them
+// if they're included by a core script (like DatabaseUpdater) after Maintenance.php has already
+// been run.
+if ( strval( getenv( 'MW_INSTALL_PATH' ) ) === '' ) {
+	putenv( 'MW_INSTALL_PATH=' . realpath( __DIR__ . '/..' ) );
+}
 
 use Wikimedia\Rdbms\IDatabase;
 use MediaWiki\Logger\LoggerFactory;
@@ -50,7 +64,18 @@ use Wikimedia\Rdbms\IMaintainableDatabase;
  * is the execute() method. See docs/maintenance.txt for more info
  * and a quick demo of how to use it.
  *
- * @author Chad Horohoe <chad@anyonecanedit.org>
+ * Terminology:
+ *   params: registry of named values that may be passed to the script
+ *   arg list: registry of positional values that may be passed to the script
+ *   options: passed param values
+ *   args: passed positional values
+ *
+ * In the command:
+ *   mwscript somescript.php --foo=bar baz
+ * foo is a param
+ * bar is the option value of the option for param foo
+ * baz is the arg value at index 0 in the arg list
+ *
  * @since 1.16
  * @ingroup Maintenance
  */
@@ -66,13 +91,17 @@ abstract class Maintenance {
 	// Const for getStdin()
 	const STDIN_ALL = 'all';
 
-	// This is the desired params
+	/**
+	 * Array of desired/allowed params
+	 * @var array[]
+	 * @phan-var array<string,array{desc:string,require:bool,withArg:string,shortName:string,multiOccurrence:bool}>
+	 */
 	protected $mParams = [];
 
 	// Array of mapping short parameters to long ones
 	protected $mShortParamsMap = [];
 
-	// Array of desired args
+	// Array of desired/allowed args
 	protected $mArgList = [];
 
 	// This is the list of options that were actually passed
@@ -80,6 +109,9 @@ abstract class Maintenance {
 
 	// This is the list of arguments that were actually passed
 	protected $mArgs = [];
+
+	// Allow arbitrary options to be passed, or only specified ones?
+	protected $mAllowUnregisteredOptions = false;
 
 	// Name of the script currently running
 	protected $mSelf;
@@ -102,9 +134,17 @@ abstract class Maintenance {
 	 */
 	protected $mBatchSize = null;
 
-	// Generic options added by addDefaultParams()
+	/**
+	 * Generic options added by addDefaultParams()
+	 * @var array[]
+	 * @phan-var array<string,array{desc:string,require:bool,withArg:string,shortName:string,multiOccurrence:bool}>
+	 */
 	private $mGenericParameters = [];
-	// Generic options which might or not be supported by the script
+	/**
+	 * Generic options which might or not be supported by the script
+	 * @var array[]
+	 * @phan-var array<string,array{desc:string,require:bool,withArg:string,shortName:string,multiOccurrence:bool}>
+	 */
 	private $mDependantParameters = [];
 
 	/**
@@ -153,11 +193,8 @@ abstract class Maintenance {
 	 * their own constructors
 	 */
 	public function __construct() {
-		// Setup $IP, using MW_INSTALL_PATH if it exists
 		global $IP;
-		$IP = strval( getenv( 'MW_INSTALL_PATH' ) ) !== ''
-			? getenv( 'MW_INSTALL_PATH' )
-			: realpath( __DIR__ . '/..' );
+		$IP = getenv( 'MW_INSTALL_PATH' );
 
 		$this->addDefaultParams();
 		register_shutdown_function( [ $this, 'outputChanneled' ], false );
@@ -183,7 +220,7 @@ abstract class Maintenance {
 		if ( $count < 2 ) {
 			return false; // sanity
 		}
-		if ( $bt[0]['class'] !== 'Maintenance' || $bt[0]['function'] !== 'shouldExecute' ) {
+		if ( $bt[0]['class'] !== self::class || $bt[0]['function'] !== 'shouldExecute' ) {
 			return false; // last call should be to this function
 		}
 		$includeFuncs = [ 'require_once', 'require', 'include', 'include_once' ];
@@ -198,8 +235,23 @@ abstract class Maintenance {
 
 	/**
 	 * Do the actual work. All child classes will need to implement this
+	 *
+	 * @return bool|null|void True for success, false for failure. Not returning
+	 *   a value, or returning null, is also interpreted as success. Returning
+	 *   false for failure will cause doMaintenance.php to exit the process
+	 *   with a non-zero exit status.
 	 */
 	abstract public function execute();
+
+	/**
+	 * Checks to see if a particular option in supported.  Normally this means it
+	 * has been registered by the script via addOption.
+	 * @param string $name The name of the option
+	 * @return bool true if the option exists, false otherwise
+	 */
+	protected function supportsOption( $name ) {
+		return isset( $this->mParams[$name] );
+	}
 
 	/**
 	 * Add a parameter to the script. Will be displayed on --help
@@ -229,8 +281,8 @@ abstract class Maintenance {
 	}
 
 	/**
-	 * Checks to see if a particular param exists.
-	 * @param string $name The name of the param
+	 * Checks to see if a particular option exists.
+	 * @param string $name The name of the option
 	 * @return bool
 	 */
 	protected function hasOption( $name ) {
@@ -244,7 +296,7 @@ abstract class Maintenance {
 	 * this will return an array.
 	 *
 	 * @param string $name The name of the param
-	 * @param mixed $default Anything you want, default null
+	 * @param mixed|null $default Anything you want, default null
 	 * @return mixed
 	 */
 	protected function getOption( $name, $default = null ) {
@@ -281,6 +333,15 @@ abstract class Maintenance {
 	}
 
 	/**
+	 * Sets whether to allow unregistered options, which are options passed to
+	 * a script that do not match an expected parameter.
+	 * @param bool $allow Should we allow?
+	 */
+	protected function setAllowUnregisteredOptions( $allow ) {
+		$this->mAllowUnregisteredOptions = $allow;
+	}
+
+	/**
 	 * Set the description text.
 	 * @param string $text The text of the description
 	 */
@@ -294,17 +355,36 @@ abstract class Maintenance {
 	 * @return bool
 	 */
 	protected function hasArg( $argId = 0 ) {
+		if ( func_num_args() === 0 ) {
+			wfDeprecated( __METHOD__ . ' without an $argId', '1.33' );
+		}
+
 		return isset( $this->mArgs[$argId] );
 	}
 
 	/**
 	 * Get an argument.
 	 * @param int $argId The integer value (from zero) for the arg
-	 * @param mixed $default The default if it doesn't exist
+	 * @param mixed|null $default The default if it doesn't exist
 	 * @return mixed
 	 */
 	protected function getArg( $argId = 0, $default = null ) {
-		return $this->hasArg( $argId ) ? $this->mArgs[$argId] : $default;
+		if ( func_num_args() === 0 ) {
+			wfDeprecated( __METHOD__ . ' without an $argId', '1.33' );
+		}
+
+		return $this->mArgs[$argId] ?? $default;
+	}
+
+	/**
+	 * Returns batch size
+	 *
+	 * @since 1.31
+	 *
+	 * @return int|null
+	 */
+	protected function getBatchSize() {
+		return $this->mBatchSize;
 	}
 
 	/**
@@ -339,12 +419,12 @@ abstract class Maintenance {
 
 	/**
 	 * Return input from stdin.
-	 * @param int $len The number of bytes to read. If null, just return the handle.
+	 * @param int|null $len The number of bytes to read. If null, just return the handle.
 	 *   Maintenance::STDIN_ALL returns the full length
 	 * @return mixed
 	 */
 	protected function getStdin( $len = null ) {
-		if ( $len == Maintenance::STDIN_ALL ) {
+		if ( $len == self::STDIN_ALL ) {
 			return file_get_contents( 'php://stdin' );
 		}
 		$f = fopen( 'php://stdin', 'rt' );
@@ -368,9 +448,18 @@ abstract class Maintenance {
 	 * Throw some output to the user. Scripts can call this with no fears,
 	 * as we handle all --quiet stuff here
 	 * @param string $out The text to show to the user
-	 * @param mixed $channel Unique identifier for the channel. See function outputChanneled.
+	 * @param mixed|null $channel Unique identifier for the channel. See function outputChanneled.
 	 */
 	protected function output( $out, $channel = null ) {
+		// This is sometimes called very early, before Setup.php is included.
+		if ( class_exists( MediaWikiServices::class ) ) {
+			// Try to periodically flush buffered metrics to avoid OOMs
+			$stats = MediaWikiServices::getInstance()->getStatsdDataFactory();
+			if ( $stats->getDataCount() > 1000 ) {
+				MediaWiki::emitBufferedStatsdData( $stats, $this->getConfig() );
+			}
+		}
+
 		if ( $this->mQuiet ) {
 			return;
 		}
@@ -387,19 +476,34 @@ abstract class Maintenance {
 	 * Throw an error to the user. Doesn't respect --quiet, so don't use
 	 * this for non-error output
 	 * @param string $err The error to display
-	 * @param int $die If > 0, go ahead and die out using this int as the code
+	 * @param int $die Deprecated since 1.31, use Maintenance::fatalError() instead
 	 */
 	protected function error( $err, $die = 0 ) {
+		if ( intval( $die ) !== 0 ) {
+			wfDeprecated( __METHOD__ . '( $err, $die )', '1.31' );
+			$this->fatalError( $err, intval( $die ) );
+		}
 		$this->outputChanneled( false );
-		if ( PHP_SAPI == 'cli' ) {
+		if (
+			( PHP_SAPI == 'cli' || PHP_SAPI == 'phpdbg' ) &&
+			!defined( 'MW_PHPUNIT_TEST' )
+		) {
 			fwrite( STDERR, $err . "\n" );
 		} else {
 			print $err;
 		}
-		$die = intval( $die );
-		if ( $die > 0 ) {
-			die( $die );
-		}
+	}
+
+	/**
+	 * Output a message and terminate the current script.
+	 *
+	 * @param string $msg Error message
+	 * @param int $exitCode PHP exit status. Should be in range 1-254.
+	 * @since 1.31
+	 */
+	protected function fatalError( $msg, $exitCode = 1 ) {
+		$this->error( $msg );
+		exit( $exitCode );
 	}
 
 	private $atLineStart = true;
@@ -420,7 +524,7 @@ abstract class Maintenance {
 	 * same channel are concatenated, but any intervening messages in another
 	 * channel start a new line.
 	 * @param string $msg The message without trailing newline
-	 * @param string $channel Channel identifier or null for no
+	 * @param string|null $channel Channel identifier or null for no
 	 *     channel. Channel comparison uses ===.
 	 */
 	public function outputChanneled( $msg, $channel = null ) {
@@ -457,7 +561,7 @@ abstract class Maintenance {
 	 * @return int
 	 */
 	public function getDbType() {
-		return Maintenance::DB_STD;
+		return self::DB_STD;
 	}
 
 	/**
@@ -467,19 +571,23 @@ abstract class Maintenance {
 		# Generic (non script dependant) options:
 
 		$this->addOption( 'help', 'Display this help message', false, false, 'h' );
-		$this->addOption( 'quiet', 'Whether to supress non-error output', false, false, 'q' );
+		$this->addOption( 'quiet', 'Whether to suppress non-error output', false, false, 'q' );
 		$this->addOption( 'conf', 'Location of LocalSettings.php, if not default', false, true );
 		$this->addOption( 'wiki', 'For specifying the wiki ID', false, true );
 		$this->addOption( 'globals', 'Output globals at the end of processing for debugging' );
 		$this->addOption(
 			'memory-limit',
 			'Set a specific memory limit for the script, '
-				. '"max" for no limit or "default" to avoid changing it'
+				. '"max" for no limit or "default" to avoid changing it',
+			false,
+			true
 		);
 		$this->addOption( 'server', "The protocol and server name to use in URLs, e.g. " .
 			"http://en.wikipedia.org. This is sometimes necessary because " .
 			"server name detection may fail in command line scripts.", false, true );
 		$this->addOption( 'profiler', 'Profiler output format (usually "text")', false, true );
+		// This is named --mwdebug, because --debug would conflict in the phpunit.php CLI script.
+		$this->addOption( 'mwdebug', 'Enable built-in MediaWiki development settings', false, false );
 
 		# Save generic options to display them separately in help
 		$this->mGenericParameters = $this->mParams;
@@ -490,6 +598,7 @@ abstract class Maintenance {
 		if ( $this->getDbType() > 0 ) {
 			$this->addOption( 'dbuser', 'The DB user to use for this script', false, true );
 			$this->addOption( 'dbpass', 'The password to use for this script', false, true );
+			$this->addOption( 'dbgroupdefault', 'The default DB group to use.', false, true );
 		}
 
 		# Save additional script dependant options to display
@@ -548,7 +657,7 @@ abstract class Maintenance {
 			$joined = implode( ', ', $missing );
 			$msg = "The following extensions are required to be installed "
 				. "for this script to run: $joined. Please enable them and then try again.";
-			$this->error( $msg, 1 );
+			$this->fatalError( $msg );
 		}
 	}
 
@@ -569,36 +678,41 @@ abstract class Maintenance {
 		$lbFactory->setAgentName(
 			mb_strlen( $agent ) > 15 ? mb_substr( $agent, 0, 15 ) . '...' : $agent
 		);
-		self::setLBFactoryTriggers( $lbFactory );
+		self::setLBFactoryTriggers( $lbFactory, $this->getConfig() );
 	}
 
 	/**
 	 * @param LBFactory $LBFactory
+	 * @param Config $config
 	 * @since 1.28
 	 */
-	public static function setLBFactoryTriggers( LBFactory $LBFactory ) {
+	public static function setLBFactoryTriggers( LBFactory $LBFactory, Config $config ) {
+		$services = MediaWikiServices::getInstance();
+		$stats = $services->getStatsdDataFactory();
 		// Hook into period lag checks which often happen in long-running scripts
-		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+		$lbFactory = $services->getDBLoadBalancerFactory();
 		$lbFactory->setWaitForReplicationListener(
 			__METHOD__,
-			function () {
-				global $wgCommandLineMode;
+			function () use ( $stats, $config ) {
 				// Check config in case of JobRunner and unit tests
-				if ( $wgCommandLineMode ) {
+				if ( $config->get( 'CommandLineMode' ) ) {
 					DeferredUpdates::tryOpportunisticExecute( 'run' );
 				}
+				// Try to periodically flush buffered metrics to avoid OOMs
+				MediaWiki::emitBufferedStatsdData( $stats, $config );
 			}
 		);
 		// Check for other windows to run them. A script may read or do a few writes
 		// to the master but mostly be writing to something else, like a file store.
 		$lbFactory->getMainLB()->setTransactionListener(
 			__METHOD__,
-			function ( $trigger ) {
-				global $wgCommandLineMode;
+			function ( $trigger ) use ( $stats, $config ) {
 				// Check config in case of JobRunner and unit tests
-				if ( $wgCommandLineMode && $trigger === IDatabase::TRIGGER_COMMIT ) {
+				if ( $config->get( 'CommandLineMode' ) && $trigger === IDatabase::TRIGGER_COMMIT ) {
 					DeferredUpdates::tryOpportunisticExecute( 'run' );
 				}
+				// Try to periodically flush buffered metrics to avoid OOMs
+				MediaWiki::emitBufferedStatsdData( $stats, $config );
 			}
 		);
 	}
@@ -607,7 +721,7 @@ abstract class Maintenance {
 	 * Run a child maintenance script. Pass all of the current arguments
 	 * to it.
 	 * @param string $maintClass A name of a child maintenance class
-	 * @param string $classFile Full path of where the child is
+	 * @param string|null $classFile Full path of where the child is
 	 * @return Maintenance
 	 */
 	public function runChild( $maintClass, $classFile = null ) {
@@ -622,7 +736,7 @@ abstract class Maintenance {
 		}
 
 		/**
-		 * @var $child Maintenance
+		 * @var Maintenance $child
 		 */
 		$child = new $maintClass();
 		$child->loadParamsAndArgs( $this->mSelf, $this->mOptions, $this->mArgs );
@@ -637,21 +751,22 @@ abstract class Maintenance {
 	 * Do some sanity checking and basic setup
 	 */
 	public function setup() {
-		global $IP, $wgCommandLineMode, $wgRequestTime;
+		global $IP, $wgCommandLineMode;
 
 		# Abort if called from a web server
-		if ( isset( $_SERVER ) && isset( $_SERVER['REQUEST_METHOD'] ) ) {
-			$this->error( 'This script must be run from the command line', true );
+		# wfIsCLI() is not available yet
+		if ( PHP_SAPI !== 'cli' && PHP_SAPI !== 'phpdbg' ) {
+			$this->fatalError( 'This script must be run from the command line' );
 		}
 
 		if ( $IP === null ) {
-			$this->error( "\$IP not set, aborting!\n" .
-				'(Did you forget to call parent::__construct() in your maintenance script?)', 1 );
+			$this->fatalError( "\$IP not set, aborting!\n" .
+				'(Did you forget to call parent::__construct() in your maintenance script?)' );
 		}
 
 		# Make sure we can handle script parameters
 		if ( !defined( 'HPHP_VERSION' ) && !ini_get( 'register_argc_argv' ) ) {
-			$this->error( 'Cannot get command line arguments, register_argc_argv is set to false', true );
+			$this->fatalError( 'Cannot get command line arguments, register_argc_argv is set to false' );
 		}
 
 		// Send PHP warnings and errors to stderr instead of stdout.
@@ -662,7 +777,6 @@ abstract class Maintenance {
 		}
 
 		$this->loadParamsAndArgs();
-		$this->maybeHelp();
 
 		# Set the memory limit
 		# Note we need to set it again later in cache LocalSettings changed it
@@ -673,8 +787,6 @@ abstract class Maintenance {
 		# But sometimes this doesn't seem to be the case.
 		ini_set( 'max_execution_time', 0 );
 
-		$wgRequestTime = microtime( true );
-
 		# Define us as being in MediaWiki
 		define( 'MEDIAWIKI', true );
 
@@ -684,8 +796,6 @@ abstract class Maintenance {
 		while ( ob_get_level() > 0 ) {
 			ob_end_flush();
 		}
-
-		$this->validateParamsAndArgs();
 	}
 
 	/**
@@ -735,7 +845,7 @@ abstract class Maintenance {
 					+ $wgProfiler
 					+ [ 'threshold' => $wgProfileLimit ]
 			);
-			$profiler->setTemplated( true );
+			$profiler->setAllowOutput();
 			Profiler::replaceStubInstance( $profiler );
 		}
 
@@ -788,14 +898,7 @@ abstract class Maintenance {
 					$this->setParam( $options, $option, $param );
 				} else {
 					$bits = explode( '=', $option, 2 );
-					if ( count( $bits ) > 1 ) {
-						$option = $bits[0];
-						$param = $bits[1];
-					} else {
-						$param = 1;
-					}
-
-					$this->setParam( $options, $option, $param );
+					$this->setParam( $options, $bits[0], $bits[1] ?? 1 );
 				}
 			} elseif ( $arg == '-' ) {
 				# Lonely "-", often used to indicate stdin or stdout.
@@ -869,9 +972,9 @@ abstract class Maintenance {
 	 * $mOptions becomes an array with keys set to the option names
 	 * $mArgs becomes a zero-based array containing the non-option arguments
 	 *
-	 * @param string $self The name of the script, if any
-	 * @param array $opts An array of options, in form of key=>value
-	 * @param array $args An array of command line arguments
+	 * @param string|null $self The name of the script, if any
+	 * @param array|null $opts An array of options, in form of key=>value
+	 * @param array|null $args An array of command line arguments
 	 */
 	public function loadParamsAndArgs( $self = null, $opts = null, $args = null ) {
 		# If we were given opts or args, set those and return early
@@ -905,7 +1008,7 @@ abstract class Maintenance {
 	/**
 	 * Run some validation checks on the params, etc
 	 */
-	protected function validateParamsAndArgs() {
+	public function validateParamsAndArgs() {
 		$die = false;
 		# Check to make sure we've got all the required options
 		foreach ( $this->mParams as $opt => $info ) {
@@ -921,10 +1024,17 @@ abstract class Maintenance {
 				$die = true;
 			}
 		}
-
-		if ( $die ) {
-			$this->maybeHelp( true );
+		if ( !$this->mAllowUnregisteredOptions ) {
+			# Check for unexpected options
+			foreach ( $this->mOptions as $opt => $val ) {
+				if ( !$this->supportsOption( $opt ) ) {
+					$this->error( "Unexpected option $opt!" );
+					$die = true;
+				}
+			}
 		}
+
+		$this->maybeHelp( $die );
 	}
 
 	/**
@@ -969,7 +1079,7 @@ abstract class Maintenance {
 
 		// ... append parameters ...
 		if ( $this->mParams ) {
-			$output .= " [--" . implode( array_keys( $this->mParams ), "|--" ) . "]";
+			$output .= " [--" . implode( "|--", array_keys( $this->mParams ) ) . "]";
 		}
 
 		// ... and append arguments.
@@ -1065,8 +1175,8 @@ abstract class Maintenance {
 	 * Handle some last-minute setup here.
 	 */
 	public function finalSetup() {
-		global $wgCommandLineMode, $wgShowSQLErrors, $wgServer;
-		global $wgDBadminuser, $wgDBadminpassword;
+		global $wgCommandLineMode, $wgServer, $wgShowExceptionDetails, $wgShowHostnames;
+		global $wgDBadminuser, $wgDBadminpassword, $wgDBDefaultGroup;
 		global $wgDBuser, $wgDBpassword, $wgDBservers, $wgLBFactoryConf;
 
 		# Turn off output buffering again, it might have been turned on in the settings files
@@ -1088,6 +1198,11 @@ abstract class Maintenance {
 		if ( $this->mDbPass ) {
 			$wgDBadminpassword = $this->mDbPass;
 		}
+		if ( $this->hasOption( 'dbgroupdefault' ) ) {
+			$wgDBDefaultGroup = $this->getOption( 'dbgroupdefault', null );
+
+			MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->destroy();
+		}
 
 		if ( $this->getDbType() == self::DB_ADMIN && isset( $wgDBadminuser ) ) {
 			$wgDBuser = $wgDBadminuser;
@@ -1095,7 +1210,7 @@ abstract class Maintenance {
 
 			if ( $wgDBservers ) {
 				/**
-				 * @var $wgDBservers array
+				 * @var array $wgDBservers
 				 */
 				foreach ( $wgDBservers as $i => $server ) {
 					$wgDBservers[$i]['user'] = $wgDBuser;
@@ -1109,16 +1224,22 @@ abstract class Maintenance {
 			MediaWikiServices::getInstance()->getDBLoadBalancerFactory()->destroy();
 		}
 
+		# Apply debug settings
+		if ( $this->hasOption( 'mwdebug' ) ) {
+			require __DIR__ . '/../includes/DevelopmentSettings.php';
+		}
+
 		// Per-script profiling; useful for debugging
 		$this->activateProfiler();
 
 		$this->afterFinalSetup();
 
-		$wgShowSQLErrors = true;
+		$wgShowExceptionDetails = true;
+		$wgShowHostnames = true;
 
-		MediaWiki\suppressWarnings();
+		Wikimedia\suppressWarnings();
 		set_time_limit( 0 );
-		MediaWiki\restoreWarnings();
+		Wikimedia\restoreWarnings();
 
 		$this->adjustMemoryLimit();
 	}
@@ -1128,6 +1249,7 @@ abstract class Maintenance {
 	 */
 	protected function afterFinalSetup() {
 		if ( defined( 'MW_CMDLINE_CALLBACK' ) ) {
+			// @phan-suppress-next-line PhanUndeclaredConstant
 			call_user_func( MW_CMDLINE_CALLBACK );
 		}
 	}
@@ -1157,18 +1279,21 @@ abstract class Maintenance {
 			$settingsFile = "$IP/LocalSettings.php";
 		}
 		if ( isset( $this->mOptions['wiki'] ) ) {
-			$bits = explode( '-', $this->mOptions['wiki'] );
-			if ( count( $bits ) == 1 ) {
-				$bits[] = '';
-			}
+			$bits = explode( '-', $this->mOptions['wiki'], 2 );
 			define( 'MW_DB', $bits[0] );
-			define( 'MW_PREFIX', $bits[1] );
+			define( 'MW_PREFIX', $bits[1] ?? '' );
+		} elseif ( isset( $this->mOptions['server'] ) ) {
+			// Provide the option for site admins to detect and configure
+			// multiple wikis based on server names. This offers --server
+			// as alternative to --wiki.
+			// See https://www.mediawiki.org/wiki/Manual:Wiki_family
+			$_SERVER['SERVER_NAME'] = $this->mOptions['server'];
 		}
 
 		if ( !is_readable( $settingsFile ) ) {
-			$this->error( "A copy of your installation's LocalSettings.php\n" .
+			$this->fatalError( "A copy of your installation's LocalSettings.php\n" .
 				"must exist and be readable in the source directory.\n" .
-				"Use --conf to specify it.", true );
+				"Use --conf to specify it." );
 		}
 		$wgCommandLineMode = true;
 
@@ -1181,27 +1306,46 @@ abstract class Maintenance {
 	 * @author Rob Church <robchur@gmail.com>
 	 */
 	public function purgeRedundantText( $delete = true ) {
+		global $wgMultiContentRevisionSchemaMigrationStage;
+
 		# Data should come off the master, wrapped in a transaction
 		$dbw = $this->getDB( DB_MASTER );
 		$this->beginTransaction( $dbw, __METHOD__ );
 
-		# Get "active" text records from the revisions table
-		$cur = [];
-		$this->output( 'Searching for active text records in revisions table...' );
-		$res = $dbw->select( 'revision', 'rev_text_id', [], __METHOD__, [ 'DISTINCT' ] );
-		foreach ( $res as $row ) {
-			$cur[] = $row->rev_text_id;
-		}
-		$this->output( "done.\n" );
-
-		# Get "active" text records from the archive table
-		$this->output( 'Searching for active text records in archive table...' );
-		$res = $dbw->select( 'archive', 'ar_text_id', [], __METHOD__, [ 'DISTINCT' ] );
-		foreach ( $res as $row ) {
-			# old pre-MW 1.5 records can have null ar_text_id's.
-			if ( $row->ar_text_id !== null ) {
-				$cur[] = $row->ar_text_id;
+		if ( $wgMultiContentRevisionSchemaMigrationStage & SCHEMA_COMPAT_READ_OLD ) {
+			# Get "active" text records from the revisions table
+			$cur = [];
+			$this->output( 'Searching for active text records in revisions table...' );
+			$res = $dbw->select( 'revision', 'rev_text_id', [], __METHOD__, [ 'DISTINCT' ] );
+			foreach ( $res as $row ) {
+				$cur[] = $row->rev_text_id;
 			}
+			$this->output( "done.\n" );
+
+			# Get "active" text records from the archive table
+			$this->output( 'Searching for active text records in archive table...' );
+			$res = $dbw->select( 'archive', 'ar_text_id', [], __METHOD__, [ 'DISTINCT' ] );
+			foreach ( $res as $row ) {
+				# old pre-MW 1.5 records can have null ar_text_id's.
+				if ( $row->ar_text_id !== null ) {
+					$cur[] = $row->ar_text_id;
+				}
+			}
+			$this->output( "done.\n" );
+		} else {
+			# Get "active" text records via the content table
+			$cur = [];
+			$this->output( 'Searching for active text records via contents table...' );
+			$res = $dbw->select( 'content', 'content_address', [], __METHOD__, [ 'DISTINCT' ] );
+			$blobStore = MediaWikiServices::getInstance()->getBlobStore();
+			foreach ( $res as $row ) {
+				// @phan-suppress-next-line PhanUndeclaredMethod
+				$textId = $blobStore->getTextIdFromAddress( $row->content_address );
+				if ( $textId ) {
+					$cur[] = $textId;
+				}
+			}
+			$this->output( "done.\n" );
 		}
 		$this->output( "done.\n" );
 
@@ -1226,7 +1370,6 @@ abstract class Maintenance {
 			$this->output( "done.\n" );
 		}
 
-		# Done
 		$this->commitTransaction( $dbw, __METHOD__ );
 	}
 
@@ -1239,29 +1382,34 @@ abstract class Maintenance {
 	}
 
 	/**
-	 * Returns a database to be used by current maintenance script. It can be set by setDB().
-	 * If not set, wfGetDB() will be used.
-	 * This function has the same parameters as wfGetDB()
+	 * Returns a database to be used by current maintenance script.
 	 *
-	 * @param integer $db DB index (DB_REPLICA/DB_MASTER)
-	 * @param array $groups; default: empty array
-	 * @param string|bool $wiki; default: current wiki
+	 * This uses the main LBFactory instance by default unless overriden via setDB().
+	 *
+	 * This function has the same parameters as LoadBalancer::getConnection().
+	 *
+	 * @param int $db DB index (DB_REPLICA/DB_MASTER)
+	 * @param string|string[] $groups default: empty array
+	 * @param string|bool $dbDomain default: current wiki
 	 * @return IMaintainableDatabase
 	 */
-	protected function getDB( $db, $groups = [], $wiki = false ) {
-		if ( is_null( $this->mDb ) ) {
-			return wfGetDB( $db, $groups, $wiki );
-		} else {
-			return $this->mDb;
+	protected function getDB( $db, $groups = [], $dbDomain = false ) {
+		if ( $this->mDb === null ) {
+			return MediaWikiServices::getInstance()
+				->getDBLoadBalancerFactory()
+				->getMainLB( $dbDomain )
+				->getMaintenanceConnectionRef( $db, $groups, $dbDomain );
 		}
+
+		return $this->mDb;
 	}
 
 	/**
 	 * Sets database object to be returned by getDB().
 	 *
-	 * @param IDatabase $db
+	 * @param IMaintainableDatabase $db
 	 */
-	public function setDB( IDatabase $db ) {
+	public function setDB( IMaintainableDatabase $db ) {
 		$this->mDb = $db;
 	}
 
@@ -1292,17 +1440,12 @@ abstract class Maintenance {
 	 */
 	protected function commitTransaction( IDatabase $dbw, $fname ) {
 		$dbw->commit( $fname );
-		try {
-			$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
-			$lbFactory->waitForReplication(
-				[ 'timeout' => 30, 'ifWritesSince' => $this->lastReplicationWait ]
-			);
-			$this->lastReplicationWait = microtime( true );
-
-			return true;
-		} catch ( DBReplicationWaitError $e ) {
-			return false;
-		}
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+		$waitSucceeded = $lbFactory->waitForReplication(
+			[ 'timeout' => 30, 'ifWritesSince' => $this->lastReplicationWait ]
+		);
+		$this->lastReplicationWait = microtime( true );
+		return $waitSucceeded;
 	}
 
 	/**
@@ -1334,7 +1477,7 @@ abstract class Maintenance {
 			'user',
 			'page_restrictions'
 		];
-		$db->lockTables( $read, $write, __CLASS__ . '::' . __METHOD__ );
+		$db->lockTables( $read, $write, __CLASS__ . '-searchIndexLock' );
 	}
 
 	/**
@@ -1342,7 +1485,7 @@ abstract class Maintenance {
 	 * @param IMaintainableDatabase &$db
 	 */
 	private function unlockSearchindex( $db ) {
-		$db->unlockTables( __CLASS__ . '::' . __METHOD__ );
+		$db->unlockTables( __CLASS__ . '-searchIndexLock' );
 	}
 
 	/**
@@ -1358,9 +1501,9 @@ abstract class Maintenance {
 	/**
 	 * Perform a search index update with locking
 	 * @param int $maxLockTime The maximum time to keep the search index locked.
-	 * @param string $callback The function that will update the function.
+	 * @param callable $callback The function that will update the function.
 	 * @param IMaintainableDatabase $dbw
-	 * @param array $results
+	 * @param array|IResultWrapper $results
 	 */
 	public function updateSearchIndex( $maxLockTime, $callback, $dbw, $results ) {
 		$lockTime = time();
@@ -1408,12 +1551,38 @@ abstract class Maintenance {
 			$title = $titleObj->getPrefixedDBkey();
 			$this->output( "$title..." );
 			# Update searchindex
-			$u = new SearchUpdate( $pageId, $titleObj->getText(), $rev->getContent() );
+			$u = new SearchUpdate( $pageId, $titleObj, $rev->getContent() );
 			$u->doUpdate();
 			$this->output( "\n" );
 		}
 
 		return $title;
+	}
+
+	/**
+	 * Count down from $seconds to zero on the terminal, with a one-second pause
+	 * between showing each number. If the maintenance script is in quiet mode,
+	 * this function does nothing.
+	 *
+	 * @since 1.31
+	 *
+	 * @codeCoverageIgnore
+	 * @param int $seconds
+	 */
+	protected function countDown( $seconds ) {
+		if ( $this->isQuiet() ) {
+			return;
+		}
+		for ( $i = $seconds; $i >= 0; $i-- ) {
+			if ( $i != $seconds ) {
+				$this->output( str_repeat( "\x08", strlen( $i + 1 ) ) );
+			}
+			$this->output( $i );
+			if ( $i ) {
+				sleep( 1 );
+			}
+		}
+		$this->output( "\n" );
 	}
 
 	/**
@@ -1444,13 +1613,7 @@ abstract class Maintenance {
 		}
 
 		if ( $isatty && function_exists( 'readline' ) ) {
-			$resp = readline( $prompt );
-			if ( $resp === null ) {
-				// Workaround for https://github.com/facebook/hhvm/issues/4776
-				return false;
-			} else {
-				return $resp;
-			}
+			return readline( $prompt );
 		} else {
 			if ( $isatty ) {
 				$st = self::readlineEmulation( $prompt );
@@ -1476,13 +1639,13 @@ abstract class Maintenance {
 	 * @return string
 	 */
 	private static function readlineEmulation( $prompt ) {
-		$bash = Installer::locateExecutableInDefaultPaths( [ 'bash' ] );
+		$bash = ExecutableFinder::findInDefaultPaths( 'bash' );
 		if ( !wfIsWindows() && $bash ) {
 			$retval = false;
-			$encPrompt = wfEscapeShellArg( $prompt );
+			$encPrompt = Shell::escape( $prompt );
 			$command = "read -er -p $encPrompt && echo \"\$REPLY\"";
-			$encCommand = wfEscapeShellArg( $command );
-			$line = wfShellExec( "$bash -c $encCommand", $retval, [], [ 'walltime' => 0 ] );
+			$encCommand = Shell::escape( $command );
+			$line = Shell::escape( "$bash -c $encCommand", $retval, [], [ 'walltime' => 0 ] );
 
 			if ( $retval == 0 ) {
 				return $line;
@@ -1517,6 +1680,9 @@ abstract class Maintenance {
 		if ( wfIsWindows() ) {
 			return $default;
 		}
+		if ( Shell::isDisabled() ) {
+			return $default;
+		}
 		// It's possible to get the screen size with VT-100 terminal escapes,
 		// but reading the responses is not possible without setting raw mode
 		// (unless you want to require the user to press enter), and that
@@ -1524,12 +1690,12 @@ abstract class Maintenance {
 		// something that can do the relevant syscalls. There are a few
 		// options. Linux and Mac OS X both have "stty size" which does the
 		// job directly.
-		$retval = false;
-		$size = wfShellExec( 'stty size', $retval );
-		if ( $retval !== 0 ) {
+		$result = Shell::command( 'stty', 'size' )
+			->execute();
+		if ( $result->getExitCode() !== 0 ) {
 			return $default;
 		}
-		if ( !preg_match( '/^(\d+) (\d+)$/', $size, $m ) ) {
+		if ( !preg_match( '/^(\d+) (\d+)$/', $result->getStdout(), $m ) ) {
 			return $default;
 		}
 		return [ intval( $m[2] ), intval( $m[1] ) ];
@@ -1551,7 +1717,6 @@ class FakeMaintenance extends Maintenance {
 	protected $mSelf = "FakeMaintenanceScript";
 
 	public function execute() {
-		return;
 	}
 }
 
@@ -1582,13 +1747,9 @@ abstract class LoggedUpdateMaintenance extends Maintenance {
 			return false;
 		}
 
-		if ( $db->insert( 'updatelog', [ 'ul_key' => $key ], __METHOD__, 'IGNORE' ) ) {
-			return true;
-		} else {
-			$this->output( $this->updatelogFailedMessage() . "\n" );
+		$db->insert( 'updatelog', [ 'ul_key' => $key ], __METHOD__, [ 'IGNORE' ] );
 
-			return false;
-		}
+		return true;
 	}
 
 	/**
@@ -1598,17 +1759,7 @@ abstract class LoggedUpdateMaintenance extends Maintenance {
 	protected function updateSkippedMessage() {
 		$key = $this->getUpdateKey();
 
-		return "Update '{$key}' already logged as completed.";
-	}
-
-	/**
-	 * Message to show that the update log was unable to log the completion of this update
-	 * @return string
-	 */
-	protected function updatelogFailedMessage() {
-		$key = $this->getUpdateKey();
-
-		return "Unable to log update '{$key}' as completed.";
+		return "Update '{$key}' already logged as completed. Use --force to run it again.";
 	}
 
 	/**

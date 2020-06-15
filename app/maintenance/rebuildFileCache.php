@@ -21,6 +21,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -41,60 +43,60 @@ class RebuildFileCache extends Maintenance {
 	}
 
 	public function finalSetup() {
-		global $wgDebugToolbar, $wgUseFileCache;
+		global $wgUseFileCache;
 
 		$this->enabled = $wgUseFileCache;
 		// Script will handle capturing output and saving it itself
 		$wgUseFileCache = false;
-		// Debug toolbar makes content uncacheable so we disable it.
-		// Has to be done before Setup.php initialize MWDebug
-		$wgDebugToolbar = false;
 		//  Avoid DB writes (like enotif/counters)
 		MediaWiki\MediaWikiServices::getInstance()->getReadOnlyMode()
 			->setReason( 'Building cache' );
+
+		// Ensure no debug-specific logic ends up in the cache (must be after Setup.php)
+		MWDebug::deinit();
 
 		parent::finalSetup();
 	}
 
 	public function execute() {
-		global $wgRequestTime;
-
 		if ( !$this->enabled ) {
-			$this->error( "Nothing to do -- \$wgUseFileCache is disabled.", true );
+			$this->fatalError( "Nothing to do -- \$wgUseFileCache is disabled." );
 		}
 
 		$start = $this->getOption( 'start', "0" );
 		if ( !ctype_digit( $start ) ) {
-			$this->error( "Invalid value for start parameter.", true );
+			$this->fatalError( "Invalid value for start parameter." );
 		}
 		$start = intval( $start );
 
 		$end = $this->getOption( 'end', "0" );
 		if ( !ctype_digit( $end ) ) {
-			$this->error( "Invalid value for end parameter.", true );
+			$this->fatalError( "Invalid value for end parameter." );
 		}
 		$end = intval( $end );
 
 		$this->output( "Building content page file cache from page {$start}!\n" );
 
 		$dbr = $this->getDB( DB_REPLICA );
-		$overwrite = $this->getOption( 'overwrite', false );
+		$batchSize = $this->getBatchSize();
+		$overwrite = $this->hasOption( 'overwrite' );
 		$start = ( $start > 0 )
 			? $start
-			: $dbr->selectField( 'page', 'MIN(page_id)', false, __METHOD__ );
+			: $dbr->selectField( 'page', 'MIN(page_id)', '', __METHOD__ );
 		$end = ( $end > 0 )
 			? $end
-			: $dbr->selectField( 'page', 'MAX(page_id)', false, __METHOD__ );
+			: $dbr->selectField( 'page', 'MAX(page_id)', '', __METHOD__ );
 		if ( !$start ) {
-			$this->error( "Nothing to do.", true );
+			$this->fatalError( "Nothing to do." );
 		}
 
-		$_SERVER['HTTP_ACCEPT_ENCODING'] = 'bgzip'; // hack, no real client
+		// Mock request (hack, no real client)
+		$_SERVER['HTTP_ACCEPT_ENCODING'] = 'bgzip';
 
 		# Do remaining chunk
-		$end += $this->mBatchSize - 1;
+		$end += $batchSize - 1;
 		$blockStart = $start;
-		$blockEnd = $start + $this->mBatchSize - 1;
+		$blockEnd = $start + $batchSize - 1;
 
 		$dbw = $this->getDB( DB_MASTER );
 		// Go through each page and save the output
@@ -102,8 +104,9 @@ class RebuildFileCache extends Maintenance {
 			// Get the pages
 			$res = $dbr->select( 'page',
 				[ 'page_namespace', 'page_title', 'page_id' ],
-				[ 'page_namespace' => MWNamespace::getContentNamespaces(),
-					"page_id BETWEEN $blockStart AND $blockEnd" ],
+				[ 'page_namespace' => MediaWikiServices::getInstance()->getNamespaceInfo()->
+					getContentNamespaces(),
+					"page_id BETWEEN " . (int)$blockStart . " AND " . (int)$blockEnd ],
 				__METHOD__,
 				[ 'ORDER BY' => 'page_id ASC', 'USE INDEX' => 'PRIMARY' ]
 			);
@@ -113,7 +116,7 @@ class RebuildFileCache extends Maintenance {
 				$rebuilt = false;
 
 				$title = Title::makeTitleSafe( $row->page_namespace, $row->page_title );
-				if ( null == $title ) {
+				if ( $title === null ) {
 					$this->output( "Page {$row->page_id} has bad title\n" );
 					continue; // broken title?
 				}
@@ -139,24 +142,29 @@ class RebuildFileCache extends Maintenance {
 						}
 					}
 
-					MediaWiki\suppressWarnings(); // header notices
-					// Cache ?action=view
-					$wgRequestTime = microtime( true ); # T24852
+					Wikimedia\suppressWarnings(); // header notices
+
+					// 1. Cache ?action=view
+					// Be sure to reset the mocked request time (T24852)
+					$_SERVER['REQUEST_TIME_FLOAT'] = microtime( true );
 					ob_start();
 					$article->view();
 					$context->getOutput()->output();
 					$context->getOutput()->clearHTML();
 					$viewHtml = ob_get_clean();
 					$viewCache->saveToFileCache( $viewHtml );
-					// Cache ?action=history
-					$wgRequestTime = microtime( true ); # T24852
+
+					// 2. Cache ?action=history
+					// Be sure to reset the mocked request time (T24852)
+					$_SERVER['REQUEST_TIME_FLOAT'] = microtime( true );
 					ob_start();
 					Action::factory( 'history', $article, $context )->show();
 					$context->getOutput()->output();
 					$context->getOutput()->clearHTML();
 					$historyHtml = ob_get_clean();
 					$historyCache->saveToFileCache( $historyHtml );
-					MediaWiki\restoreWarnings();
+
+					Wikimedia\restoreWarnings();
 
 					if ( $rebuilt ) {
 						$this->output( "Re-cached page '$title' (id {$row->page_id})..." );
@@ -171,12 +179,12 @@ class RebuildFileCache extends Maintenance {
 			}
 			$this->commitTransaction( $dbw, __METHOD__ ); // commit any changes (just for sanity)
 
-			$blockStart += $this->mBatchSize;
-			$blockEnd += $this->mBatchSize;
+			$blockStart += $batchSize;
+			$blockEnd += $batchSize;
 		}
 		$this->output( "Done!\n" );
 	}
 }
 
-$maintClass = "RebuildFileCache";
+$maintClass = RebuildFileCache::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

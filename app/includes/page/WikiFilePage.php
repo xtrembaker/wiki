@@ -20,6 +20,7 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\FakeResultWrapper;
 
 /**
@@ -28,13 +29,13 @@ use Wikimedia\Rdbms\FakeResultWrapper;
  * @ingroup Media
  */
 class WikiFilePage extends WikiPage {
-	/** @var File */
+	/** @var File|false */
 	protected $mFile = false;
-	/** @var LocalRepo */
+	/** @var LocalRepo|null */
 	protected $mRepo = null;
 	/** @var bool */
 	protected $mFileLoaded = false;
-	/** @var array */
+	/** @var array|null */
 	protected $mDupes = null;
 
 	public function __construct( $title ) {
@@ -55,14 +56,16 @@ class WikiFilePage extends WikiPage {
 	 * @return bool
 	 */
 	protected function loadFile() {
+		$services = MediaWikiServices::getInstance();
 		if ( $this->mFileLoaded ) {
 			return true;
 		}
 		$this->mFileLoaded = true;
 
-		$this->mFile = wfFindFile( $this->mTitle );
+		$this->mFile = $services->getRepoGroup()->findFile( $this->mTitle );
 		if ( !$this->mFile ) {
-			$this->mFile = wfLocalFile( $this->mTitle ); // always a File
+			$this->mFile = $services->getRepoGroup()->getLocalRepo()
+				->newFile( $this->mTitle ); // always a File
 		}
 		$this->mRepo = $this->mFile->getRepo();
 		return true;
@@ -149,7 +152,7 @@ class WikiFilePage extends WikiPage {
 		$size = $this->mFile->getSize();
 
 		/**
-		 * @var $file File
+		 * @var File $file
 		 */
 		foreach ( $dupes as $index => $file ) {
 			$key = $file->getRepoName() . ':' . $file->getName();
@@ -170,21 +173,36 @@ class WikiFilePage extends WikiPage {
 	 */
 	public function doPurge() {
 		$this->loadFile();
+
 		if ( $this->mFile->exists() ) {
 			wfDebug( 'ImagePage::doPurge purging ' . $this->mFile->getName() . "\n" );
-			DeferredUpdates::addUpdate( new HTMLCacheUpdate( $this->mTitle, 'imagelinks' ) );
-			$this->mFile->purgeCache( [ 'forThumbRefresh' => true ] );
+			$job = HTMLCacheUpdateJob::newForBacklinks(
+				$this->mTitle,
+				'imagelinks',
+				[ 'causeAction' => 'file-purge' ]
+			);
+			JobQueueGroup::singleton()->lazyPush( $job );
 		} else {
 			wfDebug( 'ImagePage::doPurge no image for '
 				. $this->mFile->getName() . "; limiting purge to cache only\n" );
-			// even if the file supposedly doesn't exist, force any cached information
-			// to be updated (in case the cached information is wrong)
-			$this->mFile->purgeCache( [ 'forThumbRefresh' => true ] );
 		}
+
+		// even if the file supposedly doesn't exist, force any cached information
+		// to be updated (in case the cached information is wrong)
+
+		// Purge current version and its thumbnails
+		$this->mFile->purgeCache( [ 'forThumbRefresh' => true ] );
+
+		// Purge the old versions and their thumbnails
+		foreach ( $this->mFile->getHistory() as $oldFile ) {
+			$oldFile->purgeCache( [ 'forThumbRefresh' => true ] );
+		}
+
 		if ( $this->mRepo ) {
 			// Purge redirect cache
 			$this->mRepo->invalidateImageRedirect( $this->mTitle );
 		}
+
 		return parent::doPurge();
 	}
 
@@ -223,7 +241,7 @@ class WikiFilePage extends WikiPage {
 			],
 			__METHOD__,
 			[],
-			[ 'categorylinks' => [ 'INNER JOIN', 'page_id = cl_from' ] ]
+			[ 'categorylinks' => [ 'JOIN', 'page_id = cl_from' ] ]
 		);
 
 		return TitleArray::newFromResult( $res );

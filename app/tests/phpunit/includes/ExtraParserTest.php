@@ -1,5 +1,8 @@
 <?php
 
+use MediaWiki\MediaWikiServices;
+use Wikimedia\TestingAccessWrapper;
+
 /**
  * Parser-related tests that don't suit for parserTests.txt
  *
@@ -17,7 +20,7 @@ class ExtraParserTest extends MediaWikiTestCase {
 
 		$contLang = Language::factory( 'en' );
 		$this->setMwGlobals( [
-			'wgShowDBErrorBacktrace' => true,
+			'wgShowExceptionDetails' => true,
 			'wgCleanSignatures' => true,
 		] );
 		$this->setUserLang( 'en' );
@@ -28,7 +31,7 @@ class ExtraParserTest extends MediaWikiTestCase {
 		$this->options->setTemplateCallback( [ __CLASS__, 'statelessFetchTemplate' ] );
 		$this->parser = new Parser;
 
-		MagicWord::clearCache();
+		MediaWikiServices::getInstance()->resetServiceForTesting( 'MagicWordFactory' );
 	}
 
 	/**
@@ -41,7 +44,26 @@ class ExtraParserTest extends MediaWikiTestCase {
 		$title = Title::newFromText( 'Unit test' );
 		$options = ParserOptions::newFromUser( new User() );
 		$this->assertEquals( "<p>$longLine</p>",
-			$this->parser->parse( $longLine, $title, $options )->getText() );
+			$this->parser->parse( $longLine, $title, $options )->getText( [ 'unwrap' => true ] ) );
+	}
+
+	/**
+	 * @covers Parser::braceSubstitution
+	 * @covers SpecialPageFactory::capturePath
+	 */
+	public function testSpecialPageTransclusionRestoresGlobalState() {
+		$text = "{{Special:ApiHelp/help}}";
+		$title = Title::newFromText( 'testSpecialPageTransclusionRestoresGlobalState' );
+		$options = ParserOptions::newFromUser( new User() );
+
+		RequestContext::getMain()->setTitle( $title );
+		RequestContext::getMain()->getWikiPage()->CustomTestProp = true;
+
+		$parsed = $this->parser->parse( $text, $title, $options )->getText();
+		$this->assertContains( 'apihelp-header', $parsed );
+
+		// Verify that this property wasn't wiped out by the parse
+		$this->assertTrue( RequestContext::getMain()->getWikiPage()->CustomTestProp );
 	}
 
 	/**
@@ -53,7 +75,7 @@ class ExtraParserTest extends MediaWikiTestCase {
 		$parserOutput = $this->parser->parse( "Test\n{{Foo}}\n{{Bar}}", $title, $this->options );
 		$this->assertEquals(
 			"<p>Test\nContent of <i>Template:Foo</i>\nContent of <i>Template:Bar</i>\n</p>",
-			$parserOutput->getText()
+			$parserOutput->getText( [ 'unwrap' => true ] )
 		);
 	}
 
@@ -191,7 +213,6 @@ class ExtraParserTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @group Database
 	 * @covers Parser::parse
 	 */
 	public function testTrackingCategory() {
@@ -205,7 +226,6 @@ class ExtraParserTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @group Database
 	 * @covers Parser::parse
 	 */
 	public function testTrackingCategorySpecial() {
@@ -214,5 +234,82 @@ class ExtraParserTest extends MediaWikiTestCase {
 		$parserOutput = $this->parser->parse( "[[file:nonexistent]]", $title, $this->options );
 		$result = $parserOutput->getCategoryLinks();
 		$this->assertEmpty( $result );
+	}
+
+	/**
+	 * @covers Parser::parseLinkParameterPrivate
+	 * @dataProvider provideParseLinkParameter
+	 */
+	public function testParseLinkParameter( $input, $expected, $expectedLinks, $desc ) {
+		$this->parser->startExternalParse( Title::newFromText( __FUNCTION__ ),
+			$this->options, Parser::OT_HTML );
+		$output = TestingAccessWrapper::newFromObject( $this->parser )
+			->parseLinkParameterPrivate( $input );
+
+		$this->assertEquals( $expected[0], $output[0], "$desc (type)" );
+
+		if ( $expected[0] === 'link-title' ) {
+			$this->assertTrue( $expected[1]->equals( $output[1] ), "$desc (target)" );
+		} else {
+			$this->assertEquals( $expected[1], $output[1], "$desc (target)" );
+		}
+
+		foreach ( $expectedLinks as $func => $expected ) {
+			$output = $this->parser->getOutput()->$func();
+			$this->assertEquals( $expected, $output, "$desc ($func)" );
+		}
+	}
+
+	public static function provideParseLinkParameter() {
+		return [
+			[
+				'',
+				[ 'no-link', false ],
+				[],
+				'Return no link when requested',
+			],
+			[
+				'https://example.com/',
+				[ 'link-url', 'https://example.com/' ],
+				[ 'getExternalLinks' => [ 'https://example.com/' => 1 ] ],
+				'External link',
+			],
+			[
+				'//example.com/',
+				[ 'link-url', '//example.com/' ],
+				[ 'getExternalLinks' => [ '//example.com/' => 1 ] ],
+				'External link',
+			],
+			[
+				'Test',
+				[ 'link-title', Title::newFromText( 'Test' ) ],
+				[ 'getLinks' => [ 0 => [ 'Test' => 0 ] ] ],
+				'Internal link',
+			],
+			[
+				'mw:Test',
+				[ 'link-title', Title::newFromText( 'mw:Test' ) ],
+				[ 'getInterwikiLinks' => [ 'mw' => [ 'Test' => 1 ] ] ],
+				'Internal link (interwiki)',
+			],
+			[
+				'https://',
+				[ null, false ],
+				[],
+				'Invalid link target',
+			],
+			[
+				'<>',
+				[ null, false ],
+				[],
+				'Invalid link target',
+			],
+			[
+				' ',
+				[ null, false ],
+				[],
+				'Invalid link target',
+			],
+		];
 	}
 }

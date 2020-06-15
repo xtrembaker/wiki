@@ -19,8 +19,10 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+
 /**
- * @defgroup Actions Action done on pages
+ * @defgroup Actions Actions
  */
 
 /**
@@ -28,13 +30,13 @@
  * are distinct from Special Pages because an action must apply to exactly one page.
  *
  * To add an action in an extension, create a subclass of Action, and add the key to
- * $wgActions.  There is also the deprecated UnknownAction hook
+ * $wgActions.
  *
  * Actions generally fall into two groups: the show-a-form-then-do-something-with-the-input
  * format (protect, delete, move, etc), and the just-do-something format (watch, rollback,
  * patrol, etc). The FormAction and FormlessAction classes represent these two groups.
  */
-abstract class Action {
+abstract class Action implements MessageLocalizer {
 
 	/**
 	 * Page on which we're performing the action
@@ -99,12 +101,11 @@ abstract class Action {
 			if ( !class_exists( $classOrCallable ) ) {
 				return false;
 			}
-			$obj = new $classOrCallable( $page, $context );
-			return $obj;
+			return new $classOrCallable( $page, $context );
 		}
 
 		if ( is_callable( $classOrCallable ) ) {
-			return call_user_func_array( $classOrCallable, [ $page, $context ] );
+			return $classOrCallable( $page, $context );
 		}
 
 		return $classOrCallable;
@@ -130,7 +131,7 @@ abstract class Action {
 			$actionName = 'nosuchaction';
 		}
 
-		// Workaround for bug #20966: inability of IE to provide an action dependent
+		// Workaround for T22966: inability of IE to provide an action dependent
 		// on which submit button is clicked.
 		if ( $actionName === 'historysubmit' ) {
 			if ( $request->getBool( 'revisiondelete' ) ) {
@@ -140,7 +141,7 @@ abstract class Action {
 			} else {
 				$actionName = 'view';
 			}
-		} elseif ( $actionName == 'editredlink' ) {
+		} elseif ( $actionName === 'editredlink' ) {
 			$actionName = 'edit';
 		}
 
@@ -151,7 +152,7 @@ abstract class Action {
 			return 'view';
 		}
 
-		$action = Action::factory( $actionName, $context->getWikiPage(), $context );
+		$action = self::factory( $actionName, $context->getWikiPage(), $context );
 		if ( $action instanceof Action ) {
 			return $action->getName();
 		}
@@ -251,16 +252,15 @@ abstract class Action {
 	 * Get a Message object with context set
 	 * Parameters are the same as wfMessage()
 	 *
+	 * @param string|string[]|MessageSpecifier $key
+	 * @param mixed ...$params
 	 * @return Message
 	 */
-	final public function msg() {
-		$params = func_get_args();
-		return call_user_func_array( [ $this->getContext(), 'msg' ], $params );
+	final public function msg( $key, ...$params ) {
+		return $this->getContext()->msg( $key, ...$params );
 	}
 
 	/**
-	 * Constructor.
-	 *
 	 * Only public since 1.21
 	 *
 	 * @param Page $page
@@ -314,9 +314,14 @@ abstract class Action {
 			}
 		}
 
-		if ( $this->requiresUnblock() && $user->isBlocked() ) {
+		// If the action requires an unblock, explicitly check the user's block.
+		if ( $this->requiresUnblock() && $user->isBlockedFrom( $this->getTitle() ) ) {
 			$block = $user->getBlock();
-			throw new UserBlockedError( $block );
+			if ( $block ) {
+				throw new UserBlockedError( $block );
+			}
+
+			throw new PermissionsError( $this->getName(), [ 'badaccess-group0' ] );
 		}
 
 		// This should be checked at the end so that the user won't think the
@@ -354,7 +359,7 @@ abstract class Action {
 	 */
 	protected function setHeaders() {
 		$out = $this->getOutput();
-		$out->setRobotPolicy( "noindex,nofollow" );
+		$out->setRobotPolicy( 'noindex,nofollow' );
 		$out->setPageTitle( $this->getPageTitle() );
 		$out->setSubtitle( $this->getDescription() );
 		$out->setArticleRelated( true );
@@ -388,9 +393,8 @@ abstract class Action {
 	 * @since 1.25
 	 */
 	public function addHelpLink( $to, $overrideBaseUrl = false ) {
-		global $wgContLang;
-		$msg = wfMessage( $wgContLang->lc(
-			Action::getActionName( $this->getContext() )
+		$msg = wfMessage( MediaWikiServices::getInstance()->getContentLanguage()->lc(
+			self::getActionName( $this->getContext() )
 			) . '-helppage' );
 
 		if ( !$msg->isDisabled() ) {

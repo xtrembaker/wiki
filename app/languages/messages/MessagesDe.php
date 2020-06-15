@@ -100,6 +100,7 @@ $specialPageAliases = [
 	'Mytalk'                    => [ 'Meine_Diskussionsseite' ],
 	'Myuploads'                 => [ 'Meine_hochgeladenen_Dateien' ],
 	'Newimages'                 => [ 'Neue_Dateien' ],
+	'NewSection'                => [ 'Neuer_Abschnitt' ],
 	'Newpages'                  => [ 'Neue_Seiten' ],
 	'PagesWithProp'             => [ 'Seiten_mit_Eigenschaften' ],
 	'PageLanguage'              => [ 'Seitensprache' ],
@@ -208,8 +209,8 @@ $magicWords = [
 	'subjectpagenamee'          => [ '1', 'HAUPTSEITENNAME_URL', 'VORDERSEITE_URL', 'HAUPTSEITE_URL', 'SUBJECTPAGENAMEE', 'ARTICLEPAGENAMEE' ],
 	'subst'                     => [ '0', 'ERS:', 'SUBST:' ],
 	'safesubst'                 => [ '0', 'SICHER_ERS:', 'SICHERERS:', 'SAFESUBST:' ],
-	'img_thumbnail'             => [ '1', 'miniatur', 'mini', 'thumb', 'thumbnail' ],
-	'img_manualthumb'           => [ '1', 'miniatur=$1', 'mini=$1', 'thumbnail=$1', 'thumb=$1' ],
+	'img_thumbnail'             => [ '1', 'mini', 'miniatur', 'thumb', 'thumbnail' ],
+	'img_manualthumb'           => [ '1', 'mini=$1', 'miniatur=$1', 'thumbnail=$1', 'thumb=$1' ],
 	'img_right'                 => [ '1', 'rechts', 'right' ],
 	'img_left'                  => [ '1', 'links', 'left' ],
 	'img_none'                  => [ '1', 'ohne', 'none' ],
@@ -217,8 +218,8 @@ $magicWords = [
 	'img_framed'                => [ '1', 'gerahmt', 'frame', 'framed', 'enframed' ],
 	'img_frameless'             => [ '1', 'rahmenlos', 'frameless' ],
 	'img_lang'                  => [ '1', 'sprache=$1', 'lang=$1' ],
-	'img_page'                  => [ '1', 'seite=$1', 'seite_$1', 'page=$1', 'page $1' ],
-	'img_upright'               => [ '1', 'hochkant', 'hochkant=$1', 'hochkant_$1', 'upright', 'upright=$1', 'upright $1' ],
+	'img_page'                  => [ '1', 'seite=$1', 'seite $1', 'seite_$1', 'page=$1', 'page $1' ],
+	'img_upright'               => [ '1', 'hochkant', 'hochkant=$1', 'hochkant $1', 'hochkant_$1', 'upright', 'upright=$1', 'upright $1' ],
 	'img_border'                => [ '1', 'rand', 'border' ],
 	'img_baseline'              => [ '1', 'grundlinie', 'baseline' ],
 	'img_sub'                   => [ '1', 'tief', 'tiefgestellt', 'sub' ],
@@ -302,6 +303,8 @@ $magicWords = [
 	'url_query'                 => [ '0', 'ABFRAGE', 'QUERY' ],
 	'defaultsort_noerror'       => [ '0', 'keinfehler', 'noerror' ],
 	'defaultsort_noreplace'     => [ '0', 'keineersetzung', 'noreplace' ],
+	'displaytitle_noerror'      => [ '0', 'keinfehler', 'noerror' ],
+	'displaytitle_noreplace'    => [ '0', 'keineersetzung', 'noreplace' ],
 	'pagesincategory_all'       => [ '0', 'alle', 'all' ],
 	'pagesincategory_pages'     => [ '0', 'seiten', 'pages' ],
 	'pagesincategory_subcats'   => [ '0', 'unterkategorien', 'unterkats', 'subcats' ],
@@ -352,8 +355,3 @@ $bookstoreList = [
 
 $separatorTransformTable = [ ',' => '.', '.' => ',' ];
 $linkTrail = '/^([äöüßa-z]+)(.*)$/sDu';
-
-$imageFiles = [
-	'button-bold'     => 'de/button_bold.png',
-	'button-italic'   => 'de/button_italic.png',
-];

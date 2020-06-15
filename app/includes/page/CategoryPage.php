@@ -24,15 +24,12 @@
 /**
  * Special handling for category description pages, showing pages,
  * subcategories and file that belong to the category
+ *
+ * @property WikiCategoryPage $mPage Set by overwritten newPage() in this class
  */
 class CategoryPage extends Article {
 	# Subclasses can change this to override the viewer class.
-	protected $mCategoryViewerClass = 'CategoryViewer';
-
-	/**
-	 * @var WikiCategoryPage
-	 */
-	protected $mPage;
+	protected $mCategoryViewerClass = CategoryViewer::class;
 
 	/**
 	 * @param Title $title
@@ -116,5 +113,13 @@ class CategoryPage extends Article {
 		$out = $this->getContext()->getOutput();
 		$out->addHTML( $viewer->getHTML() );
 		$this->addHelpLink( 'Help:Categories' );
+	}
+
+	function getCategoryViewerClass() {
+		return $this->mCategoryViewerClass;
+	}
+
+	function setCategoryViewerClass( $class ) {
+		$this->mCategoryViewerClass = $class;
 	}
 }

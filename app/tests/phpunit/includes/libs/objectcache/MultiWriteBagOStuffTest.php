@@ -28,8 +28,8 @@ class MultiWriteBagOStuffTest extends MediaWikiTestCase {
 	 * @covers MultiWriteBagOStuff::doWrite
 	 */
 	public function testSetImmediate() {
-		$key = wfRandomString();
-		$value = wfRandomString();
+		$key = 'key';
+		$value = 'value';
 		$this->cache->set( $key, $value );
 
 		// Set in tier 1
@@ -42,8 +42,8 @@ class MultiWriteBagOStuffTest extends MediaWikiTestCase {
 	 * @covers MultiWriteBagOStuff
 	 */
 	public function testSyncMerge() {
-		$key = wfRandomString();
-		$value = wfRandomString();
+		$key = 'keyA';
+		$value = 'value';
 		$func = function () use ( $value ) {
 			return $value;
 		};
@@ -56,14 +56,14 @@ class MultiWriteBagOStuffTest extends MediaWikiTestCase {
 		// Set in tier 1
 		$this->assertEquals( $value, $this->cache1->get( $key ), 'Written to tier 1' );
 		// Not yet set in tier 2
-		$this->assertEquals( false, $this->cache2->get( $key ), 'Not written to tier 2' );
+		$this->assertFalse( $this->cache2->get( $key ), 'Not written to tier 2' );
 
 		$dbw->commit();
 
 		// Set in tier 2
 		$this->assertEquals( $value, $this->cache2->get( $key ), 'Written to tier 2' );
 
-		$key = wfRandomString();
+		$key = 'keyB';
 
 		$dbw->begin();
 		$this->cache->merge( $key, $func, 0, 1, BagOStuff::WRITE_SYNC );
@@ -80,22 +80,81 @@ class MultiWriteBagOStuffTest extends MediaWikiTestCase {
 	 * @covers MultiWriteBagOStuff::set
 	 */
 	public function testSetDelayed() {
-		$key = wfRandomString();
-		$value = wfRandomString();
+		$key = 'key';
+		$value = (object)[ 'v' => 'saved value' ];
+		$expectValue = clone $value;
 
 		// XXX: DeferredUpdates bound to transactions in CLI mode
 		$dbw = wfGetDB( DB_MASTER );
 		$dbw->begin();
 		$this->cache->set( $key, $value );
 
+		// Test that later changes to $value don't affect the saved value (e.g. T168040)
+		$value->v = 'other value';
+
 		// Set in tier 1
-		$this->assertEquals( $value, $this->cache1->get( $key ), 'Written to tier 1' );
+		$this->assertEquals( $expectValue, $this->cache1->get( $key ), 'Written to tier 1' );
 		// Not yet set in tier 2
-		$this->assertEquals( false, $this->cache2->get( $key ), 'Not written to tier 2' );
+		$this->assertFalse( $this->cache2->get( $key ), 'Not written to tier 2' );
 
 		$dbw->commit();
 
 		// Set in tier 2
-		$this->assertEquals( $value, $this->cache2->get( $key ), 'Written to tier 2' );
+		$this->assertEquals( $expectValue, $this->cache2->get( $key ), 'Written to tier 2' );
+	}
+
+	/**
+	 * @covers MultiWriteBagOStuff::makeKey
+	 */
+	public function testMakeKey() {
+		if ( defined( 'HHVM_VERSION' ) ) {
+			$this->markTestSkipped( 'HHVM Reflection buggy' );
+		}
+
+		$cache1 = $this->getMockBuilder( HashBagOStuff::class )
+			->setMethods( [ 'makeKey' ] )->getMock();
+		$cache1->expects( $this->once() )->method( 'makeKey' )
+			->willReturn( 'special' );
+
+		$cache2 = $this->getMockBuilder( HashBagOStuff::class )
+			->setMethods( [ 'makeKey' ] )->getMock();
+		$cache2->expects( $this->never() )->method( 'makeKey' );
+
+		$cache = new MultiWriteBagOStuff( [ 'caches' => [ $cache1, $cache2 ] ] );
+		$this->assertSame( 'special', $cache->makeKey( 'a', 'b' ) );
+	}
+
+	/**
+	 * @covers MultiWriteBagOStuff::makeGlobalKey
+	 */
+	public function testMakeGlobalKey() {
+		if ( defined( 'HHVM_VERSION' ) ) {
+			$this->markTestSkipped( 'HHVM Reflection buggy' );
+		}
+
+		$cache1 = $this->getMockBuilder( HashBagOStuff::class )
+			->setMethods( [ 'makeGlobalKey' ] )->getMock();
+		$cache1->expects( $this->once() )->method( 'makeGlobalKey' )
+			->willReturn( 'special' );
+
+		$cache2 = $this->getMockBuilder( HashBagOStuff::class )
+			->setMethods( [ 'makeGlobalKey' ] )->getMock();
+		$cache2->expects( $this->never() )->method( 'makeGlobalKey' );
+
+		$cache = new MultiWriteBagOStuff( [ 'caches' => [ $cache1, $cache2 ] ] );
+
+		$this->assertSame( 'special', $cache->makeGlobalKey( 'a', 'b' ) );
+	}
+
+	/**
+	 * @covers MultiWriteBagOStuff::add
+	 */
+	public function testDuplicateStoreAdd() {
+		$bag = new HashBagOStuff();
+		$cache = new MultiWriteBagOStuff( [
+			'caches' => [ $bag, $bag ],
+		] );
+
+		$this->assertTrue( $cache->add( 'key', 1, 30 ) );
 	}
 }

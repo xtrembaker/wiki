@@ -1,8 +1,6 @@
 <?php
 /**
- * Created on Jun 25, 2013
- *
- * Copyright © 2013 Brad Jorsch <bjorsch@wikimedia.org>
+ * Copyright © 2013 Wikimedia Foundation and contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -23,6 +21,8 @@
  * @since 1.23
  */
 
+use MediaWiki\Revision\RevisionRecord;
+
 /**
  * API interface to RevDel. The API equivalent of Special:RevisionDelete.
  * Requires API write mode to be enabled.
@@ -38,16 +38,12 @@ class ApiRevisionDelete extends ApiBase {
 		$user = $this->getUser();
 		$this->checkUserRightsAny( RevisionDeleter::getRestriction( $params['type'] ) );
 
-		if ( $user->isBlocked() ) {
-			$this->dieBlocked( $user->getBlock() );
-		}
-
 		if ( !$params['ids'] ) {
 			$this->dieWithError( [ 'apierror-paramempty', 'ids' ], 'paramempty_ids' );
 		}
 
 		// Check if user can add tags
-		if ( count( $params['tags'] ) ) {
+		if ( $params['tags'] ) {
 			$ableToTag = ChangeTags::canAddTagsAccompanyingChange( $params['tags'], $user );
 			if ( !$ableToTag->isOK() ) {
 				$this->dieStatus( $ableToTag );
@@ -63,8 +59,8 @@ class ApiRevisionDelete extends ApiBase {
 		}
 		$bits = [
 			'content' => RevisionDeleter::getRevdelConstant( $params['type'] ),
-			'comment' => Revision::DELETED_COMMENT,
-			'user' => Revision::DELETED_USER,
+			'comment' => RevisionRecord::DELETED_COMMENT,
+			'user' => RevisionRecord::DELETED_USER,
 		];
 		$bitfield = [];
 		foreach ( $bits as $key => $bit ) {
@@ -79,11 +75,11 @@ class ApiRevisionDelete extends ApiBase {
 
 		if ( $params['suppress'] === 'yes' ) {
 			$this->checkUserRightsAny( 'suppressrevision' );
-			$bitfield[Revision::DELETED_RESTRICTED] = 1;
+			$bitfield[RevisionRecord::DELETED_RESTRICTED] = 1;
 		} elseif ( $params['suppress'] === 'no' ) {
-			$bitfield[Revision::DELETED_RESTRICTED] = 0;
+			$bitfield[RevisionRecord::DELETED_RESTRICTED] = 0;
 		} else {
-			$bitfield[Revision::DELETED_RESTRICTED] = -1;
+			$bitfield[RevisionRecord::DELETED_RESTRICTED] = -1;
 		}
 
 		$targetObj = null;
@@ -93,6 +89,10 @@ class ApiRevisionDelete extends ApiBase {
 		$targetObj = RevisionDeleter::suggestTarget( $params['type'], $targetObj, $params['ids'] );
 		if ( $targetObj === null ) {
 			$this->dieWithError( [ 'apierror-revdel-needtarget' ], 'needtarget' );
+		}
+
+		if ( $this->getPermissionManager()->isBlockedFrom( $user, $targetObj ) ) {
+			$this->dieBlocked( $user->getBlock() );
 		}
 
 		$list = RevisionDeleter::createList(
@@ -116,11 +116,9 @@ class ApiRevisionDelete extends ApiBase {
 		}
 
 		$list->reloadFromMaster();
-		// @codingStandardsIgnoreStart Avoid function calls in a FOR loop test part
 		for ( $item = $list->reset(); $list->current(); $item = $list->next() ) {
 			$data['items'][$item->getId()] += $item->getApiData( $this->getResult() );
 		}
-		// @codingStandardsIgnoreEnd
 
 		$data['items'] = array_values( $data['items'] );
 		ApiResult::setIndexedTagName( $data['items'], 'i' );

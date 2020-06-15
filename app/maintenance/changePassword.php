@@ -46,28 +46,24 @@ class ChangePassword extends Maintenance {
 		} elseif ( $this->hasOption( "userid" ) ) {
 			$user = User::newFromId( $this->getOption( 'userid' ) );
 		} else {
-			$this->error( "A \"user\" or \"userid\" must be set to change the password for", true );
+			$this->fatalError( "A \"user\" or \"userid\" must be set to change the password for" );
 		}
 		if ( !$user || !$user->getId() ) {
-			$this->error( "No such user: " . $this->getOption( 'user' ), true );
+			$this->fatalError( "No such user: " . $this->getOption( 'user' ) );
 		}
 		$password = $this->getOption( 'password' );
-		try {
-			$status = $user->changeAuthenticationData( [
-				'username' => $user->getName(),
-				'password' => $password,
-				'retype' => $password,
-			] );
-			if ( !$status->isGood() ) {
-				throw new PasswordError( $status->getWikiText( null, null, 'en' ) );
-			}
-			$user->saveSettings();
+		$status = $user->changeAuthenticationData( [
+			'username' => $user->getName(),
+			'password' => $password,
+			'retype' => $password,
+		] );
+		if ( $status->isGood() ) {
 			$this->output( "Password set for " . $user->getName() . "\n" );
-		} catch ( PasswordError $pwe ) {
-			$this->error( $pwe->getText(), true );
+		} else {
+			$this->fatalError( $status->getMessage( false, false, 'en' )->text() );
 		}
 	}
 }
 
-$maintClass = "ChangePassword";
+$maintClass = ChangePassword::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

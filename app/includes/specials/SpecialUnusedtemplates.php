@@ -29,7 +29,7 @@
  *
  * @ingroup SpecialPage
  */
-class UnusedtemplatesPage extends QueryPage {
+class SpecialUnusedTemplates extends QueryPage {
 	function __construct( $name = 'Unusedtemplates' ) {
 		parent::__construct( $name );
 	}
@@ -46,13 +46,16 @@ class UnusedtemplatesPage extends QueryPage {
 		return false;
 	}
 
+	function getOrderFields() {
+		return [ 'title' ];
+	}
+
 	public function getQueryInfo() {
 		return [
 			'tables' => [ 'page', 'templatelinks' ],
 			'fields' => [
 				'namespace' => 'page_namespace',
 				'title' => 'page_title',
-				'value' => 'page_title'
 			],
 			'conds' => [
 				'page_namespace' => NS_TEMPLATE,

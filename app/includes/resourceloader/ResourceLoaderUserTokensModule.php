@@ -1,7 +1,5 @@
 <?php
 /**
- * ResourceLoader module for user tokens.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,21 +16,19 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @author Krinkle
  */
 
 /**
- * Module for user tokens
+ * Module for user authorization tokens.
+ *
+ * @ingroup ResourceLoader
+ * @internal
  */
 class ResourceLoaderUserTokensModule extends ResourceLoaderModule {
-
-	/* Protected Members */
 
 	protected $origin = self::ORIGIN_CORE_INDIVIDUAL;
 
 	protected $targets = [ 'desktop', 'mobile' ];
-
-	/* Methods */
 
 	/**
 	 * Fetch the tokens for the current user.
@@ -52,19 +48,15 @@ class ResourceLoaderUserTokensModule extends ResourceLoaderModule {
 	}
 
 	/**
-	 * Generate the JavaScript content of this module.
-	 *
-	 * Add FILTER_NOMIN annotation to prevent needless minification and caching (T84960).
-	 *
 	 * @param ResourceLoaderContext $context
 	 * @return string JavaScript code
 	 */
 	public function getScript( ResourceLoaderContext $context ) {
-		return Xml::encodeJsCall(
-			'mw.user.tokens.set',
-			[ $this->contextUserTokens( $context ) ],
-			ResourceLoader::inDebugMode()
-		) . ResourceLoader::FILTER_NOMIN;
+		// Use FILTER_NOMIN annotation to prevent needless minification and caching (T84960).
+		return ResourceLoader::FILTER_NOMIN
+			. 'mw.user.tokens.set('
+			. $context->encodeJson( $this->contextUserTokens( $context ) )
+			. ');';
 	}
 
 	/**

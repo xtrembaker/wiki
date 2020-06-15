@@ -20,15 +20,15 @@
  *
  * @file
  * @author Tim Starling
- * @author Aaron Schulz
  * @copyright © 2009, Tim Starling, Domas Mituzas
  * @copyright © 2010, Max Sem
  * @copyright © 2011, Antoine Musso
  */
 
-use Wikimedia\Rdbms\ResultWrapper;
 use Wikimedia\Rdbms\FakeResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\IResultWrapper;
+use MediaWiki\MediaWikiServices;
 
 /**
  * Class for fetching backlink lists, approximate backlink counts and
@@ -67,9 +67,14 @@ class BacklinkCache {
 	 *
 	 * Initialized with BacklinkCache::getLinks()
 	 * Cleared with BacklinkCache::clear()
-	 * @var ResultWrapper[]
+	 * @var IResultWrapper[]
 	 */
 	protected $fullResultCache = [];
+
+	/**
+	 * @var WANObjectCache
+	 */
+	protected $wanCache;
 
 	/**
 	 * Local copy of a database object.
@@ -94,6 +99,7 @@ class BacklinkCache {
 	 */
 	public function __construct( Title $title ) {
 		$this->title = $title;
+		$this->wanCache = MediaWikiServices::getInstance()->getMainWANObjectCache();
 	}
 
 	/**
@@ -123,12 +129,13 @@ class BacklinkCache {
 	}
 
 	/**
-	 * Clear locally stored data and database object.
+	 * Clear locally stored data and database object. Invalidate data in memcache.
 	 */
 	public function clear() {
 		$this->partitionCache = [];
 		$this->fullResultCache = [];
-		unset( $this->db );
+		$this->wanCache->touchCheckKey( $this->makeCheckKey() );
+		$this->db = null;
 	}
 
 	/**
@@ -146,7 +153,7 @@ class BacklinkCache {
 	 * @return IDatabase
 	 */
 	protected function getDB() {
-		if ( !isset( $this->db ) ) {
+		if ( $this->db === null ) {
 			$this->db = wfGetDB( DB_REPLICA );
 		}
 
@@ -172,10 +179,9 @@ class BacklinkCache {
 	 * @param int|bool $endId
 	 * @param int $max
 	 * @param string $select 'all' or 'ids'
-	 * @return ResultWrapper
+	 * @return IResultWrapper
 	 */
 	protected function queryLinks( $table, $startId, $endId, $max, $select = 'all' ) {
-
 		$fromField = $this->getPrefix( $table ) . '_from';
 
 		if ( !$startId && !$endId && is_infinite( $max )
@@ -326,7 +332,6 @@ class BacklinkCache {
 	public function getNumLinks( $table, $max = INF ) {
 		global $wgUpdateRowsPerJob;
 
-		$cache = ObjectCache::getMainWANInstance();
 		// 1) try partition cache ...
 		if ( isset( $this->partitionCache[$table] ) ) {
 			$entry = reset( $this->partitionCache[$table] );
@@ -339,15 +344,22 @@ class BacklinkCache {
 			return min( $max, $this->fullResultCache[$table]->numRows() );
 		}
 
-		$memcKey = $cache->makeKey(
+		$memcKey = $this->wanCache->makeKey(
 			'numbacklinks',
 			md5( $this->title->getPrefixedDBkey() ),
 			$table
 		);
 
 		// 3) ... fallback to memcached ...
-		$count = $cache->get( $memcKey );
-		if ( $count ) {
+		$curTTL = INF;
+		$count = $this->wanCache->get(
+			$memcKey,
+			$curTTL,
+			[
+				$this->makeCheckKey()
+			]
+		);
+		if ( $count && ( $curTTL > 0 ) ) {
 			return min( $max, $count );
 		}
 
@@ -361,7 +373,7 @@ class BacklinkCache {
 			// Fetch the full title info, since the caller will likely need it next
 			$count = $this->getLinks( $table, false, false, $max )->count();
 			if ( $count < $max ) { // full count
-				$cache->set( $memcKey, $count, self::CACHE_EXPIRY );
+				$this->wanCache->set( $memcKey, $count, self::CACHE_EXPIRY );
 			}
 		}
 
@@ -385,7 +397,6 @@ class BacklinkCache {
 			return $this->partitionCache[$table][$batchSize]['batches'];
 		}
 
-		$cache = ObjectCache::getMainWANInstance();
 		$this->partitionCache[$table][$batchSize] = false;
 		$cacheEntry =& $this->partitionCache[$table][$batchSize];
 
@@ -397,7 +408,7 @@ class BacklinkCache {
 			return $cacheEntry['batches'];
 		}
 
-		$memcKey = $cache->makeKey(
+		$memcKey = $this->wanCache->makeKey(
 			'backlinks',
 			md5( $this->title->getPrefixedDBkey() ),
 			$table,
@@ -405,8 +416,15 @@ class BacklinkCache {
 		);
 
 		// 3) ... fallback to memcached ...
-		$memcValue = $cache->get( $memcKey );
-		if ( is_array( $memcValue ) ) {
+		$curTTL = 0;
+		$memcValue = $this->wanCache->get(
+			$memcKey,
+			$curTTL,
+			[
+				$this->makeCheckKey()
+			]
+		);
+		if ( is_array( $memcValue ) && ( $curTTL > 0 ) ) {
 			$cacheEntry = $memcValue;
 			wfDebug( __METHOD__ . ": got from memcached $memcKey\n" );
 
@@ -437,15 +455,15 @@ class BacklinkCache {
 		}
 
 		// Save partitions to memcached
-		$cache->set( $memcKey, $cacheEntry, self::CACHE_EXPIRY );
+		$this->wanCache->set( $memcKey, $cacheEntry, self::CACHE_EXPIRY );
 
 		// Save backlink count to memcached
-		$memcKey = $cache->makeKey(
+		$memcKey = $this->wanCache->makeKey(
 			'numbacklinks',
 			md5( $this->title->getPrefixedDBkey() ),
 			$table
 		);
-		$cache->set( $memcKey, $cacheEntry['numRows'], self::CACHE_EXPIRY );
+		$this->wanCache->set( $memcKey, $cacheEntry['numRows'], self::CACHE_EXPIRY );
 
 		wfDebug( __METHOD__ . ": got from database\n" );
 
@@ -454,7 +472,7 @@ class BacklinkCache {
 
 	/**
 	 * Partition a DB result with backlinks in it into batches
-	 * @param ResultWrapper $res Database result
+	 * @param IResultWrapper $res Database result
 	 * @param int $batchSize
 	 * @param bool $isComplete Whether $res includes all the backlinks
 	 * @throws MWException
@@ -544,5 +562,17 @@ class BacklinkCache {
 
 		return TitleArray::newFromResult(
 			new FakeResultWrapper( array_values( $mergedRes ) ) );
+	}
+
+	/**
+	 * Returns check key for the backlinks cache for a particular title
+	 *
+	 * @return string
+	 */
+	private function makeCheckKey() {
+		return $this->wanCache->makeKey(
+			'backlinks',
+			md5( $this->title->getPrefixedDBkey() )
+		);
 	}
 }

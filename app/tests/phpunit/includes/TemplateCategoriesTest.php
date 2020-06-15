@@ -1,18 +1,21 @@
 <?php
 
+require __DIR__ . "/../../../maintenance/runJobs.php";
+
 /**
  * @group Database
  */
-require __DIR__ . "/../../../maintenance/runJobs.php";
-
 class TemplateCategoriesTest extends MediaWikiLangTestCase {
 
 	/**
+	 * Broken per T165099.
+	 *
+	 * @group Broken
 	 * @covers Title::getParentCategories
 	 */
 	public function testTemplateCategories() {
 		$user = new User();
-		$user->mRights = [ 'createpage', 'edit', 'purge', 'delete' ];
+		$this->overrideUserPermissions( $user, [ 'createpage', 'edit', 'purge', 'delete' ] );
 
 		$title = Title::newFromText( "Categorized from template" );
 		$page = WikiPage::factory( $title );

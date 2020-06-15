@@ -1,4 +1,7 @@
 <?php
+
+use Wikimedia\AtEase\AtEase;
+
 /**
  * Methods to play with strings.
  *
@@ -39,19 +42,7 @@ class StringUtils {
 	 * @return bool Whether the given $value is a valid UTF-8 encoded string
 	 */
 	static function isUtf8( $value ) {
-		$value = (string)$value;
-
-		// HHVM 3.4 and older come with an outdated version of libmbfl that
-		// incorrectly allows values above U+10FFFF, so we have to check
-		// for them separately. (This issue also exists in PHP 5.3 and
-		// older, which are no longer supported.)
-		static $newPHP;
-		if ( $newPHP === null ) {
-			$newPHP = !mb_check_encoding( "\xf4\x90\x80\x80", 'UTF-8' );
-		}
-
-		return mb_check_encoding( $value, 'UTF-8' ) &&
-			( $newPHP || preg_match( "/\xf4[\x90-\xbf]|[\xf5-\xff]/S", $value ) === 0 );
+		return mb_check_encoding( (string)$value, 'UTF-8' );
 	}
 
 	/**
@@ -218,7 +209,7 @@ class StringUtils {
 			} elseif ( $tokenType == 'end' ) {
 				if ( $foundStart ) {
 					# Found match
-					$output .= call_user_func( $callback, [
+					$output .= $callback( [
 						substr( $subject, $outputPos, $tokenOffset + $tokenLength - $outputPos ),
 						substr( $subject, $contentPos, $tokenOffset - $contentPos )
 					] );
@@ -255,10 +246,13 @@ class StringUtils {
 	 * @return string The string with the matches replaced
 	 */
 	static function delimiterReplace( $startDelim, $endDelim, $replace, $subject, $flags = '' ) {
-		$replacer = new RegexlikeReplacer( $replace );
-
-		return self::delimiterReplaceCallback( $startDelim, $endDelim,
-			$replacer->cb(), $subject, $flags );
+		return self::delimiterReplaceCallback(
+			$startDelim, $endDelim,
+			function ( array $matches ) use ( $replace ) {
+				return strtr( $replace, [ '$0' => $matches[0], '$1' => $matches[1] ] );
+			},
+			$subject, $flags
+		);
 	}
 
 	/**
@@ -275,8 +269,13 @@ class StringUtils {
 		$text = str_replace( $placeholder, '', $text );
 
 		// Replace instances of the separator inside HTML-like tags with the placeholder
-		$replacer = new DoubleReplacer( $separator, $placeholder );
-		$cleaned = StringUtils::delimiterReplaceCallback( '<', '>', $replacer->cb(), $text );
+		$cleaned = self::delimiterReplaceCallback(
+			'<', '>',
+			function ( array $matches ) use ( $separator, $placeholder ) {
+				return str_replace( $separator, $placeholder, $matches[0] );
+			},
+			$text
+		);
 
 		// Explode, then put the replaced separators back in
 		$items = explode( $separator, $cleaned );
@@ -302,14 +301,36 @@ class StringUtils {
 		$text = str_replace( $placeholder, '', $text );
 
 		// Replace instances of the separator inside HTML-like tags with the placeholder
-		$replacer = new DoubleReplacer( $search, $placeholder );
-		$cleaned = StringUtils::delimiterReplaceCallback( '<', '>', $replacer->cb(), $text );
+		$cleaned = self::delimiterReplaceCallback(
+			'<', '>',
+			function ( array $matches ) use ( $search, $placeholder ) {
+				return str_replace( $search, $placeholder, $matches[0] );
+			},
+			$text
+		);
 
 		// Explode, then put the replaced separators back in
 		$cleaned = str_replace( $search, $replace, $cleaned );
 		$text = str_replace( $placeholder, $search, $cleaned );
 
 		return $text;
+	}
+
+	/**
+	 * Utility function to check if the given string is a valid PCRE regex. Avoids
+	 * manually calling suppressWarnings and restoreWarnings, and provides a
+	 * one-line solution without the need to use @.
+	 *
+	 * @since 1.34
+	 * @param string $string The string you want to check being a valid regex
+	 * @return bool
+	 */
+	public static function isValidPCRERegex( $string ) {
+		AtEase::suppressWarnings();
+		// @phan-suppress-next-line PhanParamSuspiciousOrder False positive
+		$isValid = preg_match( $string, '' );
+		AtEase::restoreWarnings();
+		return $isValid !== false;
 	}
 
 	/**

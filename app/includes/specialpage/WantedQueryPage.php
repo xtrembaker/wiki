@@ -21,7 +21,7 @@
  * @ingroup SpecialPage
  */
 
-use Wikimedia\Rdbms\ResultWrapper;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
@@ -41,7 +41,7 @@ abstract class WantedQueryPage extends QueryPage {
 	/**
 	 * Cache page existence for performance
 	 * @param IDatabase $db
-	 * @param ResultWrapper $res
+	 * @param IResultWrapper $res
 	 */
 	function preprocessResults( $db, $res ) {
 		$this->executeLBFromResultWrapper( $res );
@@ -102,6 +102,7 @@ abstract class WantedQueryPage extends QueryPage {
 	 * @note This will only be run if the page is cached (ie $wgMiserMode = true)
 	 *   unless forceExistenceCheck() is true.
 	 * @since 1.24
+	 * @param Title $title
 	 * @return bool
 	 */
 	protected function existenceCheck( Title $title ) {
@@ -115,10 +116,10 @@ abstract class WantedQueryPage extends QueryPage {
 	 * @param object $result Result row
 	 * @return string
 	 */
-	private function makeWlhLink( $title, $result ) {
+	protected function makeWlhLink( $title, $result ) {
 		$wlh = SpecialPage::getTitleFor( 'Whatlinkshere', $title->getPrefixedText() );
-		$label = $this->msg( 'nlinks' )->numParams( $result->value )->escaped();
-		return Linker::link( $wlh, $label );
+		$label = $this->msg( 'nlinks' )->numParams( $result->value )->text();
+		return $this->getLinkRenderer()->makeLink( $wlh, $label );
 	}
 
 	/**

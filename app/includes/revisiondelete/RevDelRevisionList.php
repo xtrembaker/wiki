@@ -19,6 +19,7 @@
  * @ingroup RevisionDelete
  */
 
+use MediaWiki\Revision\RevisionRecord;
 use Wikimedia\Rdbms\FakeResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
@@ -48,7 +49,7 @@ class RevDelRevisionList extends RevDelList {
 	}
 
 	public static function getRevdelConstant() {
-		return Revision::DELETED_TEXT;
+		return RevisionRecord::DELETED_TEXT;
 	}
 
 	public static function suggestTarget( $target, array $ids ) {
@@ -62,9 +63,10 @@ class RevDelRevisionList extends RevDelList {
 	 */
 	public function doQuery( $db ) {
 		$ids = array_map( 'intval', $this->ids );
+		$revQuery = Revision::getQueryInfo( [ 'page', 'user' ] );
 		$queryInfo = [
-			'tables' => [ 'revision', 'page', 'user' ],
-			'fields' => array_merge( Revision::selectFields(), Revision::selectUserFields() ),
+			'tables' => $revQuery['tables'],
+			'fields' => $revQuery['fields'],
 			'conds' => [
 				'rev_page' => $this->title->getArticleID(),
 				'rev_id' => $ids,
@@ -73,10 +75,7 @@ class RevDelRevisionList extends RevDelList {
 				'ORDER BY' => 'rev_id DESC',
 				'USE INDEX' => [ 'revision' => 'PRIMARY' ] // workaround for MySQL bug (T104313)
 			],
-			'join_conds' => [
-				'page' => Revision::pageJoinCond(),
-				'user' => Revision::userJoinCond(),
-			],
+			'join_conds' => $revQuery['joins'],
 		];
 		ChangeTags::modifyDisplayQuery(
 			$queryInfo['tables'],
@@ -100,14 +99,15 @@ class RevDelRevisionList extends RevDelList {
 			return $live;
 		}
 
+		$arQuery = Revision::getArchiveQueryInfo();
 		$archiveQueryInfo = [
-			'tables' => [ 'archive' ],
-			'fields' => Revision::selectArchiveFields(),
+			'tables' => $arQuery['tables'],
+			'fields' => $arQuery['fields'],
 			'conds' => [
 				'ar_rev_id' => $ids,
 			],
 			'options' => [ 'ORDER BY' => 'ar_rev_id DESC' ],
-			'join_conds' => [],
+			'join_conds' => $arQuery['joins'],
 		];
 
 		ChangeTags::modifyDisplayQuery(
@@ -168,7 +168,7 @@ class RevDelRevisionList extends RevDelList {
 	}
 
 	public function getSuppressBit() {
-		return Revision::DELETED_RESTRICTED;
+		return RevisionRecord::DELETED_RESTRICTED;
 	}
 
 	public function doPreCommitUpdates() {

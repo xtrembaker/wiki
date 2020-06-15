@@ -3,8 +3,6 @@
 /**
  * API for MediaWiki 1.17+
  *
- * Created on October 26, 2010
- *
  * Copyright © 2010 Bryan Tong Minh and Brion Vibber
  *
  * This program is free software; you can redistribute it and/or modify
@@ -122,7 +120,7 @@ class ApiRsd extends ApiBase {
 				'name' => $name,
 				'preferred' => wfBoolToStr( $name == 'MediaWiki' ),
 				'apiLink' => $info['apiLink'],
-				'blogID' => isset( $info['blogID'] ) ? $info['blogID'] : '',
+				'blogID' => $info['blogID'] ?? '',
 			];
 			$settings = [];
 			if ( isset( $info['docs'] ) ) {
@@ -149,21 +147,5 @@ class ApiRsd extends ApiBase {
 		}
 
 		return $outputData;
-	}
-}
-
-class ApiFormatXmlRsd extends ApiFormatXml {
-	public function __construct( ApiMain $main, $format ) {
-		parent::__construct( $main, $format );
-		$this->setRootElement( 'rsd' );
-	}
-
-	public function getMimeType() {
-		return 'application/rsd+xml';
-	}
-
-	public static function recXmlPrint( $name, $value, $indent, $attributes = [] ) {
-		unset( $attributes['_idx'] );
-		return parent::recXmlPrint( $name, $value, $indent, $attributes );
 	}
 }

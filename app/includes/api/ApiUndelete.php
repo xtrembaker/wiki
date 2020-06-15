@@ -1,9 +1,5 @@
 <?php
 /**
- *
- *
- * Created on Jul 3, 2007
- *
  * Copyright © 2007 Roan Kattouw "<Firstname>.<Lastname>@gmail.com"
  *
  * This program is free software; you can redistribute it and/or modify
@@ -35,7 +31,8 @@ class ApiUndelete extends ApiBase {
 		$params = $this->extractRequestParams();
 
 		$user = $this->getUser();
-		if ( $user->isBlocked() ) {
+		$block = $user->getBlock();
+		if ( $block && $block->isSitewide() ) {
 			$this->dieBlocked( $user->getBlock() );
 		}
 
@@ -44,7 +41,7 @@ class ApiUndelete extends ApiBase {
 			$this->dieWithError( [ 'apierror-invalidtitle', wfEscapeWikiText( $params['title'] ) ] );
 		}
 
-		if ( !$titleObj->userCan( 'undelete', $user, 'secure' ) ) {
+		if ( !$this->getPermissionManager()->userCan( 'undelete', $this->getUser(), $titleObj ) ) {
 			$this->dieWithError( 'permdenied-undelete' );
 		}
 
@@ -69,7 +66,7 @@ class ApiUndelete extends ApiBase {
 
 		$pa = new PageArchive( $titleObj, $this->getConfig() );
 		$retval = $pa->undelete(
-			( isset( $params['timestamps'] ) ? $params['timestamps'] : [] ),
+			( $params['timestamps'] ?? [] ),
 			$params['reason'],
 			$params['fileids'],
 			false,
@@ -87,10 +84,12 @@ class ApiUndelete extends ApiBase {
 
 		$this->setWatch( $params['watchlist'], $titleObj );
 
-		$info['title'] = $titleObj->getPrefixedText();
-		$info['revisions'] = intval( $retval[0] );
-		$info['fileversions'] = intval( $retval[1] );
-		$info['reason'] = $retval[2];
+		$info = [
+			'title' => $titleObj->getPrefixedText(),
+			'revisions' => (int)$retval[0],
+			'fileversions' => (int)$retval[1],
+			'reason' => $retval[2]
+		];
 		$this->getResult()->addValue( null, $this->getModuleName(), $info );
 	}
 

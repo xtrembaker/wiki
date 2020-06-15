@@ -21,7 +21,6 @@
  *
  * @file
  * @ingroup Maintenance
- * @author Aaron Schulz
  */
 
 require_once __DIR__ . '/Maintenance.php';
@@ -67,7 +66,6 @@ class DeleteArchivedFiles extends Maintenance {
 				continue;
 			}
 
-			/** @var LocalFile $file */
 			$file = $repo->newFile( $row->fa_name );
 			try {
 				$file->lock();
@@ -131,5 +129,5 @@ class DeleteArchivedFiles extends Maintenance {
 	}
 }
 
-$maintClass = "DeleteArchivedFiles";
+$maintClass = DeleteArchivedFiles::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

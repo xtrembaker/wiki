@@ -5,7 +5,7 @@
  * @license The MIT License (MIT); see LICENSE.txt
  */
 /* global moment */
-( function ( $, mw ) {
+( function () {
 
 	/**
 	 * Creates an mw.widgets.CalendarWidget object.
@@ -177,6 +177,7 @@
 		switch ( this.displayLayer ) {
 			case 'month':
 				this.labelButton.setLabel( this.moment.format( 'MMMM YYYY' ) );
+				this.labelButton.toggle( true );
 				this.upButton.toggle( true );
 
 				// First week displayed is the first week spanned by the month, unless it begins on Monday, in
@@ -216,6 +217,7 @@
 
 			case 'year':
 				this.labelButton.setLabel( this.moment.format( 'YYYY' ) );
+				this.labelButton.toggle( true );
 				this.upButton.toggle( true );
 
 				currentMonth = moment( this.moment ).startOf( 'year' );
@@ -229,19 +231,26 @@
 					);
 					currentMonth.add( 1, 'month' );
 				}
-				// Shuffle the array to display months in columns rather than rows.
+				// Shuffle the array to display months in columns rather than rows:
+				// | Jan | Jul |
+				// | Feb | Aug |
+				// | Mar | Sep |
+				// | Apr | Oct |
+				// | May | Nov |
+				// | Jun | Dec |
 				items = [
-					items[ 0 ], items[ 6 ],      //  | January  | July      |
-					items[ 1 ], items[ 7 ],      //  | February | August    |
-					items[ 2 ], items[ 8 ],      //  | March    | September |
-					items[ 3 ], items[ 9 ],      //  | April    | October   |
-					items[ 4 ], items[ 10 ],     //  | May      | November  |
-					items[ 5 ], items[ 11 ]      //  | June     | December  |
+					items[ 0 ], items[ 6 ],
+					items[ 1 ], items[ 7 ],
+					items[ 2 ], items[ 8 ],
+					items[ 3 ], items[ 9 ],
+					items[ 4 ], items[ 10 ],
+					items[ 5 ], items[ 11 ]
 				];
 				break;
 
 			case 'duodecade':
 				this.labelButton.setLabel( null );
+				this.labelButton.toggle( false );
 				this.upButton.toggle( false );
 
 				currentYear = moment( { year: Math.floor( this.moment.year() / 20 ) * 20 } );
@@ -288,7 +297,7 @@
 			}
 			setTimeout( function () {
 				$bodyWrapper.addClass( 'mw-widget-calendarWidget-body-wrapper-fade-' + fade );
-			}.bind( this ), 0 );
+			} );
 		} else {
 			this.$oldBody.replaceWith( this.$body );
 		}
@@ -312,6 +321,8 @@
 			framed: false,
 			classes: [ 'mw-widget-calendarWidget-labelButton' ]
 		} );
+		// FIXME This button is actually not clickable because labelButton covers it,
+		// should it just be a plain icon?
 		this.upButton = new OO.ui.ButtonWidget( {
 			tabIndex: -1,
 			framed: false,
@@ -339,8 +350,8 @@
 		this.$header.append(
 			this.prevButton.$element,
 			this.nextButton.$element,
-			this.upButton.$element,
-			this.labelButton.$element
+			this.labelButton.$element,
+			this.upButton.$element
 		);
 	};
 
@@ -582,4 +593,4 @@
 		return this;
 	};
 
-}( jQuery, mediaWiki ) );
+}() );

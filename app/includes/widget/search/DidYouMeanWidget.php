@@ -2,8 +2,8 @@
 
 namespace MediaWiki\Widget\Search;
 
-use Linker;
-use SearchResultSet;
+use HtmlArmor;
+use ISearchResultSet;
 use SpecialSearch;
 
 /**
@@ -20,10 +20,10 @@ class DidYouMeanWidget {
 
 	/**
 	 * @param string $term The user provided search term
-	 * @param SearchResultSet $resultSet
+	 * @param ISearchResultSet $resultSet
 	 * @return string HTML
 	 */
-	public function render( $term, SearchResultSet $resultSet ) {
+	public function render( $term, ISearchResultSet $resultSet ) {
 		if ( $resultSet->hasRewrittenQuery() ) {
 			$html = $this->rewrittenHtml( $term, $resultSet );
 		} elseif ( $resultSet->hasSuggestion() ) {
@@ -40,32 +40,34 @@ class DidYouMeanWidget {
 	 * rewritten, and the results of the rewritten query are being returned.
 	 *
 	 * @param string $term The users search input
-	 * @param SearchResultSet $resultSet The response to the search request
+	 * @param ISearchResultSet $resultSet The response to the search request
 	 * @return string HTML Links the user to their original $term query, and the
 	 *  one suggested by $resultSet
 	 */
-	protected function rewrittenHtml( $term, SearchResultSet $resultSet ) {
+	protected function rewrittenHtml( $term, ISearchResultSet $resultSet ) {
 		$params = [
 			'search' => $resultSet->getQueryAfterRewrite(),
 			// Don't magic this link into a 'go' link, it should always
 			// show search results.
-			'fultext' => 1,
+			'fulltext' => 1,
 		];
 		$stParams = array_merge( $params, $this->specialSearch->powerSearchOptions() );
 
-		$rewritten = Linker::linkKnown(
+		$linkRenderer = $this->specialSearch->getLinkRenderer();
+		$snippet = $resultSet->getQueryAfterRewriteSnippet();
+		$rewritten = $linkRenderer->makeKnownLink(
 			$this->specialSearch->getPageTitle(),
-			$resultSet->getQueryAfterRewriteSnippet() ?: null,
+			$snippet ? new HtmlArmor( $snippet ) : null,
 			[ 'id' => 'mw-search-DYM-rewritten' ],
 			$stParams
 		);
 
 		$stParams['search'] = $term;
 		$stParams['runsuggestion'] = 0;
-		$original = Linker::linkKnown(
+		$original = $linkRenderer->makeKnownLink(
 			$this->specialSearch->getPageTitle(),
-			htmlspecialchars( $term, ENT_QUOTES, 'UTF-8' ),
-			[ 'id' => 'mwsearch-DYM-original' ],
+			$term,
+			[ 'id' => 'mw-search-DYM-original' ],
 			$stParams
 		);
 
@@ -79,19 +81,20 @@ class DidYouMeanWidget {
 	 * a query that might give more/better results than their current
 	 * query.
 	 *
-	 * @param SearchResultSet $resultSet
+	 * @param ISearchResultSet $resultSet
 	 * @return string HTML
 	 */
-	protected function suggestionHtml( SearchResultSet $resultSet ) {
+	protected function suggestionHtml( ISearchResultSet $resultSet ) {
 		$params = [
 			'search' => $resultSet->getSuggestionQuery(),
 			'fulltext' => 1,
 		];
 		$stParams = array_merge( $params, $this->specialSearch->powerSearchOptions() );
 
-		$suggest = Linker::linkKnown(
+		$snippet = $resultSet->getSuggestionSnippet();
+		$suggest = $this->specialSearch->getLinkRenderer()->makeKnownLink(
 			$this->specialSearch->getPageTitle(),
-			$resultSet->getSuggestionSnippet() ?: null,
+			$snippet ? new HtmlArmor( $snippet ) : null,
 			[ 'id' => 'mw-search-DYM-suggestion' ],
 			$stParams
 		);

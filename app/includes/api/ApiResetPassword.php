@@ -1,6 +1,6 @@
 <?php
 /**
- * Copyright © 2016 Brad Jorsch <bjorsch@wikimedia.org>
+ * Copyright © 2016 Wikimedia Foundation and contributors
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -20,7 +20,7 @@
  * @file
  */
 
-use MediaWiki\Auth\AuthManager;
+use MediaWiki\MediaWikiServices;
 
 /**
  * Reset password, with AuthManager
@@ -43,11 +43,11 @@ class ApiResetPassword extends ApiBase {
 		return $this->hasAnyRoutes;
 	}
 
-	protected function getDescriptionMessage() {
+	protected function getExtendedDescription() {
 		if ( !$this->hasAnyRoutes() ) {
-			return 'apihelp-resetpassword-description-noroutes';
+			return 'apihelp-resetpassword-extended-description-noroutes';
 		}
-		return parent::getDescriptionMessage();
+		return parent::getExtendedDescription();
 	}
 
 	public function execute() {
@@ -63,7 +63,7 @@ class ApiResetPassword extends ApiBase {
 
 		$this->requireOnlyOneParameter( $params, 'user', 'email' );
 
-		$passwordReset = new PasswordReset( $this->getConfig(), AuthManager::singleton() );
+		$passwordReset = MediaWikiServices::getInstance()->getPasswordReset();
 
 		$status = $passwordReset->isAllowed( $this->getUser() );
 		if ( !$status->isOK() ) {

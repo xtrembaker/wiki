@@ -103,6 +103,8 @@ class UploadBaseTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * @covers UploadBase::verifyUpload
+	 *
 	 * test uploading a 100 bytes file with $wgMaxUploadSize = 100
 	 *
 	 * This method should be abstracted so we can test different settings.
@@ -126,6 +128,7 @@ class UploadBaseTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * @covers UploadBase::checkSvgScriptCallback
 	 * @dataProvider provideCheckSvgScriptCallback
 	 */
 	public function testCheckSvgScriptCallback( $svg, $wellFormed, $filterMatch, $message ) {
@@ -135,13 +138,13 @@ class UploadBaseTest extends MediaWikiTestCase {
 	}
 
 	public static function provideCheckSvgScriptCallback() {
-		// @codingStandardsIgnoreStart Generic.Files.LineLength
+		// phpcs:disable Generic.Files.LineLength
 		return [
 			// html5sec SVG vectors
 			[
 				'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
-				true,
-				true,
+				true, /* SVG is well formed */
+				true, /* Evil SVG detected */
 				'Script tag in svg (http://html5sec.org/#47)'
 			],
 			[
@@ -506,12 +509,26 @@ class UploadBaseTest extends MediaWikiTestCase {
 				true,
 				false,
 				'DTD with aliased entities apos (Should be allowed)'
-			]
+			],
+			[
+				'<svg xmlns="http://www.w3.org/2000/svg"><g filter="url( \'#foo\' )"></g></svg>',
+				true,
+				false,
+				'SVG with local filter (T69044)'
+			],
+			[
+				'<svg xmlns="http://www.w3.org/2000/svg"><g filter="url( http://example.com/#foo )"></g></svg>',
+				true,
+				true,
+				'SVG with non-local filter (T69044)'
+			],
+
 		];
-		// @codingStandardsIgnoreEnd
+		// phpcs:enable
 	}
 
 	/**
+	 * @covers UploadBase::detectScriptInSvg
 	 * @dataProvider provideDetectScriptInSvg
 	 */
 	public function testDetectScriptInSvg( $svg, $expected, $message ) {
@@ -552,12 +569,13 @@ class UploadBaseTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * @covers UploadBase::checkXMLEncodingMissmatch
 	 * @dataProvider provideCheckXMLEncodingMissmatch
 	 */
 	public function testCheckXMLEncodingMissmatch( $fileContents, $evil ) {
 		$filename = $this->getNewTempFile();
 		file_put_contents( $filename, $fileContents );
-		$this->assertSame( UploadBase::checkXMLEncodingMissmatch( $filename ), $evil );
+		$this->assertSame( $evil, UploadBase::checkXMLEncodingMissmatch( $filename ) );
 	}
 
 	public function provideCheckXMLEncodingMissmatch() {
@@ -565,6 +583,42 @@ class UploadBaseTest extends MediaWikiTestCase {
 			[ '<?xml version="1.0" encoding="utf-7"?><svg></svg>', true ],
 			[ '<?xml version="1.0" encoding="utf-8"?><svg></svg>', false ],
 			[ '<?xml version="1.0" encoding="WINDOWS-1252"?><svg></svg>', false ],
+		];
+	}
+
+	/**
+	 * @covers UploadBase::detectScript
+	 * @dataProvider provideDetectScript
+	 */
+	public function testDetectScript( $filename, $mime, $extension, $expected, $message ) {
+		$result = $this->upload->detectScript( $filename, $mime, $extension );
+		$this->assertSame( $expected, $result, $message );
+	}
+
+	public static function provideDetectScript() {
+		global $IP;
+		return [
+			[
+				"$IP/tests/phpunit/data/upload/png-plain.png",
+				'image/png',
+				'png',
+				false,
+				'PNG with no suspicious things in it, should pass.'
+			],
+			[
+				"$IP/tests/phpunit/data/upload/png-embedded-breaks-ie5.png",
+				'image/png',
+				'png',
+				true,
+				'PNG with embedded data that IE5/6 interprets as HTML; should be rejected.'
+			],
+			[
+				"$IP/tests/phpunit/data/upload/jpeg-a-href-in-metadata.jpg",
+				'image/jpeg',
+				'jpeg',
+				false,
+				'JPEG with innocuous HTML in metadata from a flickr photo; should pass (T27707).'
+			],
 		];
 	}
 }

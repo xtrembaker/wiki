@@ -50,10 +50,10 @@ class ResetUserTokens extends Maintenance {
 	}
 
 	public function execute() {
-		$this->nullsOnly = $this->getOption( 'nulls' );
+		$nullsOnly = $this->getOption( 'nulls' );
 
 		if ( !$this->getOption( 'nowarn' ) ) {
-			if ( $this->nullsOnly ) {
+			if ( $nullsOnly ) {
 				$this->output( "The script is about to reset the user_token "
 					. "for USERS WITH NULL TOKENS in the database.\n" );
 			} else {
@@ -64,15 +64,14 @@ class ResetUserTokens extends Maintenance {
 			$this->output( "\n" );
 			$this->output( "Abort with control-c in the next five seconds "
 				. "(skip this countdown with --nowarn) ... " );
-			wfCountDown( 5 );
+			$this->countDown( 5 );
 		}
 
 		// We list user by user_id from one of the replica DBs
-		// We list user by user_id from one of the slave database
 		$dbr = $this->getDB( DB_REPLICA );
 
 		$where = [];
-		if ( $this->nullsOnly ) {
+		if ( $nullsOnly ) {
 			// Have to build this by hand, because \ is escaped in helper functions
 			$where = [ 'user_token = \'' . str_repeat( '\0', 32 ) . '\'' ];
 		}
@@ -80,7 +79,7 @@ class ResetUserTokens extends Maintenance {
 		$maxid = $dbr->selectField( 'user', 'MAX(user_id)', [], __METHOD__ );
 
 		$min = 0;
-		$max = $this->mBatchSize;
+		$max = $this->getBatchSize();
 
 		do {
 			$result = $dbr->select( 'user',
@@ -99,7 +98,7 @@ class ResetUserTokens extends Maintenance {
 			}
 
 			$min = $max;
-			$max = $min + $this->mBatchSize;
+			$max = $min + $this->getBatchSize();
 
 			wfWaitForSlaves();
 		} while ( $min <= $maxid );
@@ -116,5 +115,5 @@ class ResetUserTokens extends Maintenance {
 	}
 }
 
-$maintClass = "ResetUserTokens";
+$maintClass = ResetUserTokens::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

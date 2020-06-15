@@ -21,6 +21,9 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Shell\Shell;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -76,9 +79,7 @@ class PopulateImageSha1 extends LoggedUpdateMaintenance {
 				__METHOD__
 			);
 			if ( !$res ) {
-				$this->error( "No such file: $file", true );
-
-				return false;
+				$this->fatalError( "No such file: $file" );
 			}
 			$this->output( "Populating img_sha1 field for specified files\n" );
 		} else {
@@ -108,10 +109,10 @@ class PopulateImageSha1 extends LoggedUpdateMaintenance {
 			// with the database write operation, because the writes are queued
 			// in the pipe buffer. This can improve performance by up to a
 			// factor of 2.
-			global $wgDBuser, $wgDBserver, $wgDBpassword, $wgDBname;
-			$cmd = 'mysql -u' . wfEscapeShellArg( $wgDBuser ) .
-				' -h' . wfEscapeShellArg( $wgDBserver ) .
-				' -p' . wfEscapeShellArg( $wgDBpassword, $wgDBname );
+			$config = $this->getConfig();
+			$cmd = 'mysql -u' . Shell::escape( $config->get( 'DBuser' ) ) .
+				' -h' . Shell::escape( $config->get( 'DBserver' ) ) .
+				' -p' . Shell::escape( $config->get( 'DBpassword' ), $config->get( 'DBname' ) );
 			$this->output( "Using pipe method\n" );
 			$pipe = popen( $cmd, 'w' );
 		}
@@ -119,13 +120,14 @@ class PopulateImageSha1 extends LoggedUpdateMaintenance {
 		$numRows = $res->numRows();
 		$i = 0;
 		foreach ( $res as $row ) {
-			if ( $i % $this->mBatchSize == 0 ) {
+			if ( $i % $this->getBatchSize() == 0 ) {
 				$this->output( sprintf(
 					"Done %d of %d, %5.3f%%  \r", $i, $numRows, $i / $numRows * 100 ) );
 				wfWaitForSlaves();
 			}
 
-			$file = wfLocalFile( $row->img_name );
+			$file = MediaWikiServices::getInstance()->getRepoGroup()->getLocalRepo()
+				->newFile( $row->img_name );
 			if ( !$file ) {
 				continue;
 			}
@@ -149,6 +151,8 @@ class PopulateImageSha1 extends LoggedUpdateMaintenance {
 			}
 			// Upgrade the old file versions...
 			foreach ( $file->getHistory() as $oldFile ) {
+				/** @var OldLocalFile $oldFile */
+				'@phan-var OldLocalFile $oldFile';
 				$sha1 = $oldFile->getRepo()->getFileSha1( $oldFile->getPath() );
 				if ( strval( $sha1 ) !== '' ) { // file on disk and hashed properly
 					if ( $isRegen && $oldFile->getSha1() !== $sha1 ) {
@@ -180,5 +184,5 @@ class PopulateImageSha1 extends LoggedUpdateMaintenance {
 	}
 }
 
-$maintClass = "PopulateImageSha1";
+$maintClass = PopulateImageSha1::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

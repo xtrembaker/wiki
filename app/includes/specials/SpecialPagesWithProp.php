@@ -20,7 +20,6 @@
  * @since 1.21
  * @file
  * @ingroup SpecialPage
- * @author Brad Jorsch
  */
 
 /**
@@ -29,8 +28,31 @@
  * @since 1.21
  */
 class SpecialPagesWithProp extends QueryPage {
+
+	/**
+	 * @var string|null
+	 */
 	private $propName = null;
+
+	/**
+	 * @var string[]|null
+	 */
 	private $existingPropNames = null;
+
+	/**
+	 * @var int|null
+	 */
+	private $ns;
+
+	/**
+	 * @var bool
+	 */
+	private $reverse = false;
+
+	/**
+	 * @var bool
+	 */
+	private $sortByValue = false;
 
 	function __construct( $name = 'PagesWithProp' ) {
 		parent::__construct( $name );
@@ -43,10 +65,13 @@ class SpecialPagesWithProp extends QueryPage {
 	public function execute( $par ) {
 		$this->setHeaders();
 		$this->outputHeader();
-		$this->getOutput()->addModuleStyles( 'mediawiki.special.pagesWithProp' );
+		$this->getOutput()->addModuleStyles( 'mediawiki.special' );
 
 		$request = $this->getRequest();
 		$propname = $request->getVal( 'propname', $par );
+		$this->ns = $request->getIntOrNull( 'namespace' );
+		$this->reverse = $request->getBool( 'reverse' );
+		$this->sortByValue = $request->getBool( 'sortbyvalue' );
 
 		$propnames = $this->getExistingPropNames();
 
@@ -59,6 +84,27 @@ class SpecialPagesWithProp extends QueryPage {
 				'label-message' => 'pageswithprop-prop',
 				'required' => true,
 			],
+			'namespace' => [
+				'type' => 'namespaceselect',
+				'name' => 'namespace',
+				'label-message' => 'namespace',
+				'all' => '',
+				'default' => $this->ns,
+			],
+			'reverse' => [
+				'type' => 'check',
+				'name' => 'reverse',
+				'default' => $this->reverse,
+				'label-message' => 'pageswithprop-reverse',
+				'required' => false,
+			],
+			'sortbyvalue' => [
+				'type' => 'check',
+				'name' => 'sortbyvalue',
+				'default' => $this->sortByValue,
+				'label-message' => 'pageswithprop-sortbyvalue',
+				'required' => false,
+			]
 		], $this->getContext() );
 		$form->setMethod( 'get' );
 		$form->setSubmitCallback( [ $this, 'onSubmit' ] );
@@ -101,7 +147,7 @@ class SpecialPagesWithProp extends QueryPage {
 	}
 
 	public function getQueryInfo() {
-		return [
+		$query = [
 			'tables' => [ 'page_props', 'page' ],
 			'fields' => [
 				'page_id' => 'pp_page',
@@ -116,14 +162,31 @@ class SpecialPagesWithProp extends QueryPage {
 				'pp_propname' => $this->propName,
 			],
 			'join_conds' => [
-				'page' => [ 'INNER JOIN', 'page_id = pp_page' ]
+				'page' => [ 'JOIN', 'page_id = pp_page' ]
 			],
 			'options' => []
 		];
+
+		if ( $this->ns !== null ) {
+			$query['conds']['page_namespace'] = $this->ns;
+		}
+
+		return $query;
 	}
 
 	function getOrderFields() {
-		return [ 'page_id' ];
+		$sort = [ 'page_id' ];
+		if ( $this->sortByValue ) {
+			array_unshift( $sort, 'pp_sortkey' );
+		}
+		return $sort;
+	}
+
+	/**
+	 * @return bool
+	 */
+	public function sortDescending() {
+		return !$this->reverse;
 	}
 
 	/**

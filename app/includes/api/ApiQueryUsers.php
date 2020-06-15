@@ -1,9 +1,5 @@
 <?php
 /**
- *
- *
- * Created on July 30, 2007
- *
  * Copyright © 2007 Roan Kattouw "<Firstname>.<Lastname>@gmail.com"
  *
  * This program is free software; you can redistribute it and/or modify
@@ -24,12 +20,15 @@
  * @file
  */
 
+use MediaWiki\Block\DatabaseBlock;
+
 /**
  * Query module to get information about a list of users
  *
  * @ingroup API
  */
 class ApiQueryUsers extends ApiQueryBase {
+	use ApiQueryBlockInfoTrait;
 
 	private $tokenFunctions, $prop;
 
@@ -77,7 +76,7 @@ class ApiQueryUsers extends ApiQueryBase {
 		}
 
 		$this->tokenFunctions = [
-			'userrights' => [ 'ApiQueryUsers', 'getUserrightsToken' ],
+			'userrights' => [ self::class, 'getUserrightsToken' ],
 		];
 		Hooks::run( 'APIQueryUsersTokens', [ &$this->tokenFunctions ] );
 
@@ -99,6 +98,7 @@ class ApiQueryUsers extends ApiQueryBase {
 
 	public function execute() {
 		$db = $this->getDB();
+		$commentStore = CommentStore::getStore();
 
 		$params = $this->extractRequestParams();
 		$this->requireMaxOneParameter( $params, 'userids', 'users' );
@@ -143,15 +143,17 @@ class ApiQueryUsers extends ApiQueryBase {
 		$result = $this->getResult();
 
 		if ( count( $parameters ) ) {
-			$this->addTables( 'user' );
-			$this->addFields( User::selectFields() );
+			$userQuery = User::getQueryInfo();
+			$this->addTables( $userQuery['tables'] );
+			$this->addFields( $userQuery['fields'] );
+			$this->addJoinConds( $userQuery['joins'] );
 			if ( $useNames ) {
 				$this->addWhereFld( 'user_name', $goodNames );
 			} else {
 				$this->addWhereFld( 'user_id', $userids );
 			}
 
-			$this->showHiddenUsersAddBlockInfo( isset( $this->prop['blockinfo'] ) );
+			$this->addBlockInfoToQuery( isset( $this->prop['blockinfo'] ) );
 
 			$data = [];
 			$res = $this->select( __METHOD__ );
@@ -169,7 +171,7 @@ class ApiQueryUsers extends ApiQueryBase {
 				}
 
 				$this->addTables( 'user_groups' );
-				$this->addJoinConds( [ 'user_groups' => [ 'INNER JOIN', 'ug_user=user_id' ] ] );
+				$this->addJoinConds( [ 'user_groups' => [ 'JOIN', 'ug_user=user_id' ] ] );
 				$this->addFields( [ 'user_name' ] );
 				$this->addFields( UserGroupMembership::selectFields() );
 				$this->addWhere( 'ug_expiry IS NULL OR ug_expiry >= ' .
@@ -182,7 +184,6 @@ class ApiQueryUsers extends ApiQueryBase {
 			}
 
 			foreach ( $res as $row ) {
-
 				// create user object and pass along $userGroups if set
 				// that reduces the number of database queries needed in User dramatically
 				if ( !isset( $userGroups ) ) {
@@ -214,7 +215,7 @@ class ApiQueryUsers extends ApiQueryBase {
 				}
 
 				if ( isset( $this->prop['groupmemberships'] ) ) {
-					$data[$key]['groupmemberships'] = array_map( function( $ugm ) {
+					$data[$key]['groupmemberships'] = array_map( function ( $ugm ) {
 						return [
 							'group' => $ugm->getGroup(),
 							'expiry' => ApiResult::formatExpiry( $ugm->getExpiry() ),
@@ -227,18 +228,14 @@ class ApiQueryUsers extends ApiQueryBase {
 				}
 
 				if ( isset( $this->prop['rights'] ) ) {
-					$data[$key]['rights'] = $user->getRights();
+					$data[$key]['rights'] = $this->getPermissionManager()
+						->getUserPermissions( $user );
 				}
 				if ( $row->ipb_deleted ) {
 					$data[$key]['hidden'] = true;
 				}
 				if ( isset( $this->prop['blockinfo'] ) && !is_null( $row->ipb_by_text ) ) {
-					$data[$key]['blockid'] = (int)$row->ipb_id;
-					$data[$key]['blockedby'] = $row->ipb_by_text;
-					$data[$key]['blockedbyid'] = (int)$row->ipb_by;
-					$data[$key]['blockedtimestamp'] = wfTimestamp( TS_ISO_8601, $row->ipb_timestamp );
-					$data[$key]['blockreason'] = $row->ipb_reason;
-					$data[$key]['blockexpiry'] = $row->ipb_expiry;
+					$data[$key] += $this->getBlockDetails( DatabaseBlock::newFromRow( $row ) );
 				}
 
 				if ( isset( $this->prop['emailable'] ) ) {
@@ -332,8 +329,8 @@ class ApiQueryUsers extends ApiQueryBase {
 				}
 			}
 
-			$fit = $result->addValue( [ 'query', $this->getModuleName() ],
-				null, $data[$u] );
+			// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
+			$fit = $result->addValue( [ 'query', $this->getModuleName() ], null, $data[$u] );
 			if ( !$fit ) {
 				if ( $useNames ) {
 					$this->setContinueEnumParameter( 'users',

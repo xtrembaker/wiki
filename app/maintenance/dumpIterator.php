@@ -34,9 +34,10 @@ require_once __DIR__ . '/Maintenance.php';
  * @ingroup Maintenance
  */
 abstract class DumpIterator extends Maintenance {
-
 	private $count = 0;
 	private $startTime;
+	/** @var string|bool|null */
+	private $from;
 
 	public function __construct() {
 		parent::__construct();
@@ -48,7 +49,7 @@ abstract class DumpIterator extends Maintenance {
 
 	public function execute() {
 		if ( !( $this->hasOption( 'file' ) ^ $this->hasOption( 'dump' ) ) ) {
-			$this->error( "You must provide a file or dump", true );
+			$this->fatalError( "You must provide a file or dump" );
 		}
 
 		$this->checkOptions();
@@ -60,6 +61,7 @@ abstract class DumpIterator extends Maintenance {
 			$revision->setTitle( Title::newFromText(
 				rawurldecode( basename( $this->getOption( 'file' ), '.txt' ) )
 			) );
+			$this->from = false;
 			$this->handleRevision( $revision );
 
 			return;
@@ -70,13 +72,16 @@ abstract class DumpIterator extends Maintenance {
 		if ( $this->getOption( 'dump' ) == '-' ) {
 			$source = new ImportStreamSource( $this->getStdin() );
 		} else {
-			$this->error( "Sorry, I don't support dump filenames yet. "
-				. "Use - and provide it on stdin on the meantime.", true );
+			$this->fatalError( "Sorry, I don't support dump filenames yet. "
+				. "Use - and provide it on stdin on the meantime." );
 		}
 		$importer = new WikiImporter( $source, $this->getConfig() );
 
 		$importer->setRevisionCallback(
 			[ $this, 'handleRevision' ] );
+		$importer->setNoticeCallback( function ( $msg, $params ) {
+			echo wfMessage( $msg, $params )->text() . "\n";
+		} );
 
 		$this->from = $this->getOption( 'from', null );
 		$this->count = 0;
@@ -102,7 +107,7 @@ abstract class DumpIterator extends Maintenance {
 		if ( $this->getDbType() == Maintenance::DB_NONE ) {
 			global $wgUseDatabaseMessages, $wgLocalisationCacheConf, $wgHooks;
 			$wgUseDatabaseMessages = false;
-			$wgLocalisationCacheConf['storeClass'] = 'LCStoreNull';
+			$wgLocalisationCacheConf['storeClass'] = LCStoreNull::class;
 			$wgHooks['InterwikiLoadPrefix'][] = 'DumpIterator::disableInterwikis';
 		}
 	}
@@ -128,7 +133,7 @@ abstract class DumpIterator extends Maintenance {
 		}
 
 		$this->count++;
-		if ( isset( $this->from ) ) {
+		if ( $this->from !== false ) {
 			if ( $this->from != $title ) {
 				return;
 			}
@@ -143,12 +148,10 @@ abstract class DumpIterator extends Maintenance {
 
 	/* Stub function for processing additional options */
 	public function checkOptions() {
-		return;
 	}
 
 	/* Stub function for giving data about what was computed */
 	public function conclusions() {
-		return;
 	}
 
 	/* Core function which does whatever the maintenance script is designed to do */
@@ -182,5 +185,5 @@ class SearchDump extends DumpIterator {
 	}
 }
 
-$maintClass = "SearchDump";
+$maintClass = SearchDump::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

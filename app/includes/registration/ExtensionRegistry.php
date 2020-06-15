@@ -1,6 +1,10 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
+use Composer\Semver\Semver;
+use Wikimedia\AtEase\AtEase;
+use Wikimedia\ScopedCallback;
+use MediaWiki\Shell\Shell;
+use MediaWiki\ShellDisabledError;
 
 /**
  * ExtensionRegistry class
@@ -20,8 +24,15 @@ class ExtensionRegistry {
 
 	/**
 	 * Version of the highest supported manifest version
+	 * Note: Update MANIFEST_VERSION_MW_VERSION when changing this
 	 */
 	const MANIFEST_VERSION = 2;
+
+	/**
+	 * MediaWiki version constraint representing what the current
+	 * highest MANIFEST_VERSION is supported in
+	 */
+	const MANIFEST_VERSION_MW_VERSION = '>= 1.29.0';
 
 	/**
 	 * Version of the oldest supported manifest version
@@ -31,7 +42,7 @@ class ExtensionRegistry {
 	/**
 	 * Bump whenever the registration cache needs resetting
 	 */
-	const CACHE_VERSION = 6;
+	const CACHE_VERSION = 7;
 
 	/**
 	 * Special key that defines the merge strategy
@@ -70,11 +81,26 @@ class ExtensionRegistry {
 	protected $attributes = [];
 
 	/**
+	 * Attributes for testing
+	 *
+	 * @var array
+	 */
+	protected $testAttributes = [];
+
+	/**
+	 * Whether to check dev-requires
+	 *
+	 * @var bool
+	 */
+	protected $checkDev = false;
+
+	/**
 	 * @var ExtensionRegistry
 	 */
 	private static $instance;
 
 	/**
+	 * @codeCoverageIgnore
 	 * @return ExtensionRegistry
 	 */
 	public static function getInstance() {
@@ -86,6 +112,14 @@ class ExtensionRegistry {
 	}
 
 	/**
+	 * @since 1.34
+	 * @param bool $check
+	 */
+	public function setCheckDevRequires( $check ) {
+		$this->checkDev = $check;
+	}
+
+	/**
 	 * @param string $path Absolute path to the JSON file
 	 */
 	public function queue( $path ) {
@@ -93,14 +127,14 @@ class ExtensionRegistry {
 
 		$mtime = $wgExtensionInfoMTime;
 		if ( $mtime === false ) {
-			if ( file_exists( $path ) ) {
-				$mtime = filemtime( $path );
-			} else {
-				throw new Exception( "$path does not exist!" );
-			}
-			if ( !$mtime ) {
+			AtEase::suppressWarnings();
+			$mtime = filemtime( $path );
+			AtEase::restoreWarnings();
+			// @codeCoverageIgnoreStart
+			if ( $mtime === false ) {
 				$err = error_get_last();
-				throw new Exception( "Couldn't stat $path: {$err['message']}" );
+				throw new Exception( "Unable to open file $path: {$err['message']}" );
+				// @codeCoverageIgnoreEnd
 			}
 		}
 		$this->queued[$path] = $mtime;
@@ -111,7 +145,7 @@ class ExtensionRegistry {
 	 *  be loaded then).
 	 */
 	public function loadFromQueue() {
-		global $wgVersion, $wgDevelopmentWarnings;
+		global $wgVersion, $wgDevelopmentWarnings, $wgObjectCaches;
 		if ( !$this->queued ) {
 			return;
 		}
@@ -126,18 +160,22 @@ class ExtensionRegistry {
 		// A few more things to vary the cache on
 		$versions = [
 			'registration' => self::CACHE_VERSION,
-			'mediawiki' => $wgVersion
+			'mediawiki' => $wgVersion,
+			'abilities' => $this->getAbilities(),
+			'checkDev' => $this->checkDev,
 		];
 
 		// We use a try/catch because we don't want to fail here
 		// if $wgObjectCaches is not configured properly for APC setup
 		try {
-			$cache = MediaWikiServices::getInstance()->getLocalServerObjectCache();
-		} catch ( MWException $e ) {
+			// Avoid MediaWikiServices to prevent instantiating it before extensions have loaded
+			$cacheId = ObjectCache::detectLocalServerCache();
+			$cache = ObjectCache::newFromParams( $wgObjectCaches[$cacheId] );
+		} catch ( InvalidArgumentException $e ) {
 			$cache = new EmptyBagOStuff();
 		}
 		// See if this queue is in APC
-		$key = wfMemcKey(
+		$key = $cache->makeKey(
 			'registration',
 			md5( json_encode( $this->queued + $versions ) )
 		);
@@ -187,18 +225,51 @@ class ExtensionRegistry {
 	}
 
 	/**
+	 * Get the list of abilities and their values
+	 * @return bool[]
+	 */
+	private function getAbilities() {
+		return [
+			'shell' => !Shell::isDisabled(),
+		];
+	}
+
+	/**
+	 * Queries information about the software environment and constructs an appropiate version checker
+	 *
+	 * @return VersionChecker
+	 */
+	private function buildVersionChecker() {
+		global $wgVersion;
+		// array to optionally specify more verbose error messages for
+		// missing abilities
+		$abilityErrors = [
+			'shell' => ( new ShellDisabledError() )->getMessage(),
+		];
+
+		return new VersionChecker(
+			$wgVersion,
+			PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '.' . PHP_RELEASE_VERSION,
+			get_loaded_extensions(),
+			$this->getAbilities(),
+			$abilityErrors
+		);
+	}
+
+	/**
 	 * Process a queue of extensions and return their extracted data
 	 *
 	 * @param array $queue keys are filenames, values are ignored
 	 * @return array extracted info
 	 * @throws Exception
+	 * @throws ExtensionDependencyError
 	 */
 	public function readFromQueue( array $queue ) {
-		global $wgVersion;
 		$autoloadClasses = [];
+		$autoloadNamespaces = [];
 		$autoloaderPaths = [];
 		$processor = new ExtensionProcessor();
-		$versionChecker = new VersionChecker( $wgVersion );
+		$versionChecker = $this->buildVersionChecker();
 		$extDependencies = [];
 		$incompatible = [];
 		$warnings = false;
@@ -226,13 +297,16 @@ class ExtensionRegistry {
 				$incompatible[] = "$path: unsupported manifest_version: {$version}";
 			}
 
-			$autoload = $this->processAutoLoader( dirname( $path ), $info );
-			// Set up the autoloader now so custom processors will work
-			$GLOBALS['wgAutoloadClasses'] += $autoload;
-			$autoloadClasses += $autoload;
+			$dir = dirname( $path );
+			self::exportAutoloadClassesAndNamespaces(
+				$dir,
+				$info,
+				$autoloadClasses,
+				$autoloadNamespaces
+			);
 
 			// get all requirements/dependencies for this extension
-			$requires = $processor->getRequirements( $info );
+			$requires = $processor->getRequirements( $info, $this->checkDev );
 
 			// validate the information needed and add the requirements
 			if ( is_array( $requires ) && $requires && isset( $info['name'] ) ) {
@@ -241,7 +315,7 @@ class ExtensionRegistry {
 
 			// Get extra paths for later inclusion
 			$autoloaderPaths = array_merge( $autoloaderPaths,
-				$processor->getExtraAutoloaderPaths( dirname( $path ), $info ) );
+				$processor->getExtraAutoloaderPaths( $dir, $info ) );
 			// Compatible, read and extract info
 			$processor->extractInfo( $path, $info, $version );
 		}
@@ -257,18 +331,37 @@ class ExtensionRegistry {
 		);
 
 		if ( $incompatible ) {
-			if ( count( $incompatible ) === 1 ) {
-				throw new Exception( $incompatible[0] );
-			} else {
-				throw new Exception( implode( "\n", $incompatible ) );
-			}
+			throw new ExtensionDependencyError( $incompatible );
 		}
 
 		// Need to set this so we can += to it later
 		$data['globals']['wgAutoloadClasses'] = [];
 		$data['autoload'] = $autoloadClasses;
 		$data['autoloaderPaths'] = $autoloaderPaths;
+		$data['autoloaderNS'] = $autoloadNamespaces;
 		return $data;
+	}
+
+	/**
+	 * Export autoload classes and namespaces for a given directory and parsed JSON info file.
+	 *
+	 * @param string $dir
+	 * @param array $info
+	 * @param array &$autoloadClasses
+	 * @param array &$autoloadNamespaces
+	 */
+	public static function exportAutoloadClassesAndNamespaces(
+		$dir, $info, &$autoloadClasses = [], &$autoloadNamespaces = []
+	) {
+		if ( isset( $info['AutoloadClasses'] ) ) {
+			$autoload = self::processAutoLoader( $dir, $info['AutoloadClasses'] );
+			$GLOBALS['wgAutoloadClasses'] += $autoload;
+			$autoloadClasses += $autoload;
+		}
+		if ( isset( $info['AutoloadNamespaces'] ) ) {
+			$autoloadNamespaces += self::processAutoLoader( $dir, $info['AutoloadNamespaces'] );
+			AutoLoader::$psr4Namespaces += $autoloadNamespaces;
+		}
 	}
 
 	protected function exportExtractedData( array $info ) {
@@ -284,7 +377,7 @@ class ExtensionRegistry {
 
 			// Optimistic: If the global is not set, or is an empty array, replace it entirely.
 			// Will be O(1) performance.
-			if ( !isset( $GLOBALS[$key] ) || ( is_array( $GLOBALS[$key] ) && !$GLOBALS[$key] ) ) {
+			if ( !array_key_exists( $key, $GLOBALS ) || ( is_array( $GLOBALS[$key] ) && !$GLOBALS[$key] ) ) {
 				$GLOBALS[$key] = $val;
 				continue;
 			}
@@ -315,11 +408,17 @@ class ExtensionRegistry {
 			}
 		}
 
+		if ( isset( $info['autoloaderNS'] ) ) {
+			AutoLoader::$psr4Namespaces += $info['autoloaderNS'];
+		}
+
 		foreach ( $info['defines'] as $name => $val ) {
 			define( $name, $val );
 		}
 		foreach ( $info['autoloaderPaths'] as $path ) {
-			require_once $path;
+			if ( file_exists( $path ) ) {
+				require_once $path;
+			}
 		}
 
 		$this->loaded += $info['credits'];
@@ -332,7 +431,13 @@ class ExtensionRegistry {
 		}
 
 		foreach ( $info['callbacks'] as $name => $cb ) {
-			call_user_func( $cb, $info['credits'][$name] );
+			if ( !is_callable( $cb ) ) {
+				if ( is_array( $cb ) ) {
+					$cb = '[ ' . implode( ', ', $cb ) . ' ]';
+				}
+				throw new UnexpectedValueException( "callback '$cb' is not callable" );
+			}
+			$cb( $info['credits'][$name] );
 		}
 	}
 
@@ -341,10 +446,12 @@ class ExtensionRegistry {
 	 *
 	 * If some extensions are already queued, this will load
 	 * those as well.
-	 *
+	 * TODO: Remove in MediaWiki 1.35
+	 * @deprecated since 1.34, use ExtensionRegistry->queue() instead
 	 * @param string $path Absolute path to the JSON file
 	 */
 	public function load( $path ) {
+		wfDeprecated( __METHOD__, '1.34' );
 		$this->loadFromQueue(); // First clear the queue
 		$this->queue( $path );
 		$this->loadFromQueue();
@@ -353,10 +460,24 @@ class ExtensionRegistry {
 	/**
 	 * Whether a thing has been loaded
 	 * @param string $name
+	 * @param string $constraint The required version constraint for this dependency
+	 * @throws LogicException if a specific contraint is asked for,
+	 *                        but the extension isn't versioned
 	 * @return bool
 	 */
-	public function isLoaded( $name ) {
-		return isset( $this->loaded[$name] );
+	public function isLoaded( $name, $constraint = '*' ) {
+		$isLoaded = isset( $this->loaded[$name] );
+		if ( $constraint === '*' || !$isLoaded ) {
+			return $isLoaded;
+		}
+		// if a specific constraint is requested, but no version is set, throw an exception
+		if ( !isset( $this->loaded[$name]['version'] ) ) {
+			$msg = "{$name} does not expose its version, but an extension or a skin"
+					. " requires: {$constraint}.";
+			throw new LogicException( $msg );
+		}
+
+		return SemVer::satisfies( $this->loaded[$name]['version'], $constraint );
 	}
 
 	/**
@@ -364,11 +485,31 @@ class ExtensionRegistry {
 	 * @return array
 	 */
 	public function getAttribute( $name ) {
-		if ( isset( $this->attributes[$name] ) ) {
-			return $this->attributes[$name];
-		} else {
-			return [];
+		return $this->testAttributes[$name] ??
+			$this->attributes[$name] ?? [];
+	}
+
+	/**
+	 * Force override the value of an attribute during tests
+	 *
+	 * @param string $name Name of attribute to override
+	 * @param array $value Value to set
+	 * @return ScopedCallback to reset
+	 * @since 1.33
+	 */
+	public function setAttributeForTest( $name, array $value ) {
+		// @codeCoverageIgnoreStart
+		if ( !defined( 'MW_PHPUNIT_TEST' ) ) {
+			throw new RuntimeException( __METHOD__ . ' can only be used in tests' );
 		}
+		// @codeCoverageIgnoreEnd
+		if ( isset( $this->testAttributes[$name] ) ) {
+			throw new Exception( "The attribute '$name' has already been overridden" );
+		}
+		$this->testAttributes[$name] = $value;
+		return new ScopedCallback( function () use ( $name ) {
+			unset( $this->testAttributes[$name] );
+		} );
 	}
 
 	/**
@@ -381,30 +522,17 @@ class ExtensionRegistry {
 	}
 
 	/**
-	 * Mark a thing as loaded
-	 *
-	 * @param string $name
-	 * @param array $credits
-	 */
-	protected function markLoaded( $name, array $credits ) {
-		$this->loaded[$name] = $credits;
-	}
-
-	/**
-	 * Register classes with the autoloader
+	 * Fully expand autoloader paths
 	 *
 	 * @param string $dir
-	 * @param array $info
+	 * @param array $files
 	 * @return array
 	 */
-	protected function processAutoLoader( $dir, array $info ) {
-		if ( isset( $info['AutoloadClasses'] ) ) {
-			// Make paths absolute, relative to the JSON file
-			return array_map( function( $file ) use ( $dir ) {
-				return "$dir/$file";
-			}, $info['AutoloadClasses'] );
-		} else {
-			return [];
+	protected static function processAutoLoader( $dir, array $files ) {
+		// Make paths absolute, relative to the JSON file
+		foreach ( $files as &$file ) {
+			$file = "$dir/$file";
 		}
+		return $files;
 	}
 }

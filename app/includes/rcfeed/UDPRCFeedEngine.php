@@ -24,10 +24,14 @@
  */
 class UDPRCFeedEngine extends RCFeedEngine {
 	/**
-	 * @see RCFeedEngine::send
+	 * @see FormattedRCFeed::send
+	 * @param array $feed
+	 * @param string $line
+	 * @return bool
 	 */
 	public function send( array $feed, $line ) {
 		$transport = UDPTransport::newFromString( $feed['uri'] );
 		$transport->emit( $line );
+		return true;
 	}
 }

@@ -1,6 +1,7 @@
 <?php
 
 namespace RemexHtml\TreeBuilder;
+
 use RemexHtml\HTMLData;
 use RemexHtml\Tokenizer\Attribute;
 use RemexHtml\Tokenizer\Attributes;
@@ -10,8 +11,13 @@ use RemexHtml\Tokenizer\Attributes;
  * have namespaces. Features lazy adjustment of attribute name case.
  */
 class ForeignAttributes implements Attributes {
+	/** @var Attributes */
 	protected $unadjusted;
+
+	/** @var array The map of lowercase attribute name to correct attribute name */
 	protected $table;
+
+	/** @var Attribute[]|null */
 	protected $attrObjects;
 
 	/**
@@ -135,11 +141,6 @@ class ForeignAttributes implements Attributes {
 			$result[$name] = $value;
 		}
 		return $result;
-	}
-
-	public function key() {
-		$name = parent::key();
-		return isset( $this->table[$name] ) ? $this->table[$name] : $name;
 	}
 
 	public function count() {

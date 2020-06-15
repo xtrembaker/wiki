@@ -1,6 +1,7 @@
 <?php
 
 namespace RemexHtml\TreeBuilder;
+
 use RemexHtml\HTMLData;
 use RemexHtml\Tokenizer\Attributes;
 use RemexHtml\Tokenizer\TokenHandler;
@@ -79,44 +80,62 @@ class Dispatcher implements TokenHandler {
 	];
 
 	// Public shortcuts for "using the rules for" actions
+
+	/** @var InHead */
 	public $inHead;
+	/** @var InBody */
 	public $inBody;
+	/** @var InTable */
 	public $inTable;
+	/** @var InSelect */
 	public $inSelect;
+	/** @var InTemplate */
 	public $inTemplate;
+	/** @var InForeignContent */
 	public $inForeign;
 
-	/// @var TreeBuilder
+	/** @var TreeBuilder */
 	protected $builder;
 
 	/**
 	 * The InsertionMode object for the current insertion mode in HTML content
+	 *
+	 * @var InsertionMode
 	 */
 	protected $handler;
 
 	/**
 	 * An array mapping insertion mode indexes to InsertionMode objects
+	 *
+	 * @var InsertionMode[]
 	 */
 	protected $dispatchTable;
 
 	/**
 	 * The insertion mode index
+	 *
+	 * @var int
 	 */
 	protected $mode;
 
 	/**
 	 * The "original insertion mode" index
+	 *
+	 * @var int
 	 */
 	protected $originalMode;
 
 	/**
 	 * The insertion mode sets this to true to acknowledge the tag's
 	 * self-closing flag.
+	 *
+	 * @var bool|null
 	 */
 	public $ack;
 
 	/**
 	 * The stack of template insertion modes
+	 *
 	 * @var TemplateModeStack
 	 */
 	public $templateModeStack;
@@ -132,25 +151,27 @@ class Dispatcher implements TokenHandler {
 	/**
 	 * Switch the insertion mode, and return the new handler
 	 *
-	 * @param integer $mode
+	 * @param int $mode
 	 * @return InsertionMode
 	 */
 	public function switchMode( $mode ) {
 		$this->mode = $mode;
-		return $this->handler = $this->dispatchTable[$mode];
+		$this->handler = $this->dispatchTable[$mode];
+		return $this->handler;
 	}
 
 	/**
 	 * Let the original insertion mode be the current insertion mode, and
 	 * switch the insertion mode to some new value. Return the new handler.
 	 *
-	 * @param integer $mode
+	 * @param int $mode
 	 * @return InsertionMode
 	 */
 	public function switchAndSave( $mode ) {
 		$this->originalMode = $this->mode;
 		$this->mode = $mode;
-		return $this->handler = $this->dispatchTable[$mode];
+		$this->handler = $this->dispatchTable[$mode];
+		return $this->handler;
 	}
 
 	/**
@@ -165,7 +186,8 @@ class Dispatcher implements TokenHandler {
 		}
 		$mode = $this->mode = $this->originalMode;
 		$this->originalMode = null;
-		return $this->handler = $this->dispatchTable[$mode];
+		$this->handler = $this->dispatchTable[$mode];
+		return $this->handler;
 	}
 
 	/**
@@ -209,13 +231,12 @@ class Dispatcher implements TokenHandler {
 	 * Get the insertion mode index which is switched to when we reset the
 	 * insertion mode appropriately.
 	 *
-	 * @return integer
+	 * @return int
 	 */
 	protected function getAppropriateMode() {
 		$builder = $this->builder;
 		$stack = $builder->stack;
 		$last = false;
-		$node = $stack->current;
 		for ( $idx = $stack->length() - 1; $idx >= 0; $idx-- ) {
 			$node = $stack->item( $idx );
 			if ( $idx === 0 ) {
@@ -295,6 +316,7 @@ class Dispatcher implements TokenHandler {
 	/**
 	 * If the stack of open elements is empty, return null, otherwise return
 	 * the adjusted current node.
+	 * @return Element|null
 	 */
 	protected function dispatcherCurrentNode() {
 		$current = $this->builder->stack->current;

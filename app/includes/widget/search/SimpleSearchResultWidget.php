@@ -6,10 +6,11 @@ use HtmlArmor;
 use MediaWiki\Linker\LinkRenderer;
 use SearchResult;
 use SpecialSearch;
-use Title;
 
 /**
  * Renders a simple one-line result
+ *
+ * @deprecated since 1.31. Use other result widgets.
  */
 class SimpleSearchResultWidget implements SearchResultWidget {
 	/** @var SpecialSearch */
@@ -18,17 +19,17 @@ class SimpleSearchResultWidget implements SearchResultWidget {
 	protected $linkRenderer;
 
 	public function __construct( SpecialSearch $specialSearch, LinkRenderer $linkRenderer ) {
+		wfDeprecated( __METHOD__, '1.31' );
 		$this->specialSearch = $specialSearch;
 		$this->linkRenderer = $linkRenderer;
 	}
 
 	/**
 	 * @param SearchResult $result The result to render
-	 * @param string $terms Terms to be highlighted (@see SearchResult::getTextSnippet)
 	 * @param int $position The result position, including offset
 	 * @return string HTML
 	 */
-	public function render( SearchResult $result, $terms, $position ) {
+	public function render( SearchResult $result, $position ) {
 		$title = $result->getTitle();
 		$titleSnippet = $result->getTitleSnippet();
 		if ( $titleSnippet ) {
@@ -52,7 +53,7 @@ class SimpleSearchResultWidget implements SearchResultWidget {
 				"<span class='searchalttitle'>" .
 					$this->specialSearch->msg( 'search-redirect' )->rawParams(
 						$this->linkRenderer->makeLink( $redirectTitle, $redirectText )
-					)->text() .
+					)->parse() .
 				"</span>";
 		}
 

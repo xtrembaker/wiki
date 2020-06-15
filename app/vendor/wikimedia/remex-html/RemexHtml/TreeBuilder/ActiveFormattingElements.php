@@ -139,6 +139,8 @@ class ActiveFormattingElements {
 	 * Find and return the last element with the specified name between the
 	 * end of the list and the last marker on the list.
 	 * Used when parsing <a> "in body mode".
+	 * @param string $name
+	 * @return Element|null
 	 */
 	public function findElementByName( $name ) {
 		$elt = $this->tail;
@@ -154,7 +156,7 @@ class ActiveFormattingElements {
 	/**
 	 * Determine whether an element is in the list of formatting elements.
 	 * @param Element $elt
-	 * @return boolean
+	 * @return bool
 	 */
 	public function isInList( Element $elt ) {
 		return $this->head === $elt || $elt->prevAFE;
@@ -167,6 +169,7 @@ class ActiveFormattingElements {
 	 * @param FormattingElement $elt
 	 */
 	public function remove( FormattingElement $elt ) {
+		/** @var Marker|Element $elt */
 		if ( $this->head !== $elt && !$elt->prevAFE ) {
 			throw new TreeBuilderError(
 				"Attempted to remove an element which is not in the AFE list" );
@@ -251,6 +254,8 @@ class ActiveFormattingElements {
 	 * @param FormattingElement $b
 	 */
 	public function replace( FormattingElement $a, FormattingElement $b ) {
+		/** @var Marker|Element $a */
+		/** @var Marker|Element $b */
 		if ( $this->head !== $a && !$a->prevAFE ) {
 			throw new TreeBuilderError(
 				"Attempted to replace an element which is not in the AFE list" );
@@ -289,6 +294,8 @@ class ActiveFormattingElements {
 	 * @param FormattingElement $b
 	 */
 	public function insertAfter( FormattingElement $a, FormattingElement $b ) {
+		/** @var Marker|Element $a */
+		/** @var Marker|Element $b */
 		if ( $this->head !== $a && !$a->prevAFE ) {
 			throw new TreeBuilderError(
 				"Attempted to insert after an element which is not in the AFE list" );
@@ -309,6 +316,7 @@ class ActiveFormattingElements {
 
 	/**
 	 * Get a string representation of the AFE list, for debugging
+	 * @return string
 	 */
 	public function dump() {
 		$prev = null;
@@ -318,6 +326,7 @@ class ActiveFormattingElements {
 				$s .= "MARKER\n";
 				continue;
 			}
+			/** @var Element $node */
 			$s .= $node->getDebugTag();
 			if ( $node->nextNoah ) {
 				$s .= " (noah sibling: " . $node->nextNoah->getDebugTag() .

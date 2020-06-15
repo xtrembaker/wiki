@@ -22,6 +22,7 @@
 
 use Psr\Log\LoggerInterface;
 use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\MediaWikiServices;
 
 /**
  * Send information about this MediaWiki instance to MediaWiki.org.
@@ -50,8 +51,8 @@ class Pingback {
 	protected $id;
 
 	/**
-	 * @param Config $config
-	 * @param LoggerInterface $logger
+	 * @param Config|null $config
+	 * @param LoggerInterface|null $logger
 	 */
 	public function __construct( Config $config = null, LoggerInterface $logger = null ) {
 		$this->config = $config ?: RequestContext::getMain()->getConfig();
@@ -68,14 +69,25 @@ class Pingback {
 	}
 
 	/**
-	 * Has a pingback already been sent for this MediaWiki version?
+	 * Has a pingback been sent in the last month for this MediaWiki version?
 	 * @return bool
 	 */
 	private function checkIfSent() {
 		$dbr = wfGetDB( DB_REPLICA );
-		$sent = $dbr->selectField(
-			'updatelog', '1', [ 'ul_key' => $this->key ], __METHOD__ );
-		return $sent !== false;
+		$timestamp = $dbr->selectField(
+			'updatelog',
+			'ul_value',
+			[ 'ul_key' => $this->key ],
+			__METHOD__
+		);
+		if ( $timestamp === false ) {
+			return false;
+		}
+		// send heartbeat ping if last ping was over a month ago
+		if ( time() - (int)$timestamp > 60 * 60 * 24 * 30 ) {
+			return false;
+		}
+		return true;
 	}
 
 	/**
@@ -84,8 +96,14 @@ class Pingback {
 	 */
 	private function markSent() {
 		$dbw = wfGetDB( DB_MASTER );
-		return $dbw->insert(
-			'updatelog', [ 'ul_key' => $this->key ], __METHOD__, 'IGNORE' );
+		$timestamp = time();
+		return $dbw->upsert(
+			'updatelog',
+			[ 'ul_key' => $this->key, 'ul_value' => $timestamp ],
+			[ 'ul_key' ],
+			[ 'ul_value' => $timestamp ],
+			__METHOD__
+		);
 	}
 
 	/**
@@ -178,7 +196,7 @@ class Pingback {
 					'updatelog',
 					[ 'ul_key' => 'PingBack', 'ul_value' => $id ],
 					__METHOD__,
-					'IGNORE'
+					[ 'IGNORE' ]
 				);
 
 				if ( !$dbw->affectedRows() ) {
@@ -212,7 +230,7 @@ class Pingback {
 		$json = FormatJson::encode( $data );
 		$queryString = rawurlencode( str_replace( ' ', '\u0020', $json ) ) . ';';
 		$url = 'https://www.mediawiki.org/beacon/event?' . $queryString;
-		return Http::post( $url ) !== false;
+		return MediaWikiServices::getInstance()->getHttpRequestFactory()->post( $url ) !== null;
 	}
 
 	/**
@@ -228,6 +246,7 @@ class Pingback {
 	 *
 	 * The schema for the data is located at:
 	 * <https://meta.wikimedia.org/wiki/Schema:MediaWikiPingback>
+	 * @return bool
 	 */
 	public function sendPingback() {
 		if ( !$this->acquireLock() ) {

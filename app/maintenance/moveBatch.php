@@ -35,6 +35,8 @@
  * e.g. immobile_namespace for namespaces which can't be moved
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -64,16 +66,16 @@ class MoveBatch extends Maintenance {
 		$user = $this->getOption( 'u', false );
 		$reason = $this->getOption( 'r', '' );
 		$interval = $this->getOption( 'i', 0 );
-		$noredirects = $this->getOption( 'noredirects', false );
-		if ( $this->hasArg() ) {
-			$file = fopen( $this->getArg(), 'r' );
+		$noredirects = $this->hasOption( 'noredirects' );
+		if ( $this->hasArg( 0 ) ) {
+			$file = fopen( $this->getArg( 0 ), 'r' );
 		} else {
 			$file = $this->getStdin();
 		}
 
 		# Setup
 		if ( !$file ) {
-			$this->error( "Unable to read file, exiting", true );
+			$this->fatalError( "Unable to read file, exiting" );
 		}
 		if ( $user === false ) {
 			$wgUser = User::newSystemUser( 'Move page script', [ 'steal' => true ] );
@@ -81,14 +83,12 @@ class MoveBatch extends Maintenance {
 			$wgUser = User::newFromName( $user );
 		}
 		if ( !$wgUser ) {
-			$this->error( "Invalid username", true );
+			$this->fatalError( "Invalid username" );
 		}
 
 		# Setup complete, now start
 		$dbw = $this->getDB( DB_MASTER );
-		// @codingStandardsIgnoreStart Ignore avoid function calls in a FOR loop test part warning
 		for ( $linenum = 1; !feof( $file ); $linenum++ ) {
-			// @codingStandardsIgnoreEnd
 			$line = fgets( $file );
 			if ( $line === false ) {
 				break;
@@ -107,10 +107,11 @@ class MoveBatch extends Maintenance {
 
 			$this->output( $source->getPrefixedText() . ' --> ' . $dest->getPrefixedText() );
 			$this->beginTransaction( $dbw, __METHOD__ );
-			$mp = new MovePage( $source, $dest );
+			$mp = MediaWikiServices::getInstance()->getMovePageFactory()
+				->newMovePage( $source, $dest );
 			$status = $mp->move( $wgUser, $reason, !$noredirects );
 			if ( !$status->isOK() ) {
-				$this->output( "\nFAILED: " . $status->getWikiText( false, false, 'en' ) );
+				$this->output( "\nFAILED: " . $status->getMessage( false, false, 'en' )->text() );
 			}
 			$this->commitTransaction( $dbw, __METHOD__ );
 			$this->output( "\n" );
@@ -118,10 +119,9 @@ class MoveBatch extends Maintenance {
 			if ( $interval ) {
 				sleep( $interval );
 			}
-			wfWaitForSlaves();
 		}
 	}
 }
 
-$maintClass = "MoveBatch";
+$maintClass = MoveBatch::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

@@ -1,7 +1,5 @@
 <?php
 /**
- * ResourceLoader module for user preference customizations.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -23,7 +21,10 @@
  */
 
 /**
- * Module for user preference customizations
+ * Module for user preferences.
+ *
+ * @ingroup ResourceLoader
+ * @internal
  */
 class ResourceLoaderUserOptionsModule extends ResourceLoaderModule {
 
@@ -32,7 +33,7 @@ class ResourceLoaderUserOptionsModule extends ResourceLoaderModule {
 	protected $targets = [ 'desktop', 'mobile' ];
 
 	/**
-	 * @param ResourceLoaderContext $context
+	 * @param ResourceLoaderContext|null $context
 	 * @return array List of module names as strings
 	 */
 	public function getDependencies( ResourceLoaderContext $context = null ) {
@@ -51,10 +52,13 @@ class ResourceLoaderUserOptionsModule extends ResourceLoaderModule {
 	 * @return string JavaScript code
 	 */
 	public function getScript( ResourceLoaderContext $context ) {
-		return Xml::encodeJsCall( 'mw.user.options.set',
-			[ $context->getUserObj()->getOptions( User::GETOPTIONS_EXCLUDE_DEFAULTS ) ],
-			ResourceLoader::inDebugMode()
-		);
+		// Use FILTER_NOMIN annotation to prevent needless minification and caching (T84960).
+		return ResourceLoader::FILTER_NOMIN
+			. 'mw.user.options.set('
+			. $context->encodeJson(
+				$context->getUserObj()->getOptions( User::GETOPTIONS_EXCLUDE_DEFAULTS )
+			)
+			. ');';
 	}
 
 	/**
@@ -62,6 +66,14 @@ class ResourceLoaderUserOptionsModule extends ResourceLoaderModule {
 	 */
 	public function supportsURLLoading() {
 		return false;
+	}
+
+	/**
+	 * @param ResourceLoaderContext $context
+	 * @return bool
+	 */
+	public function isKnownEmpty( ResourceLoaderContext $context ) {
+		return !$context->getUserObj()->getOptions( User::GETOPTIONS_EXCLUDE_DEFAULTS );
 	}
 
 	/**

@@ -1,9 +1,10 @@
 @import 'mediawiki.ui/variables';
+@import '../variables.less';
 
 /* mediawiki.notification */
 
 .mw-notification-area {
-	font-size: 0.8em;
+	font-size: @font-size-notification;
 }
 
 .mw-notification-area-layout {
@@ -11,17 +12,7 @@
 }
 
 .mw-notification {
-	background-color: #fff;
-	padding: 0.75em 1.5em;
 	border: 1px solid @colorFieldBorder;
-	border-radius: 2px;
+	border-radius: @borderRadius;
 	box-shadow: 0 2px 2px 0 rgba( 0, 0, 0, 0.25 );
-}
-
-.mw-notification-type-warn {
-	border-color: #f5be00; /* yellow */
-}
-
-.mw-notification-type-error {
-	border-color: #d33; /* red */
 }

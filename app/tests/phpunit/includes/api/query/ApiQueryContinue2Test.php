@@ -30,7 +30,7 @@ class ApiQueryContinue2Test extends ApiQueryContinueTestBase {
 	/**
 	 * Create a set of pages. These must not change, otherwise the tests might give wrong results.
 	 *
-*@see MediaWikiTestCase::addDBDataOnce()
+	 * @see MediaWikiTestCase::addDBDataOnce()
 	 */
 	function addDBDataOnce() {
 		try {
@@ -46,7 +46,7 @@ class ApiQueryContinue2Test extends ApiQueryContinueTestBase {
 	}
 
 	/**
-	 * @medium
+	 * @group medium
 	 */
 	public function testA() {
 		$this->mVerbose = false;

@@ -4,17 +4,19 @@ namespace MediaWiki\Widget\Search;
 
 use MediaWiki\Interwiki\InterwikiLookup;
 use MediaWiki\Linker\LinkRenderer;
-use SearchResultSet;
+use ISearchResultSet;
 use SpecialSearch;
 use Title;
 use Html;
 
 /**
- * Renders one or more SearchResultSets into a sidebar grouped by
+ * Renders one or more ISearchResultSets into a sidebar grouped by
  * interwiki prefix. Includes a per-wiki header indicating where
  * the results are from.
+ *
+ * @deprecated since 1.31. Use InterwikiSearchResultSetWidget
  */
-class SimpleSearchResultSetWidget implements SearchResultSetWidget{
+class SimpleSearchResultSetWidget implements SearchResultSetWidget {
 	/** @var SpecialSearch */
 	protected $specialSearch;
 	/** @var SearchResultWidget */
@@ -32,6 +34,7 @@ class SimpleSearchResultSetWidget implements SearchResultSetWidget{
 		LinkRenderer $linkRenderer,
 		InterwikiLookup $iwLookup
 	) {
+		wfDeprecated( __METHOD__, '1.31' );
 		$this->specialSearch = $specialSearch;
 		$this->resultWidget = $resultWidget;
 		$this->linkRenderer = $linkRenderer;
@@ -40,7 +43,7 @@ class SimpleSearchResultSetWidget implements SearchResultSetWidget{
 
 	/**
 	 * @param string $term User provided search term
-	 * @param SearchResultSet|SearchResultSet[] $resultSets List of interwiki
+	 * @param ISearchResultSet|ISearchResultSet[] $resultSets List of interwiki
 	 *  results to render.
 	 * @return string HTML
 	 */
@@ -53,12 +56,10 @@ class SimpleSearchResultSetWidget implements SearchResultSetWidget{
 
 		$iwResults = [];
 		foreach ( $resultSets as $resultSet ) {
-			$result = $resultSet->next();
-			while ( $result ) {
+			foreach ( $resultSet as $result ) {
 				if ( !$result->isBrokenTitle() ) {
 					$iwResults[$result->getTitle()->getInterwiki()][] = $result;
 				}
-				$result = $resultSet->next();
 			}
 		}
 
@@ -74,13 +75,12 @@ class SimpleSearchResultSetWidget implements SearchResultSetWidget{
 			$out .= "</ul>";
 		}
 
-		return
-			"<div id='mw-search-interwiki'>" .
-				"<div id='mw-search-interwiki-caption'>" .
-					$this->specialSearch->msg( 'search-interwiki-caption' )->parse() .
-				'</div>' .
-				$out .
-			"</div>";
+		return "<div id='mw-search-interwiki'>" .
+			"<div id='mw-search-interwiki-caption'>" .
+				$this->specialSearch->msg( 'search-interwiki-caption' )->parse() .
+			'</div>' .
+			$out .
+		"</div>";
 	}
 
 	/**
@@ -108,10 +108,9 @@ class SimpleSearchResultSetWidget implements SearchResultSetWidget{
 			$this->specialSearch->msg( 'search-interwiki-more' )->escaped()
 		);
 
-		return
-			"<div class='mw-search-interwiki-project'>" .
-				"<span class='mw-search-interwiki-more'>{$searchLink}</span>" .
-				$caption .
+		return "<div class='mw-search-interwiki-project'>" .
+			"<span class='mw-search-interwiki-more'>{$searchLink}</span>" .
+			$caption .
 		"</div>";
 	}
 

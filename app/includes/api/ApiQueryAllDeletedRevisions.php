@@ -1,8 +1,6 @@
 <?php
 /**
- * Created on Oct 3, 2014
- *
- * Copyright © 2014 Brad Jorsch "bjorsch@wikimedia.org"
+ * Copyright © 2014 Wikimedia Foundation and contributors
  *
  * Heavily based on ApiQueryDeletedrevs,
  * Copyright © 2007 Roan Kattouw "<Firstname>.<Lastname>@gmail.com"
@@ -25,6 +23,10 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Storage\NameTableAccessException;
+
 /**
  * Query module to enumerate all deleted revisions.
  *
@@ -37,16 +39,15 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 	}
 
 	/**
-	 * @param ApiPageSet $resultPageSet
+	 * @param ApiPageSet|null $resultPageSet
 	 * @return void
 	 */
 	protected function run( ApiPageSet $resultPageSet = null ) {
-		// Before doing anything at all, let's check permissions
-		$this->checkUserRightsAny( 'deletedhistory' );
-
 		$user = $this->getUser();
 		$db = $this->getDB();
 		$params = $this->extractRequestParams( false );
+		$services = MediaWikiServices::getInstance();
+		$revisionStore = $services->getRevisionStore();
 
 		$result = $this->getResult();
 
@@ -71,7 +72,7 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 				if ( !is_null( $params[$param] ) ) {
 					$p = $this->getModulePrefix();
 					$this->dieWithError(
-						[ 'apierror-invalidparammix-cannotusewith', $p.$param, "{$p}user" ],
+						[ 'apierror-invalidparammix-cannotusewith', $p . $param, "{$p}user" ],
 						'invalidparammix'
 					);
 				}
@@ -81,7 +82,7 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 				if ( !is_null( $params[$param] ) ) {
 					$p = $this->getModulePrefix();
 					$this->dieWithError(
-						[ 'apierror-invalidparammix-mustusewith', $p.$param, "{$p}user" ],
+						[ 'apierror-invalidparammix-mustusewith', $p . $param, "{$p}user" ],
 						'invalidparammix'
 					);
 				}
@@ -103,13 +104,16 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 			}
 		}
 
-		$this->addTables( 'archive' );
 		if ( $resultPageSet === null ) {
 			$this->parseParameters( $params );
-			$this->addFields( Revision::selectArchiveFields() );
+			$arQuery = $revisionStore->getArchiveQueryInfo();
+			$this->addTables( $arQuery['tables'] );
+			$this->addJoinConds( $arQuery['joins'] );
+			$this->addFields( $arQuery['fields'] );
 			$this->addFields( [ 'ar_title', 'ar_namespace' ] );
 		} else {
 			$this->limit = $this->getParameter( 'limit' ) ?: 10;
+			$this->addTables( 'archive' );
 			$this->addFields( [ 'ar_title', 'ar_namespace' ] );
 			if ( $optimizeGenerateTitles ) {
 				$this->addOption( 'DISTINCT' );
@@ -119,45 +123,40 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 		}
 
 		if ( $this->fld_tags ) {
-			$this->addTables( 'tag_summary' );
-			$this->addJoinConds(
-				[ 'tag_summary' => [ 'LEFT JOIN', [ 'ar_rev_id=ts_rev_id' ] ] ]
-			);
-			$this->addFields( 'ts_tags' );
+			$this->addFields( [ 'ts_tags' => ChangeTags::makeTagSummarySubquery( 'archive' ) ] );
 		}
 
 		if ( !is_null( $params['tag'] ) ) {
 			$this->addTables( 'change_tag' );
 			$this->addJoinConds(
-				[ 'change_tag' => [ 'INNER JOIN', [ 'ar_rev_id=ct_rev_id' ] ] ]
+				[ 'change_tag' => [ 'JOIN', [ 'ar_rev_id=ct_rev_id' ] ] ]
 			);
-			$this->addWhereFld( 'ct_tag', $params['tag'] );
+			$changeTagDefStore = $services->getChangeTagDefStore();
+			try {
+				$this->addWhereFld( 'ct_tag_id', $changeTagDefStore->getId( $params['tag'] ) );
+			} catch ( NameTableAccessException $exception ) {
+				// Return nothing.
+				$this->addWhere( '1=0' );
+			}
 		}
 
-		if ( $this->fetchContent ) {
-			// Modern MediaWiki has the content for deleted revs in the 'text'
-			// table using fields old_text and old_flags. But revisions deleted
-			// pre-1.5 store the content in the 'archive' table directly using
-			// fields ar_text and ar_flags, and no corresponding 'text' row. So
-			// we have to LEFT JOIN and fetch all four fields.
-			$this->addTables( 'text' );
-			$this->addJoinConds(
-				[ 'text' => [ 'LEFT JOIN', [ 'ar_text_id=old_id' ] ] ]
-			);
-			$this->addFields( [ 'ar_text', 'ar_flags', 'old_text', 'old_flags' ] );
-
-			// This also means stricter restrictions
-			$this->checkUserRightsAny( [ 'deletedtext', 'undelete' ] );
+		// This means stricter restrictions
+		if ( ( $this->fld_comment || $this->fld_parsedcomment ) &&
+			!$this->getPermissionManager()->userHasRight( $user, 'deletedhistory' )
+		) {
+			$this->dieWithError( 'apierror-cantview-deleted-comment', 'permissiondenied' );
+		}
+		if ( $this->fetchContent &&
+			!$this->getPermissionManager()->userHasAnyRight( $user, 'deletedtext', 'undelete' )
+		) {
+			$this->dieWithError( 'apierror-cantview-deleted-revision-content', 'permissiondenied' );
 		}
 
 		$miser_ns = null;
 
 		if ( $mode == 'all' ) {
-			if ( $params['namespace'] !== null ) {
-				$namespaces = $params['namespace'];
-			} else {
-				$namespaces = MWNamespace::getValidNamespaces();
-			}
+			$namespaces = $params['namespace'] ??
+				$services->getNamespaceInfo()->getValidNamespaces();
 			$this->addWhereFld( 'ar_namespace', $namespaces );
 
 			// For from/to/prefix, we have to consider the potential
@@ -223,20 +222,29 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 		}
 
 		if ( !is_null( $params['user'] ) ) {
-			$this->addWhereFld( 'ar_user_text', $params['user'] );
+			// Don't query by user ID here, it might be able to use the ar_usertext_timestamp index.
+			$actorQuery = ActorMigration::newMigration()
+				->getWhere( $db, 'ar_user', User::newFromName( $params['user'], false ), false );
+			$this->addTables( $actorQuery['tables'] );
+			$this->addJoinConds( $actorQuery['joins'] );
+			$this->addWhere( $actorQuery['conds'] );
 		} elseif ( !is_null( $params['excludeuser'] ) ) {
-			$this->addWhere( 'ar_user_text != ' .
-				$db->addQuotes( $params['excludeuser'] ) );
+			// Here there's no chance of using ar_usertext_timestamp.
+			$actorQuery = ActorMigration::newMigration()
+				->getWhere( $db, 'ar_user', User::newFromName( $params['excludeuser'], false ) );
+			$this->addTables( $actorQuery['tables'] );
+			$this->addJoinConds( $actorQuery['joins'] );
+			$this->addWhere( 'NOT(' . $actorQuery['conds'] . ')' );
 		}
 
 		if ( !is_null( $params['user'] ) || !is_null( $params['excludeuser'] ) ) {
 			// Paranoia: avoid brute force searches (T19342)
-			// (shouldn't be able to get here without 'deletedhistory', but
-			// check it again just in case)
-			if ( !$user->isAllowed( 'deletedhistory' ) ) {
-				$bitmask = Revision::DELETED_USER;
-			} elseif ( !$user->isAllowedAny( 'suppressrevision', 'viewsuppressed' ) ) {
-				$bitmask = Revision::DELETED_USER | Revision::DELETED_RESTRICTED;
+			if ( !$this->getPermissionManager()->userHasRight( $user, 'deletedhistory' ) ) {
+				$bitmask = RevisionRecord::DELETED_USER;
+			} elseif ( !$this->getPermissionManager()
+				->userHasAnyRight( $user, 'suppressrevision', 'viewsuppressed' )
+			) {
+				$bitmask = RevisionRecord::DELETED_USER | RevisionRecord::DELETED_RESTRICTED;
 			} else {
 				$bitmask = 0;
 			}
@@ -250,14 +258,14 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 			$op = ( $dir == 'newer' ? '>' : '<' );
 			if ( $optimizeGenerateTitles ) {
 				$this->dieContinueUsageIf( count( $cont ) != 2 );
-				$ns = intval( $cont[0] );
+				$ns = (int)$cont[0];
 				$this->dieContinueUsageIf( strval( $ns ) !== $cont[0] );
 				$title = $db->addQuotes( $cont[1] );
 				$this->addWhere( "ar_namespace $op $ns OR " .
 					"(ar_namespace = $ns AND ar_title $op= $title)" );
 			} elseif ( $mode == 'all' ) {
 				$this->dieContinueUsageIf( count( $cont ) != 4 );
-				$ns = intval( $cont[0] );
+				$ns = (int)$cont[0];
 				$this->dieContinueUsageIf( strval( $ns ) !== $cont[0] );
 				$title = $db->addQuotes( $cont[1] );
 				$ts = $db->addQuotes( $db->timestamp( $cont[2] ) );
@@ -342,13 +350,13 @@ class ApiQueryAllDeletedRevisions extends ApiQueryRevisionsBase {
 					$generated[] = $row->ar_rev_id;
 				}
 			} else {
-				$revision = Revision::newFromArchiveRow( $row );
+				$revision = $revisionStore->newRevisionFromArchiveRow( $row );
 				$rev = $this->extractRevisionInfo( $revision, $row );
 
 				if ( !isset( $pageMap[$row->ar_namespace][$row->ar_title] ) ) {
 					$index = $nextIndex++;
 					$pageMap[$row->ar_namespace][$row->ar_title] = $index;
-					$title = $revision->getTitle();
+					$title = Title::newFromLinkTarget( $revision->getPageAsLinkTarget() );
 					$a = [
 						'pageid' => $title->getArticleID(),
 						'revisions' => [ $rev ],

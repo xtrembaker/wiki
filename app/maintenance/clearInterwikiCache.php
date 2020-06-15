@@ -38,21 +38,21 @@ class ClearInterwikiCache extends Maintenance {
 	public function execute() {
 		global $wgLocalDatabases, $wgMemc;
 		$dbr = $this->getDB( DB_REPLICA );
-		$res = $dbr->select( 'interwiki', [ 'iw_prefix' ], false );
+		$res = $dbr->select( 'interwiki', [ 'iw_prefix' ], '', __METHOD__ );
 		$prefixes = [];
 		foreach ( $res as $row ) {
 			$prefixes[] = $row->iw_prefix;
 		}
 
-		foreach ( $wgLocalDatabases as $db ) {
-			$this->output( "$db..." );
+		foreach ( $wgLocalDatabases as $wikiId ) {
+			$this->output( "$wikiId..." );
 			foreach ( $prefixes as $prefix ) {
-				$wgMemc->delete( "$db:interwiki:$prefix" );
+				$wgMemc->delete( "$wikiId:interwiki:$prefix" );
 			}
 			$this->output( "done\n" );
 		}
 	}
 }
 
-$maintClass = "ClearInterwikiCache";
+$maintClass = ClearInterwikiCache::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

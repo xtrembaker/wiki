@@ -23,6 +23,7 @@
  * @file
  * @ingroup SpecialPage
  */
+
 use MediaWiki\MediaWikiServices;
 
 /**
@@ -32,13 +33,15 @@ use MediaWiki\MediaWikiServices;
  * @ingroup SpecialPage
  */
 class WikiImporter {
-	private $reader = null;
+	/** @var XMLReader */
+	private $reader;
 	private $foreignNamespaces = null;
 	private $mLogItemCallback, $mUploadCallback, $mRevisionCallback, $mPageCallback;
 	private $mSiteInfoCallback, $mPageOutCallback;
 	private $mNoticeCallback, $mDebug;
 	private $mImportUploads, $mImageBasePath;
 	private $mNoUpdates = false;
+	private $pageOffset = 0;
 	/** @var Config */
 	private $config;
 	/** @var ImportTitleFactory */
@@ -47,6 +50,8 @@ class WikiImporter {
 	private $countableCache = [];
 	/** @var bool */
 	private $disableStatisticsUpdate = false;
+	/** @var ExternalUserNames */
+	private $externalUserNames;
 
 	/**
 	 * Creates an ImportXMLReader drawing from the source provided
@@ -54,20 +59,16 @@ class WikiImporter {
 	 * @param Config $config
 	 * @throws Exception
 	 */
-	function __construct( ImportSource $source, Config $config = null ) {
+	function __construct( ImportSource $source, Config $config ) {
 		if ( !class_exists( 'XMLReader' ) ) {
 			throw new Exception( 'Import requires PHP to have been compiled with libxml support' );
 		}
 
 		$this->reader = new XMLReader();
-		if ( !$config ) {
-			wfDeprecated( __METHOD__ . ' without a Config instance', '1.25' );
-			$config = MediaWikiServices::getInstance()->getMainConfig();
-		}
 		$this->config = $config;
 
 		if ( !in_array( 'uploadsource', stream_get_wrappers() ) ) {
-			stream_wrapper_register( 'uploadsource', 'UploadSourceAdapter' );
+			stream_wrapper_register( 'uploadsource', UploadSourceAdapter::class );
 		}
 		$id = UploadSourceAdapter::registerSource( $source );
 
@@ -95,6 +96,7 @@ class WikiImporter {
 		$this->setPageOutCallback( [ $this, 'finishImportPage' ] );
 
 		$this->importTitleFactory = new NaiveImportTitleFactory();
+		$this->externalUserNames = new ExternalUserNames( 'imported', false );
 	}
 
 	/**
@@ -119,14 +121,13 @@ class WikiImporter {
 		wfDebug( "IMPORT: $data\n" );
 	}
 
-	public function notice( $msg /*, $param, ...*/ ) {
-		$params = func_get_args();
-		array_shift( $params );
-
+	public function notice( $msg, ...$params ) {
 		if ( is_callable( $this->mNoticeCallback ) ) {
 			call_user_func( $this->mNoticeCallback, $msg, $params );
 		} else { # No ImportReporter -> CLI
-			echo wfMessage( $msg, $params )->text() . "\n";
+			// T177997: the command line importers should call setNoticeCallback()
+			// for their own custom callback to echo the notice
+			wfDebug( wfMessage( $msg, $params )->text() . "\n" );
 		}
 	}
 
@@ -144,6 +145,16 @@ class WikiImporter {
 	 */
 	function setNoUpdates( $noupdates ) {
 		$this->mNoUpdates = $noupdates;
+	}
+
+	/**
+	 * Sets 'pageOffset' value. So it will skip the first n-1 pages
+	 * and start from the nth page. It's 1-based indexing.
+	 * @param int $nthPage
+	 * @since 1.29
+	 */
+	function setPageOffset( $nthPage ) {
+		$this->pageOffset = $nthPage;
 	}
 
 	/**
@@ -247,7 +258,7 @@ class WikiImporter {
 			return true;
 		} elseif (
 			$namespace >= 0 &&
-			MWNamespace::exists( intval( $namespace ) )
+			MediaWikiServices::getInstance()->getNamespaceInfo()->exists( intval( $namespace ) )
 		) {
 			$namespace = intval( $namespace );
 			$this->setImportTitleFactory( new NamespaceImportTitleFactory( $namespace ) );
@@ -273,19 +284,19 @@ class WikiImporter {
 
 			if ( !$title || $title->isExternal() ) {
 				$status->fatal( 'import-rootpage-invalid' );
+			} elseif (
+				!MediaWikiServices::getInstance()->getNamespaceInfo()->
+				hasSubpages( $title->getNamespace() )
+			) {
+				$displayNSText = $title->getNamespace() == NS_MAIN
+					? wfMessage( 'blanknamespace' )->text()
+					: MediaWikiServices::getInstance()->getContentLanguage()->
+						getNsText( $title->getNamespace() );
+				$status->fatal( 'import-rootpage-nosubpage', $displayNSText );
 			} else {
-				if ( !MWNamespace::hasSubpages( $title->getNamespace() ) ) {
-					global $wgContLang;
-
-					$displayNSText = $title->getNamespace() == NS_MAIN
-						? wfMessage( 'blanknamespace' )->text()
-						: $wgContLang->getNsText( $title->getNamespace() );
-					$status->fatal( 'import-rootpage-nosubpage', $displayNSText );
-				} else {
-					// set namespace to 'all', so the namespace check in processTitle() can pass
-					$this->setTargetNamespace( null );
-					$this->setImportTitleFactory( new SubpageImportTitleFactory( $title ) );
-				}
+				// set namespace to 'all', so the namespace check in processTitle() can pass
+				$this->setTargetNamespace( null );
+				$this->setImportTitleFactory( new SubpageImportTitleFactory( $title ) );
 			}
 		}
 		return $status;
@@ -303,6 +314,15 @@ class WikiImporter {
 	 */
 	public function setImportUploads( $import ) {
 		$this->mImportUploads = $import;
+	}
+
+	/**
+	 * @since 1.31
+	 * @param string $usernamePrefix Prefix to apply to unknown (and possibly also known) usernames
+	 * @param bool $assignKnownUsers Whether to apply the prefix to usernames that exist locally
+	 */
+	public function setUsernamePrefix( $usernamePrefix, $assignKnownUsers ) {
+		$this->externalUserNames = new ExternalUserNames( $usernamePrefix, $assignKnownUsers );
 	}
 
 	/**
@@ -383,8 +403,8 @@ class WikiImporter {
 	 * @return bool
 	 */
 	public function finishImportPage( $title, $foreignTitle, $revCount,
-			$sRevCount, $pageInfo ) {
-
+		$sRevCount, $pageInfo
+	) {
 		// Update article count statistics (T42009)
 		// The normal counting logic in WikiPage->doEditUpdates() is designed for
 		// one-revision-at-a-time editing, not bulk imports. In this situation it
@@ -411,13 +431,12 @@ class WikiImporter {
 			}
 		}
 
-		$args = func_get_args();
-		return Hooks::run( 'AfterImportPage', $args );
+		return Hooks::run( 'AfterImportPage', func_get_args() );
 	}
 
 	/**
 	 * Alternate per-revision callback, for debugging.
-	 * @param WikiRevision $revision
+	 * @param WikiRevision &$revision
 	 */
 	public function debugRevisionHandler( &$revision ) {
 		$this->debug( "Got revision:" );
@@ -448,7 +467,7 @@ class WikiImporter {
 
 	/**
 	 * Notify the callback function when a new "<page>" is reached.
-	 * @param Title $title
+	 * @param array $title
 	 */
 	function pageCallback( $title ) {
 		if ( isset( $this->mPageCallback ) ) {
@@ -467,8 +486,7 @@ class WikiImporter {
 	private function pageOutCallback( $title, $foreignTitle, $revCount,
 			$sucCount, $pageInfo ) {
 		if ( isset( $this->mPageOutCallback ) ) {
-			$args = func_get_args();
-			call_user_func_array( $this->mPageOutCallback, $args );
+			call_user_func_array( $this->mPageOutCallback, func_get_args() );
 		}
 	}
 
@@ -515,7 +533,7 @@ class WikiImporter {
 	 * Fetches text contents of the current element, assuming
 	 * no sub-elements or such scary things.
 	 * @return string
-	 * @access private
+	 * @private
 	 */
 	public function nodeContents() {
 		if ( $this->reader->isEmptyElement ) {
@@ -524,13 +542,13 @@ class WikiImporter {
 		$buffer = "";
 		while ( $this->reader->read() ) {
 			switch ( $this->reader->nodeType ) {
-			case XMLReader::TEXT:
-			case XMLReader::CDATA:
-			case XMLReader::SIGNIFICANT_WHITESPACE:
-				$buffer .= $this->reader->value;
-				break;
-			case XMLReader::END_ELEMENT:
-				return $buffer;
+				case XMLReader::TEXT:
+				case XMLReader::CDATA:
+				case XMLReader::SIGNIFICANT_WHITESPACE:
+					$buffer .= $this->reader->value;
+					break;
+				case XMLReader::END_ELEMENT:
+					return $buffer;
 			}
 		}
 
@@ -540,6 +558,7 @@ class WikiImporter {
 
 	/**
 	 * Primary entry point
+	 * @throws Exception
 	 * @throws MWException
 	 * @return bool
 	 */
@@ -562,9 +581,19 @@ class WikiImporter {
 		$keepReading = $this->reader->read();
 		$skip = false;
 		$rethrow = null;
+		$pageCount = 0;
 		try {
 			while ( $keepReading ) {
 				$tag = $this->reader->localName;
+				if ( $this->pageOffset ) {
+					if ( $tag === 'page' ) {
+						$pageCount++;
+					}
+					if ( $pageCount < $this->pageOffset ) {
+						$keepReading = $this->reader->next();
+						continue;
+					}
+				}
 				$type = $this->reader->nodeType;
 
 				if ( !Hooks::run( 'ImportHandleToplevelXMLTag', [ $this ] ) ) {
@@ -670,7 +699,6 @@ class WikiImporter {
 	 * @return bool|mixed
 	 */
 	private function processLogItem( $logInfo ) {
-
 		$revision = new WikiRevision( $this->config );
 
 		if ( isset( $logInfo['id'] ) ) {
@@ -701,14 +729,19 @@ class WikiImporter {
 		}
 
 		if ( !isset( $logInfo['contributor']['username'] ) ) {
-			$revision->setUsername( 'Unknown user' );
+			$revision->setUsername( $this->externalUserNames->addPrefix( 'Unknown user' ) );
 		} else {
-			$revision->setUsername( $logInfo['contributor']['username'] );
+			$revision->setUsername(
+				$this->externalUserNames->applyPrefix( $logInfo['contributor']['username'] )
+			);
 		}
 
 		return $this->logItemCallback( $revision );
 	}
 
+	/**
+	 * @suppress PhanTypeInvalidDimOffset Phan not reading the reference inside the hook
+	 */
 	private function handlePage() {
 		// Handle page data.
 		$this->debug( "Enter page handler." );
@@ -752,7 +785,7 @@ class WikiImporter {
 			} elseif ( $tag == 'revision' || $tag == 'upload' ) {
 				if ( !isset( $title ) ) {
 					$title = $this->processTitle( $pageInfo['title'],
-						isset( $pageInfo['ns'] ) ? $pageInfo['ns'] : null );
+						$pageInfo['ns'] ?? null );
 
 					// $title is either an array of two titles or false.
 					if ( is_array( $title ) ) {
@@ -797,7 +830,7 @@ class WikiImporter {
 		$this->debug( "Enter revision handler" );
 		$revisionInfo = [];
 
-		$normalFields = [ 'id', 'timestamp', 'comment', 'minor', 'model', 'format', 'text' ];
+		$normalFields = [ 'id', 'timestamp', 'comment', 'minor', 'model', 'format', 'text', 'sha1' ];
 
 		$skip = false;
 
@@ -832,6 +865,7 @@ class WikiImporter {
 	/**
 	 * @param array $pageInfo
 	 * @param array $revisionInfo
+	 * @throws MWException
 	 * @return bool|mixed
 	 */
 	private function processRevision( $pageInfo, $revisionInfo ) {
@@ -859,6 +893,7 @@ class WikiImporter {
 				) . " exceeds the maximum allowable size ($wgMaxArticleSize KB)" );
 		}
 
+		// FIXME: process schema version 11!
 		$revision = new WikiRevision( $this->config );
 
 		if ( isset( $revisionInfo['id'] ) ) {
@@ -880,11 +915,7 @@ class WikiImporter {
 
 			$revision->setText( $text );
 		}
-		if ( isset( $revisionInfo['timestamp'] ) ) {
-			$revision->setTimestamp( $revisionInfo['timestamp'] );
-		} else {
-			$revision->setTimestamp( wfTimestampNow() );
-		}
+		$revision->setTimestamp( $revisionInfo['timestamp'] ?? wfTimestampNow() );
 
 		if ( isset( $revisionInfo['comment'] ) ) {
 			$revision->setComment( $revisionInfo['comment'] );
@@ -896,9 +927,14 @@ class WikiImporter {
 		if ( isset( $revisionInfo['contributor']['ip'] ) ) {
 			$revision->setUserIP( $revisionInfo['contributor']['ip'] );
 		} elseif ( isset( $revisionInfo['contributor']['username'] ) ) {
-			$revision->setUsername( $revisionInfo['contributor']['username'] );
+			$revision->setUsername(
+				$this->externalUserNames->applyPrefix( $revisionInfo['contributor']['username'] )
+			);
 		} else {
-			$revision->setUsername( 'Unknown user' );
+			$revision->setUsername( $this->externalUserNames->addPrefix( 'Unknown user' ) );
+		}
+		if ( isset( $revisionInfo['sha1'] ) ) {
+			$revision->setSha1Base36( $revisionInfo['sha1'] );
 		}
 		$revision->setNoUpdates( $this->mNoUpdates );
 
@@ -977,7 +1013,7 @@ class WikiImporter {
 	 */
 	private function processUpload( $pageInfo, $uploadInfo ) {
 		$revision = new WikiRevision( $this->config );
-		$text = isset( $uploadInfo['text'] ) ? $uploadInfo['text'] : '';
+		$text = $uploadInfo['text'] ?? '';
 
 		$revision->setTitle( $pageInfo['_title'] );
 		$revision->setID( $pageInfo['id'] );
@@ -1002,7 +1038,9 @@ class WikiImporter {
 			$revision->setUserIP( $uploadInfo['contributor']['ip'] );
 		}
 		if ( isset( $uploadInfo['contributor']['username'] ) ) {
-			$revision->setUsername( $uploadInfo['contributor']['username'] );
+			$revision->setUsername(
+				$this->externalUserNames->applyPrefix( $uploadInfo['contributor']['username'] )
+			);
 		}
 		$revision->setNoUpdates( $this->mNoUpdates );
 
@@ -1065,14 +1103,23 @@ class WikiImporter {
 		} elseif ( !$title->canExist() ) {
 			$this->notice( 'import-error-special', $title->getPrefixedText() );
 			return false;
-		} elseif ( !$title->userCan( 'edit' ) && !$commandLineMode ) {
-			# Do not import if the importing wiki user cannot edit this page
-			$this->notice( 'import-error-edit', $title->getPrefixedText() );
-			return false;
-		} elseif ( !$title->exists() && !$title->userCan( 'create' ) && !$commandLineMode ) {
-			# Do not import if the importing wiki user cannot create this page
-			$this->notice( 'import-error-create', $title->getPrefixedText() );
-			return false;
+		} elseif ( !$commandLineMode ) {
+			$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
+			$user = RequestContext::getMain()->getUser();
+
+			if ( !$permissionManager->userCan( 'edit', $user, $title ) ) {
+				# Do not import if the importing wiki user cannot edit this page
+				$this->notice( 'import-error-edit', $title->getPrefixedText() );
+
+				return false;
+			}
+
+			if ( !$title->exists() && !$permissionManager->userCan( 'create', $user, $title ) ) {
+				# Do not import if the importing wiki user cannot create this page
+				$this->notice( 'import-error-create', $title->getPrefixedText() );
+
+				return false;
+			}
 		}
 
 		return [ $title, $foreignTitle ];

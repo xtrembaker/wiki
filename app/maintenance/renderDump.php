@@ -40,6 +40,8 @@ class DumpRenderer extends Maintenance {
 
 	private $count = 0;
 	private $outputDirectory, $startTime;
+	/** @var string */
+	private $prefix;
 
 	public function __construct() {
 		parent::__construct();
@@ -66,6 +68,9 @@ class DumpRenderer extends Maintenance {
 
 		$importer->setRevisionCallback(
 			[ $this, 'handleRevision' ] );
+		$importer->setNoticeCallback( function ( $msg, $params ) {
+			echo wfMessage( $msg, $params )->text() . "\n";
+		} );
 
 		$importer->doImport();
 
@@ -120,5 +125,5 @@ class DumpRenderer extends Maintenance {
 	}
 }
 
-$maintClass = "DumpRenderer";
+$maintClass = DumpRenderer::class;
 require_once RUN_MAINTENANCE_IF_MAIN;

@@ -5,11 +5,13 @@ use Wikimedia\TestingAccessWrapper;
 /**
  * @group BagOStuff
  */
-class CachedBagOStuffTest extends PHPUnit_Framework_TestCase {
+class CachedBagOStuffTest extends PHPUnit\Framework\TestCase {
+
+	use MediaWikiCoversValidator;
 
 	/**
 	 * @covers CachedBagOStuff::__construct
-	 * @covers CachedBagOStuff::doGet
+	 * @covers CachedBagOStuff::get
 	 */
 	public function testGetFromBackend() {
 		$backend = new HashBagOStuff;
@@ -34,6 +36,7 @@ class CachedBagOStuffTest extends PHPUnit_Framework_TestCase {
 			$cache->set( "key$i", 1 );
 			$this->assertEquals( 1, $cache->get( "key$i" ) );
 			$this->assertEquals( 1, $backend->get( "key$i" ) );
+
 			$cache->delete( "key$i" );
 			$this->assertEquals( false, $cache->get( "key$i" ) );
 			$this->assertEquals( false, $backend->get( "key$i" ) );
@@ -65,7 +68,7 @@ class CachedBagOStuffTest extends PHPUnit_Framework_TestCase {
 	}
 
 	/**
-	 * @covers CachedBagOStuff::doGet
+	 * @covers CachedBagOStuff::get
 	 */
 	public function testCacheBackendMisses() {
 		$backend = new HashBagOStuff;
@@ -122,6 +125,12 @@ class CachedBagOStuffTest extends PHPUnit_Framework_TestCase {
 	 * @covers CachedBagOStuff::makeKey
 	 */
 	public function testMakeKey() {
+		if ( defined( 'HHVM_VERSION' ) ) {
+			// This works fine on HHVM (and verified by integration tests), but due to
+			// a bug in HHVM's Reflection, PHPUnit 4 fails to create a mock (T228563)
+			$this->markTestSkipped( 'HHVM Reflection buggy' );
+		}
+
 		$backend = $this->getMockBuilder( HashBagOStuff::class )
 			->setMethods( [ 'makeKey' ] )
 			->getMock();
@@ -142,6 +151,10 @@ class CachedBagOStuffTest extends PHPUnit_Framework_TestCase {
 	 * @covers CachedBagOStuff::makeGlobalKey
 	 */
 	public function testMakeGlobalKey() {
+		if ( defined( 'HHVM_VERSION' ) ) {
+			$this->markTestSkipped( 'HHVM Reflection buggy' );
+		}
+
 		$backend = $this->getMockBuilder( HashBagOStuff::class )
 			->setMethods( [ 'makeGlobalKey' ] )
 			->getMock();

@@ -1,6 +1,6 @@
 <?php
 /**
- * Contains classes for formatting log entries
+ * Contains a class for formatting log entries
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -19,9 +19,11 @@
  *
  * @file
  * @author Niklas Laxström
- * @license http://www.gnu.org/copyleft/gpl.html GNU General Public License 2.0 or later
+ * @license GPL-2.0-or-later
  * @since 1.19
  */
+use MediaWiki\Linker\LinkRenderer;
+use MediaWiki\MediaWikiServices;
 
 /**
  * Implements the default log formatting.
@@ -49,13 +51,7 @@ class LogFormatter {
 		global $wgLogActionsHandlers;
 		$fulltype = $entry->getFullType();
 		$wildcard = $entry->getType() . '/*';
-		$handler = '';
-
-		if ( isset( $wgLogActionsHandlers[$fulltype] ) ) {
-			$handler = $wgLogActionsHandlers[$fulltype];
-		} elseif ( isset( $wgLogActionsHandlers[$wildcard] ) ) {
-			$handler = $wgLogActionsHandlers[$wildcard];
-		}
+		$handler = $wgLogActionsHandlers[$fulltype] ?? $wgLogActionsHandlers[$wildcard] ?? '';
 
 		if ( $handler !== '' && is_string( $handler ) && class_exists( $handler ) ) {
 			return new $handler( $entry );
@@ -101,6 +97,17 @@ class LogFormatter {
 	/** @var string */
 	protected $irctext = false;
 
+	/**
+	 * @var LinkRenderer|null
+	 */
+	private $linkRenderer;
+
+	/**
+	 * @see LogFormatter::getMessageParameters
+	 * @var array
+	 */
+	protected $parsedParameters;
+
 	protected function __construct( LogEntry $entry ) {
 		$this->entry = $entry;
 		$this->context = RequestContext::getMain();
@@ -112,6 +119,26 @@ class LogFormatter {
 	 */
 	public function setContext( IContextSource $context ) {
 		$this->context = $context;
+	}
+
+	/**
+	 * @since 1.30
+	 * @param LinkRenderer $linkRenderer
+	 */
+	public function setLinkRenderer( LinkRenderer $linkRenderer ) {
+		$this->linkRenderer = $linkRenderer;
+	}
+
+	/**
+	 * @since 1.30
+	 * @return LinkRenderer
+	 */
+	public function getLinkRenderer() {
+		if ( $this->linkRenderer !== null ) {
+			return $this->linkRenderer;
+		} else {
+			return MediaWikiServices::getInstance()->getLinkRenderer();
+		}
 	}
 
 	/**
@@ -127,6 +154,21 @@ class LogFormatter {
 	}
 
 	/**
+	 * Check if a log item type can be displayed
+	 * @return bool
+	 */
+	public function canViewLogType() {
+		// If the user doesn't have the right permission to view the specific
+		// log type, return false
+		$logRestrictions = $this->context->getConfig()->get( 'LogRestrictions' );
+		$type = $this->entry->getType();
+		return !isset( $logRestrictions[$type] )
+			|| MediaWikiServices::getInstance()
+				   ->getPermissionManager()
+				   ->userHasRight( $this->context->getUser(), $logRestrictions[$type] );
+	}
+
+	/**
 	 * Check if a log item can be displayed
 	 * @param int $field LogPage::DELETED_* constant
 	 * @return bool
@@ -134,9 +176,10 @@ class LogFormatter {
 	protected function canView( $field ) {
 		if ( $this->audience == self::FOR_THIS_USER ) {
 			return LogEventsList::userCanBitfield(
-				$this->entry->getDeleted(), $field, $this->context->getUser() );
+				$this->entry->getDeleted(), $field, $this->context->getUser() ) &&
+				self::canViewLogType();
 		} else {
-			return !$this->entry->isDeleted( $field );
+			return !$this->entry->isDeleted( $field ) && self::canViewLogType();
 		}
 	}
 
@@ -156,6 +199,7 @@ class LogFormatter {
 	 * to avoid formatting for any particular user.
 	 * @see getActionText()
 	 * @return string Plain text
+	 * @return-taint tainted
 	 */
 	public function getPlainActionText() {
 		$this->plaintext = true;
@@ -166,7 +210,7 @@ class LogFormatter {
 	}
 
 	/**
-	 * Even uglier hack to maintain backwards compatibilty with IRC bots
+	 * Even uglier hack to maintain backwards compatibility with IRC bots
 	 * (T36508).
 	 * @see getActionText()
 	 * @return string Text
@@ -187,14 +231,12 @@ class LogFormatter {
 	}
 
 	/**
-	 * Even uglier hack to maintain backwards compatibilty with IRC bots
+	 * Even uglier hack to maintain backwards compatibility with IRC bots
 	 * (T36508).
 	 * @see getActionText()
 	 * @return string Text
 	 */
 	public function getIRCActionText() {
-		global $wgContLang;
-
 		$this->plaintext = true;
 		$this->irctext = true;
 
@@ -204,6 +246,7 @@ class LogFormatter {
 		// Text of title the action is aimed at.
 		$target = $entry->getTarget()->getPrefixedText();
 		$text = null;
+		$contLang = MediaWikiServices::getInstance()->getContentLanguage();
 		switch ( $entry->getType() ) {
 			case 'move':
 				switch ( $entry->getSubtype() ) {
@@ -234,19 +277,15 @@ class LogFormatter {
 						$text = wfMessage( 'undeletedarticle' )
 							->rawParams( $target )->inContentLanguage()->escaped();
 						break;
-					// @codingStandardsIgnoreStart Long line
 					//case 'revision': // Revision deletion
 					//case 'event': // Log deletion
 					// see https://github.com/wikimedia/mediawiki/commit/a9c243b7b5289dad204278dbe7ed571fd914e395
 					//default:
-					// @codingStandardsIgnoreEnd
 				}
 				break;
 
 			case 'patrol':
-				// @codingStandardsIgnoreStart Long line
 				// https://github.com/wikimedia/mediawiki/commit/1a05f8faf78675dc85984f27f355b8825b43efff
-				// @codingStandardsIgnoreEnd
 				// Create a diff link to the patrolled revision
 				if ( $entry->getSubtype() === 'patrol' ) {
 					$diffLink = htmlspecialchars(
@@ -306,6 +345,7 @@ class LogFormatter {
 							->rawParams( $target )->inContentLanguage()->escaped();
 						break;
 					case 'overwrite':
+					case 'revert':
 						$text = wfMessage( 'overwroteimage' )
 							->rawParams( $target )->inContentLanguage()->escaped();
 						break;
@@ -348,17 +388,17 @@ class LogFormatter {
 						// new key (5::duration/6::flags) or old key (0/optional 1)
 						if ( $entry->isLegacy() ) {
 							$rawDuration = $parameters[0];
-							$rawFlags = isset( $parameters[1] ) ? $parameters[1] : '';
+							$rawFlags = $parameters[1] ?? '';
 						} else {
 							$rawDuration = $parameters['5::duration'];
 							$rawFlags = $parameters['6::flags'];
 						}
-						$duration = $wgContLang->translateBlockExpiry(
+						$duration = $contLang->translateBlockExpiry(
 							$rawDuration,
 							null,
 							wfTimestamp( TS_UNIX, $entry->getTimestamp() )
 						);
-						$flags = BlockLogFormatter::formatBlockFlags( $rawFlags, $wgContLang );
+						$flags = BlockLogFormatter::formatBlockFlags( $rawFlags, $contLang );
 						$text = wfMessage( 'blocklogentry' )
 							->rawParams( $target, $duration, $flags )->inContentLanguage()->escaped();
 						break;
@@ -367,12 +407,13 @@ class LogFormatter {
 							->rawParams( $target )->inContentLanguage()->escaped();
 						break;
 					case 'reblock':
-						$duration = $wgContLang->translateBlockExpiry(
+						$duration = $contLang->translateBlockExpiry(
 							$parameters['5::duration'],
 							null,
 							wfTimestamp( TS_UNIX, $entry->getTimestamp() )
 						);
-						$flags = BlockLogFormatter::formatBlockFlags( $parameters['6::flags'], $wgContLang );
+						$flags = BlockLogFormatter::formatBlockFlags( $parameters['6::flags'],
+							$contLang );
 						$text = wfMessage( 'reblock-logentry' )
 							->rawParams( $target, $duration, $flags )->inContentLanguage()->escaped();
 						break;
@@ -407,6 +448,8 @@ class LogFormatter {
 	/**
 	 * Gets the log action, including username.
 	 * @return string HTML
+	 * phan-taint-check gets very confused by $this->plaintext, so disable.
+	 * @return-taint onlysafefor_html
 	 */
 	public function getActionText() {
 		if ( $this->canView( LogPage::DELETED_ACTION ) ) {
@@ -586,9 +629,13 @@ class LogFormatter {
 				$this->setShowUserToolLinks( false );
 
 				$user = User::newFromName( $value );
-				$value = Message::rawParam( $this->makeUserLink( $user ) );
 
-				$this->setShowUserToolLinks( $saveLinkFlood );
+				if ( !$user ) {
+					$value = $this->msg( 'empty-username' )->text();
+				} else {
+					$value = Message::rawParam( $this->makeUserLink( $user ) );
+					$this->setShowUserToolLinks( $saveLinkFlood );
+				}
 				break;
 			case 'title':
 				$title = Title::newFromText( $value );
@@ -610,20 +657,26 @@ class LogFormatter {
 	/**
 	 * Helper to make a link to the page, taking the plaintext
 	 * value in consideration.
-	 * @param Title $title The page
+	 * @param Title|null $title The page
 	 * @param array $parameters Query parameters
 	 * @param string|null $html Linktext of the link as raw html
-	 * @throws MWException
 	 * @return string
 	 */
 	protected function makePageLink( Title $title = null, $parameters = [], $html = null ) {
-		if ( !$this->plaintext ) {
-			$link = Linker::link( $title, $html, [], $parameters );
-		} else {
-			if ( !$title instanceof Title ) {
-				throw new MWException( "Expected title, got null" );
+		if ( !$title instanceof Title ) {
+			$msg = $this->msg( 'invalidtitle' )->text();
+			if ( $this->plaintext ) {
+				return $msg;
+			} else {
+				return Html::element( 'span', [ 'class' => 'mw-invalidtitle' ], $msg );
 			}
+		}
+
+		if ( $this->plaintext ) {
 			$link = '[[' . $title->getPrefixedText() . ']]';
+		} else {
+			$html = $html !== null ? new HtmlArmor( $html ) : $html;
+			$link = $this->getLinkRenderer()->makeLink( $title, $html, [], $parameters );
 		}
 
 		return $link;
@@ -672,6 +725,7 @@ class LogFormatter {
 	 * Helper method for displaying restricted element.
 	 * @param string $message
 	 * @return string HTML or wiki text
+	 * @return-taint onlysafefor_html
 	 */
 	protected function getRestrictedElement( $message ) {
 		if ( $this->plaintext ) {
@@ -701,12 +755,19 @@ class LogFormatter {
 	/**
 	 * Shortcut for wfMessage which honors local context.
 	 * @param string $key
+	 * @param mixed ...$params
 	 * @return Message
 	 */
-	protected function msg( $key ) {
-		return $this->context->msg( $key );
+	protected function msg( $key, ...$params ) {
+		return $this->context->msg( $key, ...$params );
 	}
 
+	/**
+	 * @param User $user
+	 * @param int $toolFlags Combination of Linker::TOOL_LINKS_* flags
+	 * @return string wikitext or html
+	 * @return-taint onlysafefor_html
+	 */
 	protected function makeUserLink( User $user, $toolFlags = 0 ) {
 		if ( $this->plaintext ) {
 			$element = $user->getName();
@@ -722,7 +783,9 @@ class LogFormatter {
 					$user->getName(),
 					true, // redContribsWhenNoEdits
 					$toolFlags,
-					$user->getEditCount()
+					$user->getEditCount(),
+					// do not render parenthesises in the HTML markup (CSS will provide)
+					false
 				);
 			}
 		}
@@ -775,6 +838,11 @@ class LogFormatter {
 		foreach ( $this->getParametersForApi() as $key => $value ) {
 			$vals = explode( ':', $key, 3 );
 			if ( count( $vals ) !== 3 ) {
+				if ( $value instanceof __PHP_Incomplete_Class ) {
+					wfLogWarning( 'Log entry of type ' . $this->entry->getFullType() .
+						' contains unrecoverable extra parameters.' );
+					continue;
+				}
 				$logParams[$key] = $value;
 				continue;
 			}
@@ -839,10 +907,12 @@ class LogFormatter {
 			case 'title':
 			case 'title-link':
 				$title = Title::newFromText( $value );
-				if ( $title ) {
-					$value = [];
-					ApiQueryBase::addTitleInfo( $value, $title, "{$name}_" );
+				if ( !$title ) {
+					// Huh? Do something halfway sane.
+					$title = SpecialPage::getTitleFor( 'Badtitle', $value );
 				}
+				$value = [];
+				ApiQueryBase::addTitleInfo( $value, $title, "{$name}_" );
 				return $value;
 
 			case 'user':
@@ -859,104 +929,5 @@ class LogFormatter {
 		}
 
 		return [ $name => $value ];
-	}
-}
-
-/**
- * This class formats all log entries for log types
- * which have not been converted to the new system.
- * This is not about old log entries which store
- * parameters in a different format - the new
- * LogFormatter classes have code to support formatting
- * those too.
- * @since 1.19
- */
-class LegacyLogFormatter extends LogFormatter {
-	/**
-	 * Backward compatibility for extension changing the comment from
-	 * the LogLine hook. This will be set by the first call on getComment(),
-	 * then it might be modified by the hook when calling getActionLinks(),
-	 * so that the modified value will be returned when calling getComment()
-	 * a second time.
-	 *
-	 * @var string|null
-	 */
-	private $comment = null;
-
-	/**
-	 * Cache for the result of getActionLinks() so that it does not need to
-	 * run multiple times depending on the order that getComment() and
-	 * getActionLinks() are called.
-	 *
-	 * @var string|null
-	 */
-	private $revert = null;
-
-	public function getComment() {
-		if ( $this->comment === null ) {
-			$this->comment = parent::getComment();
-		}
-
-		// Make sure we execute the LogLine hook so that we immediately return
-		// the correct value.
-		if ( $this->revert === null ) {
-			$this->getActionLinks();
-		}
-
-		return $this->comment;
-	}
-
-	protected function getActionMessage() {
-		$entry = $this->entry;
-		$action = LogPage::actionText(
-			$entry->getType(),
-			$entry->getSubtype(),
-			$entry->getTarget(),
-			$this->plaintext ? null : $this->context->getSkin(),
-			(array)$entry->getParameters(),
-			!$this->plaintext // whether to filter [[]] links
-		);
-
-		$performer = $this->getPerformerElement();
-		if ( !$this->irctext ) {
-			$sep = $this->msg( 'word-separator' );
-			$sep = $this->plaintext ? $sep->text() : $sep->escaped();
-			$action = $performer . $sep . $action;
-		}
-
-		return $action;
-	}
-
-	public function getActionLinks() {
-		if ( $this->revert !== null ) {
-			return $this->revert;
-		}
-
-		if ( $this->entry->isDeleted( LogPage::DELETED_ACTION ) ) {
-			$this->revert = '';
-			return $this->revert;
-		}
-
-		$title = $this->entry->getTarget();
-		$type = $this->entry->getType();
-		$subtype = $this->entry->getSubtype();
-
-		// Do nothing. The implementation is handled by the hook modifiying the
-		// passed-by-ref parameters. This also changes the default value so that
-		// getComment() and getActionLinks() do not call them indefinitely.
-		$this->revert = '';
-
-		// This is to populate the $comment member of this instance so that it
-		// can be modified when calling the hook just below.
-		if ( $this->comment === null ) {
-			$this->getComment();
-		}
-
-		$params = $this->entry->getParameters();
-
-		Hooks::run( 'LogLine', [ $type, $subtype, $title, $params,
-			&$this->comment, &$this->revert, $this->entry->getTimestamp() ] );
-
-		return $this->revert;
 	}
 }

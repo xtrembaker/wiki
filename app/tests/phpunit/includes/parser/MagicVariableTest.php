@@ -9,11 +9,14 @@
  * @author Antoine Musso
  * @copyright Copyright © 2011, Antoine Musso
  * @file
- * @todo covers tags
- *
- * @group Database
  */
 
+use Wikimedia\TestingAccessWrapper;
+
+/**
+ * @group Database
+ * @covers Parser::expandMagicVariable
+ */
 class MagicVariableTest extends MediaWikiTestCase {
 	/**
 	 * @var Parser
@@ -37,10 +40,7 @@ class MagicVariableTest extends MediaWikiTestCase {
 		parent::setUp();
 
 		$contLang = Language::factory( 'en' );
-		$this->setMwGlobals( [
-			'wgLanguageCode' => 'en',
-			'wgContLang' => $contLang,
-		] );
+		$this->setContentLang( $contLang );
 
 		$this->testParser = new Parser();
 		$this->testParser->Options( ParserOptions::newFromUserAndLang( new User, $contLang ) );
@@ -224,7 +224,7 @@ class MagicVariableTest extends MediaWikiTestCase {
 
 		$this->assertSame(
 			$expected,
-			$this->testParser->getVariableValue( $magic ),
+			TestingAccessWrapper::newFromObject( $this->testParser )->expandMagicVariable( $magic ),
 			$msg
 		);
 	}

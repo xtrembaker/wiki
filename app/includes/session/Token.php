@@ -31,11 +31,17 @@ namespace MediaWiki\Session;
  */
 class Token {
 	/** CSRF token suffix. Plus and terminal backslash are included to stop
-	 * editing from certain broken proxies. */
+	 * editing from certain broken proxies.
+	 */
 	const SUFFIX = '+\\';
 
+	/** @var string */
 	private $secret = '';
+
+	/** @var string */
 	private $salt = '';
+
+	/** @var bool */
 	private $new = false;
 
 	/**
@@ -56,7 +62,7 @@ class Token {
 	 * be able to extract the timestamp.
 	 *
 	 * @param string $token
-	 * @param int|null
+	 * @return int|null
 	 */
 	public static function getTimestamp( $token ) {
 		$suffixLen = strlen( self::SUFFIX );

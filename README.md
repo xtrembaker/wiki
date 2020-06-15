@@ -1,12 +1,7 @@
-#Boiler plate stack PHP & MySQL
+# Deployment
 
-##What is this ?
-It is super easy to deploy any-stack on dotCloud, here is a tiny boiler plate to show you how simple and frustration-less dotCloud experience is.  
+To deploy the application, use the following command
 
-##What you get
-In this boiler plate you will find the basic to get a PHP and MySQL stack running:
-* Use of the dotCoud environment
-* Communication with a database, MySQL
-* Advanced `dotCloud.yml` option: `postinstall script to create a new database.
-
-#test
+    cap staging deploy
+    
+Current Capistrano version, see [config/deploy.rb](config/deploy.rb)

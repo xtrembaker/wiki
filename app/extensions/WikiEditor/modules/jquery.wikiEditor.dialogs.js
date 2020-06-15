@@ -1,46 +1,24 @@
 /**
  * Dialog Module for wikiEditor
  */
-( function ( $, mw ) {
+( function () {
 
-	$.wikiEditor.modules.dialogs = {
-
-		/**
-		 * Compatibility map
-		 */
-		browsers: {
-			// Left-to-right languages
-			ltr: {
-				msie: [ [ '>=', 9 ] ],
-				firefox: [ [ '>=', 4 ] ],
-				opera: [ [ '>=', '10.5' ] ],
-				safari: [ [ '>=', 5 ] ],
-				chrome: [ [ '>=', 5 ] ]
-			},
-			// Right-to-left languages
-			rtl: {
-				msie: [ [ '>=', 9 ] ],
-				firefox: [ [ '>=', 4 ] ],
-				opera: [ [ '>=', '10.5' ] ],
-				safari: [ [ '>=', 5 ] ],
-				chrome: [ [ '>=', 5 ] ]
-			}
-		},
+	var dialogsModule = {
 
 		/**
 		 * API accessible functions
 		 */
 		api: {
 			addDialog: function ( context, data ) {
-				$.wikiEditor.modules.dialogs.fn.create( context, data );
+				dialogsModule.fn.create( context, data );
 			},
 			openDialog: function ( context, module ) {
 				var mod, $dialog;
-				if ( module in $.wikiEditor.modules.dialogs.modules ) {
-					mod = $.wikiEditor.modules.dialogs.modules[ module ];
+				if ( module in dialogsModule.modules ) {
+					mod = dialogsModule.modules[ module ];
 					$dialog = $( '#' + mod.id );
 					if ( $dialog.length === 0 ) {
-						$.wikiEditor.modules.dialogs.fn.reallyCreate( context, mod, module );
+						dialogsModule.fn.reallyCreate( context, mod, module );
 						$dialog = $( '#' + mod.id );
 					}
 
@@ -53,8 +31,8 @@
 				}
 			},
 			closeDialog: function ( context, module ) {
-				if ( module in $.wikiEditor.modules.dialogs.modules ) {
-					$( '#' + $.wikiEditor.modules.dialogs.modules[ module ].id ).dialog( 'close' );
+				if ( module in dialogsModule.modules ) {
+					$( '#' + dialogsModule.modules[ module ].id ).dialog( 'close' );
 				}
 			}
 		},
@@ -75,7 +53,7 @@
 				// Defer building of modules, unless they require immediate creation
 				for ( mod in config ) {
 					module = config[ mod ];
-					// Only create the dialog if it's supported, isn't filtered and doesn't exist yet
+					// Only create the dialog if it isn't filtered and doesn't exist yet
 					filtered = false;
 					if ( typeof module.filters !== 'undefined' ) {
 						for ( i = 0; i < module.filters.length; i++ ) {
@@ -92,12 +70,12 @@
 					}
 					// Re-select from the DOM, we might have removed the dialog just now
 					$existingDialog = $( '#' + module.id );
-					if ( !filtered && $.wikiEditor.isSupported( module ) && $existingDialog.length === 0 ) {
-						$.wikiEditor.modules.dialogs.modules[ mod ] = module;
+					if ( !filtered && $existingDialog.length === 0 ) {
+						dialogsModule.modules[ mod ] = module;
 						context.$textarea.trigger( 'wikiEditor-dialogs-setup-' + mod );
 						// If this dialog requires immediate creation, create it now
 						if ( typeof module.immediateCreate !== 'undefined' && module.immediateCreate ) {
-							$.wikiEditor.modules.dialogs.fn.reallyCreate( context, module, mod );
+							dialogsModule.fn.reallyCreate( context, module, mod );
 						}
 					}
 				}
@@ -108,7 +86,7 @@
 			 *
 			 * @param {Object} context Context object of editor dialog belongs to
 			 * @param {Object} module Dialog module object
-			 * @param {string} name Dialog name (key in $.wikiEditor.modules.dialogs.modules)
+			 * @param {string} name Dialog name (key in dialogsModule.modules)
 			 */
 			reallyCreate: function ( context, module, name ) {
 				var msg, $dialogDiv, $content,
@@ -120,7 +98,7 @@
 				if ( typeof configuration.modal === 'undefined' ) {
 					configuration.modal = true;
 				}
-				configuration.title = $.wikiEditor.autoMsg( module, 'title' );
+				configuration.title = $.wikiEditor.autoSafeMsg( module, 'title' );
 				// Transform messages in keys
 				// Stupid JS won't let us do stuff like
 				// foo = { mw.msg( 'bar' ): baz }
@@ -130,8 +108,8 @@
 				}
 				configuration.buttons = configuration.newButtons;
 				if ( module.htmlTemplate ) {
-					$content = mw.template.get( 'jquery.wikiEditor.dialogs.config', module.htmlTemplate ).render();
-				} else if ( module.html instanceof jQuery ) {
+					$content = mw.template.get( 'ext.wikiEditor', module.htmlTemplate ).render();
+				} else if ( module.html instanceof $ ) {
 					$content = module.html;
 				} else {
 					$content = $( $.parseHTML( module.html ) );
@@ -145,14 +123,14 @@
 					.each( module.init )
 					.dialog( configuration );
 				// Set tabindexes on buttons added by .dialog()
-				$.wikiEditor.modules.dialogs.fn.setTabindexes( $dialogDiv.closest( '.ui-dialog' )
+				dialogsModule.fn.setTabindexes( $dialogDiv.closest( '.ui-dialog' )
 					.find( 'button' ).not( '[tabindex]' ) );
 				if ( !( 'resizeme' in module ) || module.resizeme ) {
 					$dialogDiv
-						.on( 'dialogopen', $.wikiEditor.modules.dialogs.fn.resize )
+						.on( 'dialogopen', dialogsModule.fn.resize )
 						.find( '.ui-tabs' ).on( 'tabsshow', function () {
 							$( this ).closest( '.ui-dialog-content' ).each(
-								$.wikiEditor.modules.dialogs.fn.resize );
+								dialogsModule.fn.resize );
 						} );
 				}
 				$dialogDiv.on( 'dialogclose', function () {
@@ -234,4 +212,6 @@
 
 	};
 
-}( jQuery, mediaWiki ) );
+	module.exports = dialogsModule;
+
+}() );

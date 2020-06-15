@@ -24,14 +24,14 @@
  * @author Rob Church <robchur@gmail.com>
  */
 
-use Wikimedia\Rdbms\ResultWrapper;
+use Wikimedia\Rdbms\IResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
  * Special:Listredirects - Lists all the redirects on the wiki.
  * @ingroup SpecialPage
  */
-class ListredirectsPage extends QueryPage {
+class SpecialListRedirects extends QueryPage {
 	function __construct( $name = 'Listredirects' ) {
 		parent::__construct( $name );
 	}
@@ -53,7 +53,6 @@ class ListredirectsPage extends QueryPage {
 			'tables' => [ 'p1' => 'page', 'redirect', 'p2' => 'page' ],
 			'fields' => [ 'namespace' => 'p1.page_namespace',
 				'title' => 'p1.page_title',
-				'value' => 'p1.page_title',
 				'rd_namespace',
 				'rd_title',
 				'rd_fragment',
@@ -76,7 +75,7 @@ class ListredirectsPage extends QueryPage {
 	 * Cache page existence for performance
 	 *
 	 * @param IDatabase $db
-	 * @param ResultWrapper $res
+	 * @param IResultWrapper $res
 	 */
 	function preprocessResults( $db, $res ) {
 		if ( !$res->numRows() ) {
@@ -137,12 +136,17 @@ class ListredirectsPage extends QueryPage {
 			# Make a link to the destination page
 			$lang = $this->getLanguage();
 			$arr = $lang->getArrow() . $lang->getDirMark();
-			$targetLink = $linkRenderer->makeLink( $target );
+			$targetLink = $linkRenderer->makeLink( $target, $target->getFullText() );
 
 			return "$rd_link $arr $targetLink";
 		} else {
 			return "<del>$rd_link</del>";
 		}
+	}
+
+	public function execute( $par ) {
+		$this->addHelpLink( 'Help:Redirects' );
+		parent::execute( $par );
 	}
 
 	protected function getGroupName() {

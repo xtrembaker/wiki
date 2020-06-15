@@ -54,7 +54,7 @@ class ForkController {
 	const RESTART_ON_ERROR = 1;
 
 	public function __construct( $numProcs, $flags = 0 ) {
-		if ( PHP_SAPI != 'cli' ) {
+		if ( !wfIsCLI() ) {
 			throw new MWException( "ForkController cannot be used from the web." );
 		}
 		$this->procsToStart = $numProcs;
@@ -123,6 +123,7 @@ class ForkController {
 				pcntl_signal_dispatch();
 			} else {
 				declare( ticks = 1 ) {
+					// @phan-suppress-next-line PhanPluginDuplicateExpressionAssignment
 					$status = $status;
 				}
 			}
@@ -153,7 +154,6 @@ class ForkController {
 		// Don't share DB, storage, or memcached connections
 		MediaWikiServices::resetChildProcessServices();
 		FileBackendGroup::destroySingleton();
-		LockManagerGroup::destroySingletons();
 		JobQueueGroup::destroySingletons();
 		ObjectCache::clear();
 		RedisConnectionPool::destroySingletons();

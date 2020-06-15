@@ -22,6 +22,8 @@
  * @see wfWaitForSlaves()
  */
 
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\SlotRecord;
 use Wikimedia\Rdbms\DBConnectionError;
 
 require __DIR__ . '/../commandLine.inc';
@@ -86,25 +88,6 @@ class TrackBlobs {
 			exit( 1 );
 		}
 
-		// Scan the archive table for HistoryBlobStub objects or external flags (T24624)
-		$flags = $dbr->selectField( 'archive', 'ar_flags',
-			'ar_flags LIKE \'%external%\' OR (' .
-			'ar_flags LIKE \'%object%\' ' .
-			'AND LOWER(CONVERT(LEFT(ar_text,22) USING latin1)) = \'o:15:"historyblobstub"\' )',
-			__METHOD__
-		);
-
-		if ( strpos( $flags, 'external' ) !== false ) {
-			echo "Integrity check failed: found external storage pointers in your archive table.\n" .
-				"Run normaliseArchiveTable.php to fix this.\n";
-			exit( 1 );
-		} elseif ( $flags ) {
-			echo "Integrity check failed: found HistoryBlobStub objects in your archive table.\n" .
-				"These objects are probably already broken, continuing would make them\n" .
-				"unrecoverable. Run \"normaliseArchiveTable.php --fix-cgz-bug\" to fix this.\n";
-			exit( 1 );
-		}
-
 		echo "Integrity check OK\n";
 	}
 
@@ -140,7 +123,7 @@ class TrackBlobs {
 		return [
 			'cluster' => $m[1],
 			'id' => intval( $m[2] ),
-			'hash' => isset( $m[3] ) ? $m[3] : null
+			'hash' => $m[3] ?? null
 		];
 	}
 
@@ -148,31 +131,53 @@ class TrackBlobs {
 	 *  Scan the revision table for rows stored in the specified clusters
 	 */
 	function trackRevisions() {
+		global $wgMultiContentRevisionSchemaMigrationStage;
+
 		$dbw = wfGetDB( DB_MASTER );
 		$dbr = wfGetDB( DB_REPLICA );
 
 		$textClause = $this->getTextClause();
 		$startId = 0;
-		$endId = $dbr->selectField( 'revision', 'MAX(rev_id)', false, __METHOD__ );
+		$endId = $dbr->selectField( 'revision', 'MAX(rev_id)', '', __METHOD__ );
 		$batchesDone = 0;
 		$rowsInserted = 0;
 
 		echo "Finding revisions...\n";
 
+		$fields = [ 'rev_id', 'rev_page', 'old_id', 'old_flags', 'old_text' ];
+		$options = [
+			'ORDER BY' => 'rev_id',
+			'LIMIT' => $this->batchSize
+		];
+		$conds = [
+			$textClause,
+			'old_flags ' . $dbr->buildLike( $dbr->anyString(), 'external', $dbr->anyString() ),
+		];
+		if ( $wgMultiContentRevisionSchemaMigrationStage & SCHEMA_COMPAT_READ_OLD ) {
+			$tables = [ 'revision', 'text' ];
+			$conds = array_merge( [
+				'rev_text_id=old_id',
+			], $conds );
+		} else {
+			$slotRoleStore = MediaWikiServices::getInstance()->getSlotRoleStore();
+			$tables = [ 'revision', 'slots', 'content', 'text' ];
+			$conds = array_merge( [
+				'rev_id=slot_revision_id',
+				'slot_role_id=' . $slotRoleStore->getId( SlotRecord::MAIN ),
+				'content_id=slot_content_id',
+				'SUBSTRING(content_address, 1, 3)=' . $dbr->addQuotes( 'tt:' ),
+				'SUBSTRING(content_address, 4)=old_id',
+			], $conds );
+		}
+
 		while ( true ) {
-			$res = $dbr->select( [ 'revision', 'text' ],
-				[ 'rev_id', 'rev_page', 'old_id', 'old_flags', 'old_text' ],
-				[
+			$res = $dbr->select( $tables,
+				$fields,
+				array_merge( [
 					'rev_id > ' . $dbr->addQuotes( $startId ),
-					'rev_text_id=old_id',
-					$textClause,
-					'old_flags ' . $dbr->buildLike( $dbr->anyString(), 'external', $dbr->anyString() ),
-				],
+				], $conds ),
 				__METHOD__,
-				[
-					'ORDER BY' => 'rev_id',
-					'LIMIT' => $this->batchSize
-				]
+				$options
 			);
 			if ( !$res->numRows() ) {
 				break;
@@ -227,9 +232,9 @@ class TrackBlobs {
 		$pos = $dbw->getMasterPos();
 		$dbr->masterPosWait( $pos, 100000 );
 
-		$textClause = $this->getTextClause( $this->clusters );
+		$textClause = $this->getTextClause();
 		$startId = 0;
-		$endId = $dbr->selectField( 'text', 'MAX(old_id)', false, __METHOD__ );
+		$endId = $dbr->selectField( 'text', 'MAX(old_id)', '', __METHOD__ );
 		$rowsInserted = 0;
 		$batchesDone = 0;
 
@@ -317,11 +322,12 @@ class TrackBlobs {
 
 		foreach ( $this->clusters as $cluster ) {
 			echo "Searching for orphan blobs in $cluster...\n";
-			$lb = wfGetLBFactory()->getExternalLB( $cluster );
+			$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+			$lb = $lbFactory->getExternalLB( $cluster );
 			try {
-				$extDB = $lb->getConnection( DB_REPLICA );
+				$extDB = $lb->getMaintenanceConnectionRef( DB_REPLICA );
 			} catch ( DBConnectionError $e ) {
-				if ( strpos( $e->error, 'Unknown database' ) !== false ) {
+				if ( strpos( $e->getMessage(), 'Unknown database' ) !== false ) {
 					echo "No database on $cluster\n";
 				} else {
 					echo "Error on $cluster: " . $e->getMessage() . "\n";
@@ -339,7 +345,7 @@ class TrackBlobs {
 			$startId = 0;
 			$batchesDone = 0;
 			$actualBlobs = gmp_init( 0 );
-			$endId = $extDB->selectField( $table, 'MAX(blob_id)', false, __METHOD__ );
+			$endId = $extDB->selectField( $table, 'MAX(blob_id)', '', __METHOD__ );
 
 			// Build a bitmap of actual blob rows
 			while ( true ) {
@@ -356,8 +362,8 @@ class TrackBlobs {
 
 				foreach ( $res as $row ) {
 					gmp_setbit( $actualBlobs, $row->blob_id );
+					$startId = $row->blob_id;
 				}
-				$startId = $row->blob_id;
 
 				++$batchesDone;
 				if ( $batchesDone >= $this->reportingInterval ) {

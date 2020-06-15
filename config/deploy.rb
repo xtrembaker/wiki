@@ -1,10 +1,11 @@
 # config valid only for Capistrano 3.1
-lock '3.10.0'
+lock '3.14.1'
 
 set :application, 'wiki'
 set :repo_url, 'https://github.com/xtrembaker/wiki.git'
 
 # Default branch is :master
+set :branch, 'upgrade-to-1.34.1'
 # ask :branch, proc { `git rev-parse --abbrev-ref HEAD`.chomp }.call
 
 # Default deploy_to directory is /var/www/my_app
