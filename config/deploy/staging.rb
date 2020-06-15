@@ -20,6 +20,9 @@ role :db,  %w{deploy@ns3300957.ip-5-135-157.eu}
 server 'ns3300957.ip-5-135-157.eu', user: 'deploy', roles: %w{web app}, my_property: :my_value
 
 
+# Composer Options
+set :composer_working_dir, -> { "#{fetch(:release_path)}/app" }
+
 # Custom SSH Options
 # ==================
 # You may pass any option but keep in mind that net/ssh understands a
