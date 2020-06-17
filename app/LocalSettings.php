@@ -16,9 +16,14 @@ if ( !defined( 'MEDIAWIKI' ) ) {
 	exit;
 }
 
+use Symfony\Component\Dotenv\Dotenv;
+$dotenv = new Dotenv();
+$dotenv->load(__DIR__.'/.env');
+
 wfLoadSkin( 'Vector' );
 wfLoadSkin( 'MonoBook' );
 wfLoadSkin( 'Timeless' );
+wfLoadExtension( 'AWS' );
 
 $conf_params = getConfParams();
 ## Uncomment this to disable output compression
@@ -78,9 +83,11 @@ $wgMemCachedServers = array();
 
 ## To enable image uploads, make sure the 'images' directory
 ## is writable, then set this to true:
-$wgEnableUploads  = false;
+$wgEnableUploads  = true;
 $wgUseImageMagick = true;
 $wgImageMagickConvertCommand = $conf_params['img_magick_command'];
+$wgAllowCopyUploads = true;
+$wgCopyUploadsFromSpecialUpload = true;
 
 # InstantCommons allows wiki to use images from http://commons.wikimedia.org
 $wgUseInstantCommons  = false;
@@ -94,7 +101,7 @@ $wgShellLocale = "en_US.UTF-8";
 ## create the directories images/archive, images/thumb and
 ## images/temp, and make them all writable. Then uncomment
 ## this, if it's not already uncommented:
-#$wgHashedUploadDirectory = false;
+$wgHashedUploadDirectory = false;
 
 ## Set $wgCacheDirectory to a writable directory on the web server
 ## to make your wiki go slightly faster. The directory should not
@@ -135,9 +142,11 @@ $wgResourceLoaderMaxQueryLength = -1;
 $wgGroupPermissions['*']['edit'] = false;
 $wgGroupPermissions['*']['createaccount'] = false;
 $wgGroupPermissions['*']['read']    = false;
-$wgGroupPermissions['user']['read'] = true;
 $wgGroupPermissions['*']['edit']    = false;
+$wgGroupPermissions['user']['read'] = true;
 $wgGroupPermissions['user']['edit'] = true;
+$wgGroupPermissions['user']['upload'] = true;
+$wgGroupPermissions['user']['upload_by_url'] = true;
 
 function getConfParams(){
     return array(
@@ -192,6 +201,24 @@ function getConfParams(){
  */
 $wgDebugLogFile = "/var/www/wiki/logs/debug-{$wgDBname}.log";
 
+// AWS S3
+
+// Configure AWS credentials.
+// THIS IS NOT NEEDED if your EC2 instance has an IAM instance profile.
+$wgAWSCredentials = [
+    'key' => $_ENV['AWS_ACCESS_KEY_ID'],
+    'secret' => $_ENV['AWS_SECRET_ACCESS_KEY'],
+    'token' => false
+];
+
+$wgAWSRegion = 'eu-west-1'; # Europe (Irlande)
+
+// Replace <something> with the name of your S3 bucket, e.g. wonderfulbali234.
+$wgAWSBucketName = "wiki-xtrembaker-images";
+
+// if your images are stored in directory called "some_prefix"
+// you can specify an optional prefix
+//$wgAWSBucketTopSubdirectory="/some_prefix";
 
 # End of automatically generated settings.
 # Add more configuration options below.

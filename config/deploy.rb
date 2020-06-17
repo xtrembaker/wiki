@@ -1,15 +1,15 @@
-# config valid only for Capistrano 3.1
+# config valid only for Capistrano 3.14.1
 lock '3.14.1'
 
 set :application, 'wiki'
 set :repo_url, 'https://github.com/xtrembaker/wiki.git'
 
 # Default branch is :master
-set :branch, 'master'
+set :branch, 'add-upload-image'
 # ask :branch, proc { `git rev-parse --abbrev-ref HEAD`.chomp }.call
 
 # Default deploy_to directory is /var/www/my_app
-set :deploy_to, '/var/www/wiki'
+set :deploy_to, '/home/www/wiki'
 
 # Default value for :scm is :git
 # set :scm, :git
@@ -35,17 +35,25 @@ set :deploy_to, '/var/www/wiki'
 # Default value for keep_releases is 5
 # set :keep_releases, 5
 
-# namespace :deploy do
-#
-#   desc 'Restart application'
-#   task :restart do
-#     on roles(:app), in: :sequence, wait: 5 do
-#       # Your restart mechanism here, for example:
-#       # execute :touch, release_path.join('tmp/restart.txt')
-#     end
-#   end
-#
-#   after :publishing, :restart
+namespace :deploy do
+
+    desc 'Copy env file'
+    task :copy_env_file do
+        on roles(:app), in: :sequence, wait: 5 do
+            execute :cp, '~/.secrets/.env', "#{release_path}/app/.env"
+        end
+    end
+
+    desc 'Restart application'
+    task :restart do
+        on roles(:app), in: :sequence, wait: 5 do
+          # Your restart mechanism here, for example:
+          execute('sudo /usr/sbin/service php7.3-fpm restart')
+        end
+    end
+
+    after :publishing, :copy_env_file
+    after :copy_env_file, :restart
 #
 #   after :restart, :clear_cache do
 #     on roles(:web), in: :groups, limit: 3, wait: 10 do
@@ -56,4 +64,4 @@ set :deploy_to, '/var/www/wiki'
 #     end
 #   end
 #
-# end
+end
