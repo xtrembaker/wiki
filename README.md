@@ -42,3 +42,19 @@ So, to abstract all of those trouble, I first clone the extensions outside of th
 - I removed the `.gitignore` so I can commit the vendor (I know...)
 - I’ve run `composer install`
 - I moved the folder AWS to this project
+
+# Backup
+
+## DB
+
+To backup DB run the following command on the server:
+
+```
+    mysqldump -uroot -p wikidb | gzip > backup_wikidb_$(date +%Y-%m-%d).sql.gz
+```
+
+To import backup, run the following command inside the `database` container:
+
+```
+    gunzip < backup_wikidb_$(date +%Y-%m-%d).sql.gz | mysql -uroot -p wikidb
+```
