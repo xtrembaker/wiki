@@ -2,3 +2,4 @@
 .dotcloud
 /nbproject/private/
 /.idea*
+/docker/local/db/

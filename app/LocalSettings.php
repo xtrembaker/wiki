@@ -20,12 +20,8 @@ use Symfony\Component\Dotenv\Dotenv;
 $dotenv = new Dotenv();
 $dotenv->load(__DIR__.'/.env');
 
-wfLoadSkin( 'Vector' );
-wfLoadSkin( 'MonoBook' );
-wfLoadSkin( 'Timeless' );
 wfLoadExtension( 'AWS' );
 
-$conf_params = getConfParams();
 ## Uncomment this to disable output compression
 # $wgDisableOutputCompression = true;
 
@@ -41,7 +37,7 @@ $wgScriptPath       = "";
 $wgScriptExtension  = ".php";
 
 ## The protocol and server name to use in fully-qualified URLs
-$wgServer           = $conf_params['server'];
+$wgServer           = $_ENV['SERVER_ADDRESS'];
 
 ## The relative URL path to the skins directory
 $wgStylePath        = "$wgScriptPath/skins";
@@ -64,10 +60,10 @@ $wgEmailAuthentication = true;
 
 ## Database settings
 $wgDBtype           = "mysql";
-$wgDBserver         = $conf_params['host'];
-$wgDBname           = $conf_params['dbName'];
-$wgDBuser           = $conf_params['user'];
-$wgDBpassword       = $conf_params['password'];
+$wgDBserver         = $_ENV['DB_HOST'];
+$wgDBname           = $_ENV['DB_NAME'];
+$wgDBuser           = $_ENV['DB_USER'];
+$wgDBpassword       = $_ENV['DB_PASSWORD'];
 # MySQL specific settings
 $wgDBprefix         = "";
 
@@ -85,7 +81,7 @@ $wgMemCachedServers = array();
 ## is writable, then set this to true:
 $wgEnableUploads  = true;
 $wgUseImageMagick = true;
-$wgImageMagickConvertCommand = $conf_params['img_magick_command'];
+$wgImageMagickConvertCommand = '/usr/bin/convert';
 $wgAllowCopyUploads = true;
 $wgCopyUploadsFromSpecialUpload = true;
 
@@ -113,13 +109,12 @@ $wgLanguageCode = "fr";
 
 $wgSecretKey = "a1460b47389d05322faa44f09db73174d37326e86a8ec80716a302eea7117bf6";
 
+# Changing this will log out all existing sessions.
+$wgAuthenticationTokenVersion = "1";
+
 # Site upgrade key. Must be set to a string (default provided) to turn on the
 # web installer while LocalSettings.php is in place
 $wgUpgradeKey = "1cad3a0c7a42f594";
-
-## Default skin: you can change the default skin. Use the internal symbolic
-## names, ie 'standard', 'nostalgia', 'cologneblue', 'monobook', 'vector':
-$wgDefaultSkin = "timeless";
 
 ## For attaching licensing metadata to pages, and displaying an
 ## appropriate copyright notice / icon. GNU Free Documentation
@@ -131,6 +126,16 @@ $wgRightsIcon = "";
 
 # Path to the GNU diff3 utility. Used for conflict resolution.
 $wgDiff3 = "/usr/bin/diff3";
+
+## Default skin: you can change the default skin. Use the internal symbolic
+## names, ie 'standard', 'nostalgia', 'cologneblue', 'monobook', 'vector':
+$wgDefaultSkin = "timeless";
+
+# Enabled skins.
+# The following skins were automatically enabled:
+wfLoadSkin( 'Vector' );
+wfLoadSkin( 'MonoBook' );
+wfLoadSkin( 'Timeless' );
 
 # Query string length limit for ResourceLoader. You should only set this if
 # your web server has a query string length limit (then set it to that limit),
@@ -147,51 +152,6 @@ $wgGroupPermissions['user']['read'] = true;
 $wgGroupPermissions['user']['edit'] = true;
 $wgGroupPermissions['user']['upload'] = true;
 $wgGroupPermissions['user']['upload_by_url'] = true;
-
-function getConfParams(){
-    return array(
-        'env' => 'production',
-        'user' => 'root',
-        'host' => '127.0.0.1:3306',
-        'password' => 'Wsms=162',
-        'dbName' => 'wikidb',
-        'server' => 'http://wiki-xtrembaker.buzzevent.net',
-        'img_magick_command' => '/usr/bin/convert'
-    );
-//    return array(
-//        'env' => 'dev',
-//        'user' => 'root',
-//        'host' => '127.0.0.1:3306',
-//        'password' => 'Wsms=162',
-//        'dbName' => 'wikidb',
-//        'server' => 'http://wiki.dev',
-//        'img_magick_command' => '/usr/bin/convert'
-//    );
-    //$env_file = '/home/dotcloud/environment.json';
-
-    // Prod
-    /*if(file_exists($env_file) && (false !== $env = json_decode(file_get_contents($env_file)))){
-        return array(
-            'env' => 'production',
-            'user' => $env->DOTCLOUD_DB_MYSQL_LOGIN,
-            'password' => $env->DOTCLOUD_DB_MYSQL_PASSWORD,
-            'host' => $env->DOTCLOUD_DB_MYSQL_HOST.':'.$env->DOTCLOUD_DB_MYSQL_PORT,
-            'dbName' => 'wikidb',
-            'server' => 'http://wiki-xtrembaker.dotcloud.com/',
-            'img_magick_command' => '/usr/bin/convert'
-        );
-    }*/
-    //Dev
-    /*return array(
-        'env' => 'dev',
-        'user' => 'root',
-        'password' => 'Wsms=162',
-        'host' => '127.0.0.1:3306',
-        'dbName' => 'wikidb',
-        'server' => 'http://wiki.dev',
-        'img_magick_command' => '/opt/local/bin/convert'
-    );*/
-}
 
 /**
  * The debug log file must never be publicly accessible because it
@@ -214,7 +174,7 @@ $wgAWSCredentials = [
 $wgAWSRegion = 'eu-west-1'; # Europe (Irlande)
 
 // Replace <something> with the name of your S3 bucket, e.g. wonderfulbali234.
-$wgAWSBucketName = "wiki-xtrembaker-images";
+$wgAWSBucketName = $_ENV['AWS_S3_BUCKET'];
 
 // if your images are stored in directory called "some_prefix"
 // you can specify an optional prefix
