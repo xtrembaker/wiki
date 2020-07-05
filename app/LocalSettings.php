@@ -21,6 +21,7 @@ $dotenv = new Dotenv();
 $dotenv->load(__DIR__.'/.env');
 
 wfLoadExtension( 'AWS' );
+wfLoadExtension( 'WikiEditor' );
 
 ## Uncomment this to disable output compression
 # $wgDisableOutputCompression = true;
