@@ -58,3 +58,10 @@ To import backup, run the following command inside the `database` container:
 ```
     gunzip < backup_wikidb_$(date +%Y-%m-%d).sql.gz | mysql -uroot -p wikidb
 ```
+
+Copy backup to S3
+
+```
+export AWS_PROFILE=wiki
+aws s3 cp $file s3://wiki-xtrembaker-db-backup/$file
+```
