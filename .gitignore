@@ -3,3 +3,4 @@
 /nbproject/private/
 /.idea*
 /docker/local/db/
+/log

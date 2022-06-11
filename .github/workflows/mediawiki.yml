@@ -12,11 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Setup PHP with PECL extension
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '7.3.19'
+
       - name: Install dependencies
-        run: composer install
+        run: |
+          wget https://getcomposer.org/download/1.10.17/composer.phar
+          php composer.phar install
 
       - name: Lint
-        run: composer lint .
+        run: composer.phar lint
 
   deploy:
     if: github.ref == 'refs/heads/master'
