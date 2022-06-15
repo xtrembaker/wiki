@@ -5,7 +5,7 @@ set :application, 'wiki'
 set :repo_url, 'https://github.com/xtrembaker/wiki.git'
 
 # Default branch is :master
-set :branch, 'add-upload-image'
+set :branch, 'master'
 # ask :branch, proc { `git rev-parse --abbrev-ref HEAD`.chomp }.call
 
 # Default deploy_to directory is /var/www/my_app
