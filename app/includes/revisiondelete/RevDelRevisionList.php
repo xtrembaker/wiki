@@ -19,9 +19,15 @@
  * @ingroup RevisionDelete
  */
 
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\HookContainer\HookRunner;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\PageIdentity;
 use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\RevisionStore;
 use Wikimedia\Rdbms\FakeResultWrapper;
 use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\LBFactory;
 
 /**
  * List for revision table items
@@ -33,8 +39,52 @@ use Wikimedia\Rdbms\IDatabase;
  * See RevDelRevisionItem and RevDelArchivedRevisionItem for items.
  */
 class RevDelRevisionList extends RevDelList {
+
+	/** @var LBFactory */
+	private $lbFactory;
+
+	/** @var HookRunner */
+	private $hookRunner;
+
+	/** @var HtmlCacheUpdater */
+	private $htmlCacheUpdater;
+
+	/** @var RevisionStore */
+	private $revisionStore;
+
+	/** @var WANObjectCache */
+	private $wanObjectCache;
+
 	/** @var int */
 	public $currentRevId;
+
+	/**
+	 * @param IContextSource $context
+	 * @param PageIdentity $page
+	 * @param array $ids
+	 * @param LBFactory $lbFactory
+	 * @param HookContainer $hookContainer
+	 * @param HtmlCacheUpdater $htmlCacheUpdater
+	 * @param RevisionStore $revisionStore
+	 * @param WANObjectCache $wanObjectCache
+	 */
+	public function __construct(
+		IContextSource $context,
+		PageIdentity $page,
+		array $ids,
+		LBFactory $lbFactory,
+		HookContainer $hookContainer,
+		HtmlCacheUpdater $htmlCacheUpdater,
+		RevisionStore $revisionStore,
+		WANObjectCache $wanObjectCache
+	) {
+		parent::__construct( $context, $page, $ids, $lbFactory );
+		$this->lbFactory = $lbFactory;
+		$this->hookRunner = new HookRunner( $hookContainer );
+		$this->htmlCacheUpdater = $htmlCacheUpdater;
+		$this->revisionStore = $revisionStore;
+		$this->wanObjectCache = $wanObjectCache;
+	}
 
 	public function getType() {
 		return 'revision';
@@ -53,8 +103,14 @@ class RevDelRevisionList extends RevDelList {
 	}
 
 	public static function suggestTarget( $target, array $ids ) {
-		$rev = Revision::newFromId( $ids[0] );
-		return $rev ? $rev->getTitle() : $target;
+		$revisionRecord = MediaWikiServices::getInstance()
+			->getRevisionLookup()
+			->getRevisionById( $ids[0] );
+
+		if ( $revisionRecord ) {
+			return Title::newFromLinkTarget( $revisionRecord->getPageAsLinkTarget() );
+		}
+		return $target;
 	}
 
 	/**
@@ -63,12 +119,12 @@ class RevDelRevisionList extends RevDelList {
 	 */
 	public function doQuery( $db ) {
 		$ids = array_map( 'intval', $this->ids );
-		$revQuery = Revision::getQueryInfo( [ 'page', 'user' ] );
+		$revQuery = $this->revisionStore->getQueryInfo( [ 'page', 'user' ] );
 		$queryInfo = [
 			'tables' => $revQuery['tables'],
 			'fields' => $revQuery['fields'],
 			'conds' => [
-				'rev_page' => $this->title->getArticleID(),
+				'rev_page' => $this->page->getId(),
 				'rev_id' => $ids,
 			],
 			'options' => [
@@ -99,7 +155,7 @@ class RevDelRevisionList extends RevDelList {
 			return $live;
 		}
 
-		$arQuery = Revision::getArchiveQueryInfo();
+		$arQuery = $this->revisionStore->getArchiveQueryInfo();
 		$archiveQueryInfo = [
 			'tables' => $arQuery['tables'],
 			'fields' => $arQuery['fields'],
@@ -159,10 +215,14 @@ class RevDelRevisionList extends RevDelList {
 	}
 
 	public function getCurrent() {
-		if ( is_null( $this->currentRevId ) ) {
-			$dbw = wfGetDB( DB_MASTER );
+		if ( $this->currentRevId === null ) {
+			$dbw = $this->lbFactory->getMainLB()->getConnectionRef( DB_PRIMARY );
 			$this->currentRevId = $dbw->selectField(
-				'page', 'page_latest', $this->title->pageCond(), __METHOD__ );
+				'page',
+				'page_latest',
+				[ 'page_namespace' => $this->page->getNamespace(), 'page_title' => $this->page->getDBkey() ],
+				__METHOD__
+			);
 		}
 		return $this->currentRevId;
 	}
@@ -172,14 +232,26 @@ class RevDelRevisionList extends RevDelList {
 	}
 
 	public function doPreCommitUpdates() {
-		$this->title->invalidateCache();
+		Title::castFromPageIdentity( $this->page )->invalidateCache();
 		return Status::newGood();
 	}
 
 	public function doPostCommitUpdates( array $visibilityChangeMap ) {
-		$this->title->purgeSquid();
+		$this->htmlCacheUpdater->purgeTitleUrls(
+			$this->page,
+			HtmlCacheUpdater::PURGE_INTENT_TXROUND_REFLECTED
+		);
 		// Extensions that require referencing previous revisions may need this
-		Hooks::run( 'ArticleRevisionVisibilitySet', [ $this->title, $this->ids, $visibilityChangeMap ] );
+		$this->hookRunner->onArticleRevisionVisibilitySet(
+			// @phan-suppress-next-line PhanTypeMismatchArgumentNullable castFrom does not return null here
+			Title::castFromPageIdentity( $this->page ),
+			$this->ids,
+			$visibilityChangeMap
+		);
+		$this->wanObjectCache->touchCheckKey(
+			"RevDelRevisionList:page:{$this->page->getID()}}"
+		);
+
 		return Status::newGood();
 	}
 }

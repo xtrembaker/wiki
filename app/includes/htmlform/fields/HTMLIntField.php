@@ -2,8 +2,15 @@
 
 /**
  * A field that must contain a number
+ *
+ * @stable to extend
  */
 class HTMLIntField extends HTMLFloatField {
+
+	/**
+	 * @inheritDoc
+	 * @stable to override
+	 */
 	public function validate( $value, $alldata ) {
 		$p = parent::validate( $value, $alldata );
 
@@ -17,7 +24,7 @@ class HTMLIntField extends HTMLFloatField {
 		# phone numbers when you know that they are integers (the HTML5 type=tel
 		# input does not require its value to be numeric).  If you want a tidier
 		# value to, eg, save in the DB, clean it up with intval().
-		if ( !preg_match( '/^((\+|\-)?\d+)?$/', trim( $value ) ) ) {
+		if ( !preg_match( '/^((\+|\-)?\d+)?$/', trim( $value ?? '' ) ) ) {
 			return $this->msg( 'htmlform-int-invalid' );
 		}
 

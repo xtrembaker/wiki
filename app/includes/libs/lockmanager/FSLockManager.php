@@ -21,6 +21,8 @@
  * @ingroup LockManager
  */
 
+use Wikimedia\AtEase\AtEase;
+
 /**
  * Simple version of LockManager based on using FS lock files.
  * All locks are non-blocking, which avoids deadlocks.
@@ -56,11 +58,11 @@ class FSLockManager extends LockManager {
 	 * @param array $config Includes:
 	 *   - lockDirectory : Directory containing the lock files
 	 */
-	function __construct( array $config ) {
+	public function __construct( array $config ) {
 		parent::__construct( $config );
 
 		$this->lockDir = $config['lockDirectory'];
-		$this->isWindows = ( strtoupper( substr( PHP_OS, 0, 3 ) ) === 'WIN' );
+		$this->isWindows = ( PHP_OS_FAMILY === 'Windows' );
 	}
 
 	/**
@@ -122,7 +124,7 @@ class FSLockManager extends LockManager {
 			if ( isset( $this->handles[$path] ) ) {
 				$handle = $this->handles[$path];
 			} else {
-				Wikimedia\suppressWarnings();
+				AtEase::suppressWarnings();
 				$handle = fopen( $this->getLockPath( $path ), 'a+' );
 				if ( !$handle && !is_dir( $this->lockDir ) ) {
 					// Create the lock directory in case it is missing
@@ -132,7 +134,7 @@ class FSLockManager extends LockManager {
 						$this->logger->error( "Cannot create directory '{$this->lockDir}'." );
 					}
 				}
-				Wikimedia\restoreWarnings();
+				AtEase::restoreWarnings();
 			}
 			if ( $handle ) {
 				// Either a shared or exclusive lock
@@ -143,7 +145,7 @@ class FSLockManager extends LockManager {
 					$this->handles[$path] = $handle;
 				} else {
 					fclose( $handle );
-					$status->fatal( 'lockmanager-fail-acquirelock', $path );
+					$status->fatal( 'lockmanager-fail-conflict' );
 				}
 			} else {
 				$status->fatal( 'lockmanager-fail-openlock', $path );
@@ -244,9 +246,9 @@ class FSLockManager extends LockManager {
 	}
 
 	/**
-	 * Make sure remaining locks get cleared for sanity
+	 * Make sure remaining locks get cleared
 	 */
-	function __destruct() {
+	public function __destruct() {
 		while ( count( $this->locksHeld ) ) {
 			foreach ( $this->locksHeld as $path => $locks ) {
 				$this->doSingleUnlock( $path, self::LOCK_EX );

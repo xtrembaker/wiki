@@ -15,9 +15,14 @@
 	"timeless-sitetools": "Ferramientes wiki",
 	"timeless-pageactions": "Ferramientes de páxina",
 	"timeless-userpagetools": "Ferramientes de páxina d'usuariu",
+	"timeless-action-addsection": "Nuevu asuntu",
+	"timeless-view-view": "Lleer",
 	"timeless-pagemisc": "Más",
 	"timeless-namespaces": "Espacios de nomes",
 	"timeless-pagetools": "Aiciones de páxina",
 	"timeless-languages": "Llingües",
-	"timeless.js": "/* Cualquier JavaScript que tea equí se cargará pa los usuarios del aspeutu Timeless */"
+	"timeless-projects": "Otros proyeutos",
+	"timeless.js": "/* Cualquier JavaScript que tea equí se cargará pa los usuarios del aspeutu Timeless */",
+	"timeless-view-history": "Historial",
+	"timeless-action-undelete": "Restaurar {{PLURAL:$1|una edición|$1 ediciones}}"
 }

@@ -1,36 +1,32 @@
 <?php
 
-use RemexHtml\Tokenizer\Attributes;
-use RemexHtml\Tokenizer\TokenHandler;
-use RemexHtml\Tokenizer\Tokenizer;
+namespace MediaWiki\Parser;
+
+use Wikimedia\RemexHtml\Tokenizer\Attributes;
+use Wikimedia\RemexHtml\Tokenizer\NullTokenHandler;
 
 /**
+ * Helper class for Sanitizer::stripAllTags().
  * @internal
  */
-class RemexStripTagHandler implements TokenHandler {
+class RemexStripTagHandler extends NullTokenHandler {
+	private $insideNonVisibleTag = false;
 	private $text = '';
 
 	public function getResult() {
 		return $this->text;
 	}
 
-	function startDocument( Tokenizer $t, $fns, $fn ) {
-		// Do nothing.
+	public function characters( $text, $start, $length, $sourceStart, $sourceLength ) {
+		if ( !$this->insideNonVisibleTag ) {
+			$this->text .= substr( $text, $start, $length );
+		}
 	}
 
-	function endDocument( $pos ) {
-		// Do nothing.
-	}
-
-	function error( $text, $pos ) {
-		// Do nothing.
-	}
-
-	function characters( $text, $start, $length, $sourceStart, $sourceLength ) {
-		$this->text .= substr( $text, $start, $length );
-	}
-
-	function startTag( $name, Attributes $attrs, $selfClose, $sourceStart, $sourceLength ) {
+	public function startTag( $name, Attributes $attrs, $selfClose, $sourceStart, $sourceLength ) {
+		if ( $this->isNonVisibleTag( $name ) ) {
+			$this->insideNonVisibleTag = true;
+		}
 		// Inject whitespace for typical block-level tags to
 		// prevent merging unrelated<br>words.
 		if ( $this->isBlockLevelTag( $name ) ) {
@@ -38,20 +34,15 @@ class RemexStripTagHandler implements TokenHandler {
 		}
 	}
 
-	function endTag( $name, $sourceStart, $sourceLength ) {
+	public function endTag( $name, $sourceStart, $sourceLength ) {
+		if ( $this->isNonVisibleTag( $name ) ) {
+			$this->insideNonVisibleTag = false;
+		}
 		// Inject whitespace for typical block-level tags to
 		// prevent merging unrelated<br>words.
 		if ( $this->isBlockLevelTag( $name ) ) {
 			$this->text .= ' ';
 		}
-	}
-
-	function doctype( $name, $public, $system, $quirks, $sourceStart, $sourceLength ) {
-		// Do nothing.
-	}
-
-	function comment( $text, $sourceStart, $sourceLength ) {
-		// Do nothing.
 	}
 
 	// Per https://developer.mozilla.org/en-US/docs/Web/HTML/Block-level_elements
@@ -60,7 +51,7 @@ class RemexStripTagHandler implements TokenHandler {
 	// (although "block-level" is not technically defined for elements that are
 	// new in HTML5).
 	// Structured as tag => true to allow O(1) membership test.
-	private static $BLOCK_LEVEL_TAGS = [
+	private const BLOCK_LEVEL_TAGS = [
 		'address' => true,
 		'article' => true,
 		'aside' => true,
@@ -112,6 +103,28 @@ class RemexStripTagHandler implements TokenHandler {
 	 */
 	private function isBlockLevelTag( $tagName ) {
 		$key = strtolower( trim( $tagName ) );
-		return isset( self::$BLOCK_LEVEL_TAGS[$key] );
+		return isset( self::BLOCK_LEVEL_TAGS[$key] );
 	}
+
+	private const NON_VISIBLE_TAGS = [
+		'style' => true,
+		'script' => true,
+	];
+
+	/**
+	 * Detect block tags which by default are non-visible items.
+	 * Of course css can make anything non-visible,
+	 * but this is still better than nothing.
+	 *
+	 * We use this primarily to hide TemplateStyles
+	 * from output in notifications/emails etc.
+	 *
+	 * @param string $tagName HTML tag name
+	 * @return bool True when tag is a html element which should be filtered out
+	 */
+	private function isNonVisibleTag( $tagName ) {
+		$key = strtolower( trim( $tagName ) );
+		return isset( self::NON_VISIBLE_TAGS[$key] );
+	}
+
 }

@@ -1,7 +1,7 @@
 <?php
 
 use MediaWiki\Linker\LinkRenderer;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\MainConfigNames;
 
 /**
  * @covers RCCacheEntryFactory
@@ -22,20 +22,13 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 	 */
 	private $linkRenderer;
 
-	public function __construct( $name = null, array $data = [], $dataName = '' ) {
-		parent::__construct( $name, $data, $dataName );
-
-		$this->testRecentChangesHelper = new TestRecentChangesHelper();
-	}
-
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( [
-			'wgArticlePath' => '/wiki/$1'
-		] );
+		$this->overrideConfigValue( MainConfigNames::ArticlePath, '/wiki/$1' );
 
-		$this->linkRenderer = MediaWikiServices::getInstance()->getLinkRenderer();
+		$this->linkRenderer = $this->getServiceContainer()->getLinkRenderer();
+		$this->testRecentChangesHelper = new TestRecentChangesHelper();
 	}
 
 	public function testNewFromRecentChange() {
@@ -59,10 +52,10 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 
 		$this->assertInstanceOf( RCCacheEntry::class, $cacheEntry );
 
-		$this->assertEquals( false, $cacheEntry->watched, 'watched' );
+		$this->assertFalse( $cacheEntry->watched, 'watched' );
 		$this->assertEquals( '21:21', $cacheEntry->timestamp, 'timestamp' );
 		$this->assertSame( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
-		$this->assertEquals( false, $cacheEntry->unpatrolled, 'unpatrolled' );
+		$this->assertFalse( $cacheEntry->unpatrolled, 'unpatrolled' );
 
 		$this->assertUserLinks( $user->getName(), $cacheEntry );
 		$this->assertTitleLink( 'Xyz', $cacheEntry );
@@ -94,10 +87,10 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 
 		$this->assertInstanceOf( RCCacheEntry::class, $cacheEntry );
 
-		$this->assertEquals( false, $cacheEntry->watched, 'watched' );
+		$this->assertFalse( $cacheEntry->watched, 'watched' );
 		$this->assertEquals( '21:21', $cacheEntry->timestamp, 'timestamp' );
 		$this->assertSame( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
-		$this->assertEquals( false, $cacheEntry->unpatrolled, 'unpatrolled' );
+		$this->assertFalse( $cacheEntry->unpatrolled, 'unpatrolled' );
 
 		$this->assertDeleteLogLink( $cacheEntry );
 		$this->assertUserLinks( $user->getName(), $cacheEntry );
@@ -128,10 +121,10 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 
 		$this->assertInstanceOf( RCCacheEntry::class, $cacheEntry );
 
-		$this->assertEquals( false, $cacheEntry->watched, 'watched' );
+		$this->assertFalse( $cacheEntry->watched, 'watched' );
 		$this->assertEquals( '21:21', $cacheEntry->timestamp, 'timestamp' );
 		$this->assertSame( 0, $cacheEntry->numberofWatchingusers, 'watching users' );
-		$this->assertEquals( false, $cacheEntry->unpatrolled, 'unpatrolled' );
+		$this->assertFalse( $cacheEntry->unpatrolled, 'unpatrolled' );
 
 		$this->assertRevDel( $cacheEntry );
 		$this->assertTitleLink( 'Zzz', $cacheEntry );
@@ -143,7 +136,7 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 
 	private function assertValidHTML( $actual ) {
 		// Throws if invalid
-		$doc = PHPUnit_Util_XML::load( $actual, /* isHtml */ true );
+		$doc = \PHPUnit\Util\Xml::load( $actual, /* isHtml */ true );
 	}
 
 	private function assertUserLinks( $user, $cacheEntry ) {
@@ -229,7 +222,7 @@ class RCCacheEntryFactoryTest extends MediaWikiLangTestCase {
 		$user = $this->getMutableTestUser()->getUser();
 		$context = $this->testRecentChangesHelper->getTestContext( $user );
 
-		$title = Title::newFromText( 'RecentChanges', NS_SPECIAL );
+		$title = Title::makeTitle( NS_SPECIAL, 'RecentChanges' );
 		$context->setTitle( $title );
 
 		return $context;

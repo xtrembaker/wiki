@@ -16,21 +16,19 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Profiler
  */
-
 namespace Wikimedia\Rdbms;
 
 /**
  * Lazy-loaded wrapper for simplification and scrubbing of SQL queries for profiling
  *
  * @since 1.34
+ * @ingroup Profiler
+ * @ingroup Database
  */
 class GeneralizedSql {
 	/** @var string */
 	private $rawSql;
-	/** @var string */
-	private $trxId;
 	/** @var string */
 	private $prefix;
 
@@ -39,12 +37,10 @@ class GeneralizedSql {
 
 	/**
 	 * @param string $rawSql
-	 * @param string $trxId
 	 * @param string $prefix
 	 */
-	public function __construct( $rawSql, $trxId, $prefix ) {
+	public function __construct( $rawSql, $prefix ) {
 		$this->rawSql = $rawSql;
-		$this->trxId = $trxId;
 		$this->prefix = $prefix;
 	}
 
@@ -87,9 +83,12 @@ class GeneralizedSql {
 		}
 
 		$this->genericSql = $this->prefix .
-			substr( self::generalizeSQL( $this->rawSql ), 0, 255 ) .
-			( $this->trxId ? " [TRX#{$this->trxId}]" : "" );
+			substr( self::generalizeSQL( $this->rawSql ), 0, 255 );
 
 		return $this->genericSql;
+	}
+
+	public function getRawSql() {
+		return $this->rawSql;
 	}
 }

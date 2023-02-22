@@ -1,6 +1,8 @@
 <?php
 /**
  * Wrapper for ChangeTags::buildTagFilterSelector to use in HTMLForm
+ *
+ * @stable to extend
  */
 class HTMLTagFilter extends HTMLFormField {
 	protected $tagFilter;
@@ -46,5 +48,9 @@ class HTMLTagFilter extends HTMLFormField {
 			return $this->tagFilter[1];
 		}
 		return '';
+	}
+
+	protected function shouldInfuseOOUI() {
+		return true;
 	}
 }

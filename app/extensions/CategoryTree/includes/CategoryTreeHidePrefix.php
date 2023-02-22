@@ -22,18 +22,20 @@
  * @author Daniel Kinzler, brightbyte.de
  */
 
+namespace MediaWiki\Extension\CategoryTree;
+
 /**
  * Constants for use with the hideprefix option,
  * defining when the namespace prefix should be hidden.
  */
 class CategoryTreeHidePrefix {
 
-	const NEVER = 0;
+	public const NEVER = 0;
 
-	const ALWAYS = 10;
+	public const ALWAYS = 10;
 
-	const CATEGORIES = 20;
+	public const CATEGORIES = 20;
 
-	const AUTO = 30;
+	public const AUTO = 30;
 
 }

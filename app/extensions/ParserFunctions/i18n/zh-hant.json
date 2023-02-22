@@ -1,6 +1,7 @@
 {
 	"@metadata": {
 		"authors": [
+			"Cwlin0416",
 			"Gaoxuewei",
 			"Justincheng12345",
 			"Liangent",
@@ -8,10 +9,10 @@
 			"Shinjiman",
 			"Simon Shek",
 			"Waihorace",
-			"Cwlin0416"
+			"Lakejason0"
 		]
 	},
-	"pfunc_desc": "加強分析器，提供邏輯函數功能",
+	"pfunc_desc": "加強解析器，提供邏輯函數功能",
 	"pfunc_time_error": "錯誤：無效時間。",
 	"pfunc_time_too_long": "錯誤：過多 #time 呼叫。",
 	"pfunc_time_too_big": "錯誤：#time 支援上限為 9999 年。",

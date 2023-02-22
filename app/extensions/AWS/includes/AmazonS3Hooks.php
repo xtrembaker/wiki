@@ -69,7 +69,7 @@ class AmazonS3Hooks {
 	 */
 	protected function replaceLocalRepo() {
 		global $wgFileBackends, $wgLocalFileRepo, $wgAWSRepoHashLevels,
-			$wgAWSRepoDeletedHashLevels;
+			$wgAWSRepoDeletedHashLevels, $wgImgAuthPath;
 
 		/* Needed zones */
 		$zones = [ 'public', 'thumb', 'deleted', 'temp' ];
@@ -79,7 +79,7 @@ class AmazonS3Hooks {
 			'class'             => 'LocalRepo',
 			'name'              => 'local',
 			'backend'           => 'AmazonS3',
-			'url'               => wfScript( 'img_auth' ),
+			'url'               => $wgImgAuthPath ?: wfScript( 'img_auth' ),
 			'hashLevels'        => $wgAWSRepoHashLevels,
 			'deletedHashLevels' => $wgAWSRepoDeletedHashLevels,
 			'zones'             => array_fill_keys( $zones, [ 'url' => false ] )
@@ -100,8 +100,8 @@ class AmazonS3Hooks {
 			}
 		}
 
-		// Container names are prefixed by wfWikiID(), which depends on $wgDBPrefix and $wgDBname.
-		$wikiId = wfWikiID();
+		// Container names are prefixed by WikiId string, which depends on $wgDBPrefix and $wgDBname.
+		$wikiId = WikiMap::getCurrentWikiId();
 		$containerPaths = [];
 		foreach ( $zones as $zone ) {
 			$containerPaths["$wikiId-local-$zone"] = $this->getContainerPath( $zone );
@@ -223,6 +223,10 @@ class AmazonS3Hooks {
 			$domain
 		);
 
-		return 'https://' . $domain . $this->getS3RootDir( $zone );
+		if ( !preg_match( '@^https?://@', $domain ) ) {
+			$domain = 'https://' . $domain;
+		}
+
+		return $domain . $this->getS3RootDir( $zone );
 	}
 }

@@ -1,6 +1,7 @@
 <?php
 
 use MediaWiki\Auth\AuthenticationRequest;
+use MediaWiki\Extension\ConfirmEdit\Auth\CaptchaAuthenticationRequest;
 
 /**
  * Authentication request for ReCaptcha v2. Unlike the parent class, no session storage is used
@@ -8,14 +9,20 @@ use MediaWiki\Auth\AuthenticationRequest;
  */
 class ReCaptchaNoCaptchaAuthenticationRequest extends CaptchaAuthenticationRequest {
 	public function __construct() {
-		parent::__construct( null, null );
+		parent::__construct( '', [] );
 	}
 
+	/**
+	 * @inheritDoc
+	 */
 	public function loadFromSubmission( array $data ) {
 		// unhack the hack in parent
 		return AuthenticationRequest::loadFromSubmission( $data );
 	}
 
+	/**
+	 * @inheritDoc
+	 */
 	public function getFieldInfo() {
 		$fieldInfo = parent::getFieldInfo();
 

@@ -16,11 +16,12 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Language
  */
 
 /**
  * Interface for localizing messages in MediaWiki
+ *
+ * @stable to implement
  *
  * @since 1.30
  * @ingroup Language

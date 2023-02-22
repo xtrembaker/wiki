@@ -1,12 +1,264 @@
 # MediaWiki-Codesniffer release history #
 
+## 38.0.0 / 2021-10-21 ##
+### Changed sniffs ###
+* `AssertionOrderSniff`: Expand for slightly more complex cases (DannyS712)
+* `FunctionCommentSniff`: Validate @return annotations of abstract methods (Tpt)
+
+### Documentation, dependencies and build changes ###
+* build: Update squizlabs/php_codesniffer to 3.6.1 (Alexander Vorwerk)
+* build: Updating composer dependencies (libraryupgrader)
+* Drop GerritRobotComments PHPCS report (Gergő Tisza)
+
+
+## 37.0.0 / 2021-07-16 ##
+### New sniffs ###
+* Enable `PSR12.Functions.ReturnTypeDeclaration` for typehint spacing (DannyS712 & Daimona Eaytoy)
+
+### Changed sniffs ###
+* `AssertCountSniff`: Allow manual `count` on both sides (DannyS712)
+* `DocumentationTypeTrait`: Complain about `type` as a type (DannyS712)
+* `FunctionCommentSniff`: Also skip `{@inheritDoc}` (DannyS712)
+* `PrefixedGlobalFunctionsSniff`: Allow configuring prefixes (DannyS712)
+* `PrefixedGlobalFunctionsSniff`: Drop `ef` from default prefixes (DannyS712)
+* `RedundantVarNameSniff`: Also check static properties (DannyS712)
+* `UnsortedUseStatementsSniff`: Add support for bracketed namespaces (DannyS712)
+* `UnusedUseStatementSniff`: Add support for bracketed namespaces (DannyS712)
+
+### Documentation, dependencies and build changes ###
+* Add Gerrit report format (Gergő Tisza)
+* Add fix reporting to Gerrit robot comment reporter (Gergő Tisza)
+* `FullQualifiedClassNameSniff`: Fix docs typo (relly -> really) (DannyS712)
+* `LowerCamelFunctionsNameSniff`: Minor clean up (DannyS712)
+* `UnsortedUseStatementsSniff`: add early returns (DannyS712)
+* internal: Remove spaces before return typehints in existing code (DannyS712)
+* build: Update php-parallel-lint/php-parallel-lint (Umherirrender)
+
+
+## 36.0.0 / 2021-04-28 ##
+### New sniffs ###
+* Enable `PSR2.ControlStructures.SwitchDeclaration` (re-apply) (James D. Forrester)
+* Add `SetMethodsSniff` for PHPUnit tests using MockBuilder::setMethods (Daimona Eaytoy)
+* Enable `Generic.WhiteSpace.LanguageConstructSpacing` (Umherirrender)
+* Add `StaticClosureSniff` (Umherirrender)
+
+### Changed sniffs ###
+* `SpaceBeforeBracketSniff`: Fix newline handling (DannyS712)
+* `DirUsageSniff`: Check strings outside of classes (DannyS712)
+* `PHPUnitTestTrait`: Cache `::isTestFile()` results (Thiemo Kreuz)
+* `AlphabeticArraySortSniff`: Preserve tabs when autofixing (Umherirrender)
+* `FunctionAnnotationsSniff`: Recognize more phpunit annotations (DannyS712)
+* `FinalPrivateSniff`: Combine two early returns (Umherirrender)
+* `ValidGlobalNameSniff`: Fix quotes around expected names (DannyS712)
+* `SpecificAssertionsSniff`: Fix order of assertStringContainsString parameters (DannyS712)
+* `UnusedUseStatement`: Add support for understanding multiple namespaces (Thiemo Kreuz)
+* `MediaWiki/Sniffs/Commenting/*`: Fix false positive for Java-style `array<int, string>` types (Thiemo Kreuz)
+* `MediaWiki/Sniffs/Commenting/*`: Move helper to `DocumentationTypeTrait` and re-use more often (Thiemo Kreuz)
+* `MediaWiki/Sniffs/Commenting/*`:Fix spacing around exception type on `@throws` tag (Umherirrender)
+* `UnusedUseStatement`: Fix support for Java-style `array<int, string>` (Thiemo Kreuz)
+* `UnusedUseStatement`: Add support for Java-style arrays in `@phan-var` (Thiemo Kreuz)
+* `SpaceyParenthesisSniff`: Fix error message for long array case (Umherirrender)
+* `ForbiddenFunctionsSniff`: Warn about use of define() with deprecated third argument (Umherirrender)
+* `UnusedUseStatementSniff`: Add support for phan annotations (Umherirrender)
+* `UnusedUseStatementSniff`: Micro-optimizations (Daimona Eaytoy)
+* `UnusedUseStatementSniff`: Include class names in messages (Lucas Werkmeister)
+* `UnsortedUseStatementsSniff`: Fix loop on live coding/incomplete code (Umherirrender)
+* `SpaceBeforeBracketSniff`: Remove special check (Umherirrender)
+* `DocCommentSniff`: Remove SpacingDocTag for no-spaces before @param (Umherirrender)
+* `FunctionCommentSniff`: Rename and remove variables (Umherirrender)
+* `ValidGlobalNameSniff`: Allow non-two-characters prefixes for global variables (Alexander Mashin)
+* `ValidGlobalNameSniff`: Don't return on first valid name (DannyS712)
+* `MediaWiki.Usage.DeprecatedConstantUsage`: Replace DB_MASTER from 1.35.3+ (James D. Forrester)
+
+### Documentation, dependencies and build changes ###
+* build: Updating mediawiki/minus-x to 1.1.1 (libraryupgrader)
+* internal: Use static closures (Umherirrender)
+* Use neutral language (Reedy)
+* Fix PSR-4 autoloading for composer 2.0 (Reedy)
+* internal: Fix doc type for token argument in SpaceyParenthesisSniff (Umherirrender)
+* Remove reference to T_RETURN_TYPE (Umherirrender)
+* internal: Use param and return type hint on non-inherited functions (Umherirrender)
+* internal: Add return type hint to Sniff::register implementation (Umherirrender)
+* build: Update squizlabs/php_codesniffer to 3.6.0 (Umherirrender)
+* Improve performance of exclude-pattern in ruleset.xml (Umherirrender)
+* build: Split scripts in composer.json from "composer test" (Umherirrender)
+* README: Add Configuration section to document adjustable sniffs (Umherirrender)
+
+### Test coverage ###
+* Test nested but not `in_array` branch in `InArrayUsageSniff` (Umherirrender)
+* Test `RedundantVarNameSniff` (Umherirrender)
+* Test bad `@phan-var` in `UnusedUseStatementSniff` (Umherirrender)
+* Test `ClassLevelLicenseSniff` (Umherirrender)
+* Test spacing around `@var` in `PropertyDocumentationSniff` (Umherirrender)
+* Test doc comment does not belongs to function in `PhpunitAnnotationsSniff` (Umherirrender)
+* Test missing scope branch in `SpaceBeforeClassBraceSniff` (Umherirrender)
+* Test empty comment branch in `SpaceBeforeSingleLineCommentSniff` (Umherirrender)
+* Test namespaced function `is_null` in `IsNullSniff` (Umherirrender)
+* Test nested parenthesis in arguments in ForbiddenFunctionsSniff (Umherirrender)
+* Add newline test to IfElseStructureSniff (Umherirrender)
+* Test non-parenthesis branch in DirUsageSniff (Umherirrender)
+* Add newline test to WhiteSpaceBeforeFunction (Umherirrender)
+* Test non-parenthesis branch in DeprecatedPHPUnitMethodsSniff (Umherirrender)
+* Test ValidGlobalNameSniff with multi prefixes (Umherirrender)
+* Test PrefixedGlobalFunctionsSniff with ignore list (Umherirrender)
+* Test non-parenthesis and complex value branch in SpecificAssertionsSniff (Umherirrender)
+* Test non-parenthesis and complex value branch in AssertionOrderSniff (Umherirrender)
+* Test non-parenthesis branch in AssertCountSniff (Umherirrender)
+* Add test for ExtensionInfo util class (Umherirrender)
+* Test non-parenthesis branch in OpeningKeywordParenthesisSniff (Umherirrender)
+* Test for param name and duplicate @return in FunctionCommentSniff (Umherirrender)
+* Test edge case in PlusStringConcatSniff (Umherirrender)
+* Test edge case in AlphabeticArraySortSniff (Umherirrender)
+* Test edge case in VariadicArgumentSniff (Umherirrender)
+* Test edge cases in UnicodeEscapeSniff (Umherirrender)
+* Test edge cases in UnusedUseStatementSniff (Umherirrender)
+* Add test for index error in AssignmentInReturnSniff (Thiemo Kreuz)
+
+
+## 35.0.0 / 2021-01-28 ##
+### New sniffs ###
+* Add `AssertCountSniff` to warn when using `assertEquals` or `assertSame` with the results of `count` (DannyS712)
+* Add `AssertionOrderSniff` for PHPUnit assertions in the wrong order (DannyS712)
+* Add `MissingElseBetweenBracketsSniff` to error when `}` is followed by `{` (Majavah)
+* Add `SpaceBeforeBracketSniff` for spaces between variable and array offset (DannyS712)
+* Add `SpecificAssertionsSniff` to encourage dedicated, simpler PHPUnit assertions (DannyS712)
+* Add `WhiteSpaceBeforeFunctionSniff` for whitespace in function signatures (DannyS712)
+* Enable `PSR2.Classes.PropertyDeclaration.Multiple` (DannyS712)
+
+### Changed sniffs ###
+* Move `AssertEqualsSniff`, `DeprecatedPHPUnitMethodsSniff`, `PHPUnitClassUsageSniff`, and `PHPUnitTypeHintsSniff` to new `MediaWiki.PHPUnit` group (DannyS712)
+* `AssertEqualsSniff`: Whitespace handling clean-up (DannyS712)
+* `AssignmentInReturnSniff`: Check for yield (Umherirrender)
+* `EmptyTagSniff`: Also check the `@access`, `@author`, `@dataProvider`, `@depends`, `@group`, `@license`, `@link`, `@since`, and `@suppress` tags (DannyS712)
+* `EmptyTagSniff`: Re-write for performance (Thiemo Kreuz)
+* `ExtendClassUsageSniff`: Add sub classes of `IndexPager` to `ContextSource` checks (Umherirrender)
+* `ExtendClassUsageSniff`: Fix variable name: `$eligableFunc` -> `$eligibleFunc` (Ammarpad)
+* `ExtendClassUsageSniff`: Improve documentation (Ammarpad)
+* `ForbiddenFunctionsSniff`: Add `compact()` as opposite of forbidden `extract()` (Umherirrender)
+* `FunctionAnnotationsSniff`: Add `@uses` (Umherirrender)
+* `FunctionCommentSniff`, `PropertyDocumentationSniff`: Allow parenthesis as punctuation (Umherirrender)
+* `FunctionCommentSniff`, `PropertyDocumentationSniff`: Have sniff convert upper case `NULL` to `null` (Umherirrender)
+* `FunctionCommentSniff`, `PropertyDocumentationSniff`: Update error message about "object" type hints (Thiemo Kreuz)
+* `FunctionCommentSniff`: Allow intersection types (Umherirrender)
+* `FunctionCommentSniff`: Check `@param`/`@return` on files ending in …Test.php (Umherirrender)
+* `FunctionCommentSniff`: Check for yield when looking for `@return` (Umherirrender)
+* `FunctionCommentSniff`: Expand `FunctionCommentSniff::SKIP_STANDARD_METHODS` (Umherirrender)
+* `FunctionCommentSniff`: Improve check for test function (Umherirrender)
+* `FunctionCommentSniff`: Require `@return` on doc block when return type hint is used (Umherirrender)
+* `LicenseCommentSniff`: Handle possible whitespace in license names (Umherirrender)
+* `LowerCamelFunctionsNameSniff`: Use `PHPUnitTestTrait` (Umherirrender)
+* `MissingVarType`: Use camelCase for error type (Umherirrender)
+* `ParenthesesAroundKeywordSniff`: Re-write to fix whitespace handling (Umherirrender)
+* `PropertyDocumentationSniff`: Add checks for `object` and `object[]` in `@var` documentation (Umherirrender)
+* `PropertyDocumentationSniff`: Check and require `@var` on files ending in …Test.php (Umherirrender)
+* `SuperGlobalsUsageSniff`: Forbid use of super global `$_FILES` (Umherirrender)
+* `UnusedUseStatementSniff`: Remove left over semicolons (Umherirrender)
+* Avoid slow `strcasecmp()` where not necessary (Thiemo Kreuz)
+* Add and use `PHPUnitTestTrait` to limit specific sniffs to code in PHPUnit tests (DannyS712)
+* Fix performance bottleneck in PHPUnit assert sniffs (Thiemo Kreuz)
+
+### Documentation, dependencies and build changes ###
+* build: Updating `mediawiki/mediawiki-phan-config` to 0.10.5 (DannyS712)
+* build: Updating `mediawiki/mediawiki-phan-config` to 0.10.6 (libraryupgrader)
+* Bump `composer/semver` versions (Reedy)
+* Make all single-line comments use the `// phpcs:… syntax` (Thiemo Kreuz)
+* HISTORY.md: Add 19.x point release entries (Reedy)
+
+
+## 19.4.0 / 2021-01-12 ##
+* Replace jakub-onderka/* with php-parallel-lint/* (Reedy)
+
+
+## 19.3.0 / 2021-01-12 ##
+* Add tab-width=4 and increase line length to 120 (Sam Wilson)
+
+
+## 34.0.0 / 2020-12-05
+
+### New and changed sniffs ###
+* Add `FinalPrivateSniff` (DannyS712)
+* `FunctionCommentSniff`: Check `object` and `object[]` on union type and after fixes (Umherirrender)
+* `PropertyDocumentationSniff`: Allow `@inheritDoc` to be valid documentation of class properties (Umherirrender)
+* `PropertyDocumentationSniff`: Move `EmptySees` check to `EmptyTagSniff` (Umherirrender)
+* Use lowercase `callable`/`callable[]` type hints in `@param`/`@return`/`@var` (Umherirrender)
+
+### Documentation, dependencies and build changes ###
+* Update `composer/semver` constraints (Reedy)
+* build: Updating mediawiki/mediawiki-phan-config to 0.10.4 (Umherirrender)
+* Fix rule name in HISTORY.md (Lucas Werkmeister)
+
+
+## 33.0.0 / 2020-10-30
+
+### New and changed sniffs ###
+* Re-disable `PSR2.ControlStructures.SwitchDeclaration` (enabled in v32.0.0) due to poor fixer (James D. Forrester)
+* Add `MediaWiki.Commenting.ClassLevelLicense` from WikibaseCodeSniffer (Thiemo Kreuz)
+* `FunctionCommentSniff`: Expand to error on `object[]` typehints (DannyS712)
+
+
+## 32.0.0 / 2020-10-26
+
+### New and changed sniffs ###
+* Enable `PSR12.Functions.NullableTypeDeclaration` (Umherirrender)
+* Enable `PSR2.ControlStructures.SwitchDeclaration` (Ed Sanders)
+* Enable `Generic.ControlStructures.DisallowYodaConditions` (Ed Sanders)
+* Add RedundantVarNameSniff from WikibaseCodeSniffer (Thiemo Kreuz)
+* Add AlphabeticArraySortSniff based on presence of `@phpcs-require-sorted-array` tags (Umherirrender)
+* Add UnaryMinusSpacing to remove spaces after unary minus (DannyS712)
+* `RedundantVarNameSniff`: Add understanding of legacy "var" keyword (Thiemo Kreuz)
+* `NullableTypeSniff`: Fix handling of nullable type with default null (Arlo Breault)
+* `UnusedGlobalVariablesSniff`: add support for closures (Umherirrender)
+* `ExtendClassUsageSniff`: Expand subclasses of ContextSource and SpecialPage (DannyS712)
+* `ForbiddenFunctionsSniff`: Disallow is_resource() (Kunal Mehta)
+* `ForbiddenFunctionsSniff`: Disallow diskfreespace(), ini_alter(), and strchr() (Thiemo Kreuz)
+* `FullQualifiedClassNameSniff`: Optional sniff that enforces using `use` statements (Thiemo Kreuz)
+* `FunctionCommentSniff`: Handle empty type when adding null default (Umherirrender)
+* `FunctionCommentSniff`: Fix handling of nullable doc with nullable type and default null (Arlo Breault)
+* `FunctionCommentSniff`: Enforce lowercase primitive types (DannyS712)
+* `FunctionCommentSniff`: Error on `object` typehints (DannyS712)
+* Move FunctionCommentSniff annotation checks to FunctionAnnotationSniff (DannyS712)
+* Move FunctionCommentSniff EmptySees check to new EmptyTagSniff (DannyS712)
+* `FunctionAnnotationsSniff`: Normalize @exception to @throws (Umherirrender)
+* `FunctionAnnotationsSniff`: Allow `@beforeClass` and `@afterClass` (Timo Tijhof)
+* `FunctionAnnotationsSniff`: Allow @noinspection (DannyS712)
+* `IsNullSniff`: handle backslash-prefixed is_null usage (Michael Moll)
+* `MisleadingGlobalNamesSniff`: Add a sniff for `$wg*` variables that aren't globals (DannyS712)
+* `PHPUnitAssertEqualsSniff`: Report particularly confusing assertNotEquals( false ) (Thiemo Kreuz)
+* `PropertyDocumentationSniff`: Add to validate @var on class properties (Umherirrender)
+* `UnusedUseStatementSniff`: Recognize used classes even if variable/type in a tag are flipped (Thiemo Kreuz)
+* `UnusedUseStatementSniff`: Detect uses in @see tags (Gergő Tisza)
+* Support PHP 8's T_NULLSAFE_OBJECT_OPERATOR (Umherirrender)
+
+### Code cleanup and testing ###
+* Simplify IfElseStructureSniff (Umherirrender)
+* Fix possible index error in ParenthesesAroundKeywordSniff (Thiemo Kreuz)
+* Fix possible index error in SpaceyParenthesisSniff (Thiemo Kreuz)
+* Fix possible index error in SpaceAfterControlStructureSniff (Thiemo Kreuz)
+* Fix possible index error in ReferenceThisSniff (Thiemo Kreuz)
+* Fix ValidGlobalNameSniff possibly running in an endless loop (Thiemo Kreuz)
+* Fix one more index error in ParenthesesAroundKeywordSniff (Thiemo Kreuz)
+* Significant simplification of UnusedGlobalVariables sniff (Thiemo Kreuz)
+* Full rewrite of the UnsortedUseStatementsSniff (Thiemo Kreuz)
+* Set tab width correctly in test runner (Ed Sanders)
+* Fix handling of comment string for MissingReturnType (Umherirrender)
+
+### Documentation, dependencies and build changes ###
+* Relax composer/semver constraint (Reedy)
+* Replaced jakub-onderka/php-parallel-lint with php-parallel-lint/php-parallel-lint and updated to 1.2.0 (Umherirrender)
+* Replaced jakub-onderka/php-console-highlighter with php-parallel-lint/php-console-highlighter and updated to 0.5.0 (Umherirrender)
+* Update mediawiki/minus-x to 1.1.0 (Umherirrender)
+* Update squizlabs/php_codesniffer to 3.5.8 (Umherirrender)
+* Update mediawiki/mediawiki-phan-config to 0.10.3 (libraryupgrader)
+* Declare type `phpcodesniffer-standard` in composer.json (DannyS712)
+
+
 ## 31.0.0 / 2020-06-22
 
 ### New and changed sniffs ###
 * Add `MediaWiki.Commenting.FunctionComment.NoParamType` to ensure parameter type before parameter name (Umherirrender)
 * Add `MediaWiki.Commenting.FunctionComment.NotParenthesisParamName` to make sure param name is not wrapped in parentheses (Umherirrender)
 * Add `PEAR.Functions.ValidDefaultValue.NotAtEnd` to prohibit required parameters after optional ones (Max Semenik)
-* Add  `PSR12.Traits.UseDeclaration` to clean up the whitespace in use statements for traits (Umherirrender)
+* Add `PSR12.Traits.UseDeclaration` to clean up the whitespace in use statements for traits (Umherirrender)
 * `Generic.Files.LineLength` sniff: Add tab-width=4 and increase line length to 120 (Sam Wilson)
 * `DeprecatedGlobalVariables`: Expand to cover `$wgMemc` (Daimona Eaytoy)
 * `DeprecatedGlobalVariables`: Expand to cover `$wgUser` (DannyS712)
@@ -55,6 +307,7 @@
 * build: Add mediawiki/mediawiki-phan-config (Umherirrender)
 * build: Relax composer/spdx-licenses to ~1.5.2 (Reedy)
 
+
 ## 30.0.0 / 2020-02-18 ##
 * `ForbiddenFunctions` sniff: Remove little bits of unused code (Thiemo Kreuz)
 * `FunctionComment` sniff: Detect missing `&` for `ParamNameNoMatch` error code and autofix (Umherirrender)
@@ -76,6 +329,7 @@
 * dependencies: Remove space from php version constraint in composer.json (Reedy)
 * dependencies: Update composer/semver from 1.5.0 to 1.5.1 (Reedy)
 * HISTORY.md: Add backticks (Ricordisamoa)
+
 
 ## 29.0.0 / 2020-01-07 ##
 * Enforce docblock on private methods (Daimona Eaytoy)
@@ -100,8 +354,9 @@
 * Also require return type for setUpBeforeClass() and tearDownAfterClass() (Max Semenik)
 * Forbid usage of is_null() (Prateek Saxena)
 * Use severity instead of excludes to allow local overrides (Thiemo Kreuz)
-* FunctionAnnotationsSniff: whitelist @before (Max Semenik)
+* FunctionAnnotationsSniff: allow @before (Max Semenik)
 * Temporarily disable the sniff for assertArraySubset (Daimona Eaytoy)
+
 
 ## 28.0.0 / 2019-10-09 ##
 * Add a sniff to ensure that setUp and tearDown have :void typehints (Daimona Eaytoy)
@@ -116,6 +371,7 @@
 * Remove prohibitions on new PHP features (Max Semenik)
 * Require PHPUnit 6+ (Daimona Eaytoy)
 
+
 ## 27.0.0 / 2019-10-03 ##
 * Update squizlabs/php_codesniffer to 3.5.0 (Umherirrender)
 * List @phan-assert as allowed annotation in functions (Umherirrender)
@@ -126,20 +382,23 @@
 * Allow consecutive single-line comments not to start with a single space (Daimona Eaytoy)
 * Allow @slowThreshold annotation in tests (Max Semenik)
 
-## 26.0.0 / 2019-0511 ##
+
+## 26.0.0 / 2019-05-11 ##
 * Update composer/spdx-licenses from 1.4.0 to 1.5.1 (Reedy)
 * Update composer/semver from 1.4.2 to 1.5.0 (Reedy)
 * Enable sniff to check for newlines between functions (Umherirrender)
 * Upgrade PHP_CodeSniffer to 3.4.2 (Umherirrender)
 
+
 ## 25.0.0 / 2019-04-05 ##
 * Prohibit aliases is_long, is_double and is_real (mainframe98)
 * Streamline PHPDoc comment parsing in UnusedUseStatement sniff (Thiemo Kreuz)
 * Upgrade PHP_CodeSniffer to 3.4.1 (Kunal Mehta)
-* Whitelist more phan annotations (Kunal Mehta)
+* Enable more phan annotations (Kunal Mehta)
+
 
 ## 24.0.0 / 2019-02-05 ##
-* Whitelist @after and @before phpunit annotations (Umherirrender)
+* Allow @after and @before phpunit annotations (Umherirrender)
 * Update PHP_CodeSniffer to 3.4.0 (Kunal Mehta)
 * Enable new Generic.VersionControl.GitMergeConflict sniff (Kunal Mehta)
 * Copyedit comments (Max Semenik)
@@ -158,6 +417,11 @@
 * Also exclude anonymous classes in AssignmentInReturnSniff (mainframe98)
 * Replace sniff for forbidden globals by deprecated globals (Umherirrender)
 
+
+## 19.2.0 / 2019-02-05 ##
+* Disable 'Generic.PHP.DeprecatedFunctions' sniff (Kunal Mehta)
+
+
 ## 23.0.0 / 2018-11-14 ##
 * Add comment why @private and @protected are okay (Umherirrender)
 * Add sniff to detect + for string concat (Umherirrender)
@@ -167,6 +431,7 @@
 * Remove [optional] from types in @param (Umherirrender)
 * Update message to talk about "top level" instead of "file comment" (Thiemo Kreuz)
 * Upgrade squizlabs/php_codesniffer to 3.3.2 (Kunal Mehta)
+
 
 ## 22.0.0 / 2018-09-02 ##
 * Detect nesting of inline ternary statements without parentheses (Kevin Israel)
@@ -180,7 +445,8 @@
 * Cleanups to the UnusedUseStatement sniff (Thiemo Kreuz)
 * Update DB_REPLICA's last version to 1.27.3 (Kunal Mehta)
 * Upgrade squizlabs/php_codesniffer to 3.3.1 (Reedy)
-* Whitelist @param-taint and @return-taint (Umherirrender)
+* Allow @param-taint and @return-taint (Umherirrender)
+
 
 ## 21.0.0 / 2018-07-26 ##
 * Add FunctionAnnotations checking tags in function comments only (Thiemo Kreuz)
@@ -195,10 +461,12 @@
 * Upgrade squizlabs/php_codesniffer to 3.3.0 (Kunal Mehta)
 * Use "PSR12.Keywords.ShortFormTypeKeywords" in place of custom sniff (Kunal Mehta)
 
+
 ## 20.0.0 / 2018-05-24 ##
 * Require PHP 7 or HHVM to run (Kunal Mehta)
 * Document why we still need to keep ScalarTypeHintUsageSniff (Kunal Mehta)
 * Drop PHP7UnicodeSyntaxSniff sniff (Kunal Mehta)
+
 
 ## 19.0.0 / 2018-05-24 ##
 Note: This will be the final release with PHP 5.5 and 5.6 support.
@@ -210,6 +478,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Prevent usage of nullable and void type hints (Kunal Mehta)
 * Prohibit PHP's vanilla execution (Max Semenik)
 * Reorganize PHP 7.0 compatibility sniffs into a category (Kunal Mehta)
+
 
 ## 18.0.0 / 2018-04-13 ##
 * Add common autofix replacements for invalid license tag sniff (Kunal Mehta)
@@ -227,6 +496,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Scan for return tags from the end of the function scope (Thiemo Kreuz)
 * Shorten out earlier in the DbrQueryUsage sniff (Thiemo Kreuz)
 * Shorten out earlier in the FunctionComment sniff (Thiemo Kreuz)
+
 
 ## 17.0.0 / 2018-03-28 ##
 * Allow globals to start with numbers (Umherirrender)
@@ -252,12 +522,14 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Validate @license against SPDX (Umherirrender)
 * Validate phpunit annotations (Umherirrender)
 
+
 ## 16.0.1 / 2018-02-24 ##
 * Fix SpaceBeforeControlStructureBraceSniff (Thiemo Kreuz)
 * Grade errors about duplicate spaces in PHPDoc tags down to warnings (Thiemo Kreuz)
 * Remove unused code and function arguments from three sniffs (Thiemo Kreuz)
 * Replace substr_compare with substr (Umherirrender)
 * Streamline SpaceBeforeControlStructureBraceSniff implementation (Thiemo Kreuz)
+
 
 ## 16.0.0 / 2018-02-14 ##
 * Add sniff to find tests without @covers tags (Kunal Mehta)
@@ -277,6 +549,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Skip __construct on checking for @return tags (Umherirrender)
 * Use SPDX 3.0 license identifier (Kunal Mehta)
 * Warn on usage of each() (Kunal Mehta)
+
 
 ## 15.0.0 / 2017-12-29 ##
 * Add sniff for using is_int over is_integer (Kunal Mehta)
@@ -299,8 +572,10 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Use upstream Generic.PHP.DiscourageGoto (Kunal Mehta)
 * Warn on usage of create_function() (Kunal Mehta)
 
+
 ## 14.1.0 / 2017-10-20 ##
 * Update PHP_CodeSniffer to 3.1.1 (Paladox)
+
 
 ## 14.0.0 / 2017-10-20 ##
 * Add sniff for @params instead of @param (Umherirrender)
@@ -309,6 +584,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Unwrap types in function docs from {} (Umherirrender)
 * Update PHP_CodeSniffer to 3.1.0 from 3.0.2 (Paladox)
 * Validate doc syntax (Umherirrender)
+
 
 ## 13.0.0 / 2017-09-23 ##
 * Add sniff for @cover instead of @covers (James D. Forrester)
@@ -319,6 +595,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Prohibit some globals (Max Semenik)
 * Skip function comments with @deprecated (Umherirrender)
 * Sniff & fix lowercase @inheritdoc (Gergő Tisza)
+
 
 ## 0.12.0 / 2017-08-29 ##
 * Add sniff to ensure floats have a leading `0` if necessary (Kunal Mehta)
@@ -337,8 +614,10 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Rename OpeningKeywordBracketSniff to OpeningKeywordParenthesisSniff (Reedy)
 * Use local OneClassPerFile sniff for only one class/interface/trait (Kunal Mehta)
 
+
 ## 0.11.1 / 2017-08-13 ##
 * Add GoatSniffer ASCII art (Kunal Mehta)
+
 
 ## 0.11.0 / 2017-08-10 ##
 * Added OpeningKeywordBraceSniff (Umherirrender)
@@ -347,6 +626,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Enforce "short" type definitions on @param in comments (Umherirrender)
 * Fix phpunit test on windows (Umherirrender)
 * Fix Undefined offset in FunctionCommentSniff (Umherirrender)
+
 
 ## 0.10.1 / 2017-07-22 ##
 * Add .gitattributes (Umherirrender)
@@ -364,6 +644,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * track=1 rather than defaultbranch (Reedy)
 * Update PHP_CodeSniffer to 3.0.2 (Kunal Mehta)
 
+
 ## 0.10.0 / 2017-07-01 ##
 * Add sniff to prevent against using PHP 7's Unicode escape syntax (Kunal Mehta)
 * Add sniff to verify type-casts use the short form (bool, int) (Kunal Mehta)
@@ -377,6 +658,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Include sniff warning/error codes in test output (Kunal Mehta)
 * Make DisallowEmptyLineFunctionsSniff apply to closures too (Kunal Mehta)
 * Use correct notation for UTF-8 (Umherirrender)
+
 
 ## 0.9.0 / 2017-06-19 ##
 * Add sniff to enforce "function (" for closures (Kunal Mehta)
@@ -395,6 +677,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Update squizlabs/PHP_CodeSniffer to 3.0.1 (Reedy)
 * Use upstream CharacterBeforePHPOpeningTag sniff (Kunal Mehta)
 
+
 ## 0.8.0 / 2017-05-03 ##
 * Add sniff for cast operator spacing (Sam Wilson)
 * Allow filtering documentation requirements based on visibility (Kunal Mehta)
@@ -404,6 +687,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Fix test result parsing, and correct new errors that were exposed (Sam Wilson)
 * Prevent abstract functions being marked eligible (Sam Wilson)
 * PHP_CodeSniffer to 2.9.0 (Paladox)
+
 
 ## 0.8.0-alpha.1 / 2016-09-21 ##
 * Add detection for calling global functions in target classes. (Tao Xie)
@@ -425,13 +709,16 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Single Line comments no multiple '*'. (Lethe)
 * Update squizlabs/php_codesniffer to 2.7.0 (Paladox)
 
+
 ## 0.7.2 / 2016-05-27 ##
 * SpaceyParenthesisSniff: Don't remove last argument or array element (Kevin Israel)
 * Expect specific output from sniffs (Erik Bernhardson)
 * Assert fixers do as intended (Erik Bernhardson)
 
+
 ## 0.7.1 / 2016-05-06 ##
 * Fix typo in IfElseStructureSniff (addshore)
+
 
 ## 0.7.0 / 2016-05-06 ##
 * Also check for space after elseif in SpaceAfterControlStructureSniff (Lethexie)
@@ -442,11 +729,13 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Speed up PrefixedGlobalFunctionsSniff (addshore)
 * Update squizlabs/php_codesniffer to 2.6.0 (Paladox)
 
+
 ## 0.6.0 / 2016-02-17 ##
 * Add Generic.Arrays.DisallowLongArraySyntax to ruleset, autofix this repo (Kunal Mehta)
 * Add sniff to detect consecutive empty lines in a file (Vivek Ghaisas)
 * Disable Generic.Functions.CallTimePassByReference.NotAllowed (Kunal Mehta)
 * Update squizlabs/php_codesniffer to 2.5.1 (Paladox)
+
 
 ## 0.5.1 / 2015-12-28 ##
 * Avoid in_array for performance reasons (Thiemo Kreuz)
@@ -457,12 +746,14 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * build: Update phpunit to 4.8.18 (Paladox)
 * Update squizlabs/php_codesniffer to 2.5.0 (Paladox)
 
+
 ## 0.5.0 / 2015-10-23 ##
 * Add Generic.ControlStructures.InlineControlStructure to ruleset (Kunal Mehta)
 * Add IfElseStructureSniff to handle else structures (TasneemLo)
 * Handle multiple # comments in Space Before Comment (TasneemLo)
 * Sniff to check assignment in while & if (TasneemLo)
 * Sniff to warn when using `dirname(__FILE__)` (TasneemLo)
+
 
 ## 0.4.0 / 2015-09-26 ##
 * Use upstream codesniffer 2.3.4 (Kunal Mehta & Paladox)
@@ -474,6 +765,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Update jakub-onderka/php-parallel-lint to 0.9.* (Paladox)
 * Automatically fix warnings caught by SpaceBeforeSingleLineCommentSniff (Kunal Mehta)
 
+
 ## 0.3.0 / 2015-06-19 ##
 * Update README.md code formatting (Vivek Ghaisas)
 * Don't require "wf" prefix on functions that are namespaced (Kunal Mehta)
@@ -481,6 +773,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * SpaceyParenthesis: Check for space before opening parenthesis (Vivek Ghaisas)
 * SpaceyParenthesesSniff: Search for extra/unnecessary space (Vivek Ghaisas)
 * CharacterBeforePHPOpeningTagSniff: Support T_HASHBANG for HHVM >=3.5,<3.7 (Kunal Mehta)
+
 
 ## 0.2.0 / 2015-06-02 ##
 * Fixed sniff that checks globals have a "wg" prefix (Divya)
@@ -497,6 +790,7 @@ Note: This will be the final release with PHP 5.5 and 5.6 support.
 * Make failing tests fail only for specific respective reasons (Vivek Ghaisas)
 * Change certain errors to warnings (Vivek Ghaisas)
 * Update ExtraCharacters Sniff to allow shebang (Harshit Harchani)
+
 
 ## 0.1.0 / 2015-01-05 ##
 

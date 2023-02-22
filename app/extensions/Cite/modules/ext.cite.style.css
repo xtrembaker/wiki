@@ -5,11 +5,17 @@
 	vertical-align: super;
 	line-height: 1;
 	font-size: smaller;
-	/* Make sure the brackets and the numbers aren't jumbled after LTR words in RTL wikis */
-	unicode-bidi: embed;
 	/* Do not inherit bold or italic */
 	font-weight: normal;
 	font-style: normal;
+	/* Isolation to fix references in case of RTL words at the end of a reference */
+	unicode-bidi: -moz-isolate;
+	unicode-bidi: -webkit-isolate;
+	unicode-bidi: isolate;
+}
+
+.mw-ref-follow {
+	display: none;
 }
 
 /* Upstream bug in stylelint makes it complain aboout the case of 'mw-Ref' */
@@ -69,19 +75,19 @@ ol.mw-references {
 	counter-reset: mw-ref-linkback list-item;
 }
 
-ol.mw-references li {
+ol.mw-references > li {
 	counter-increment: mw-ref-linkback;
 }
 
-[ rel='mw:referencedBy' ] {
+[ rel~='mw:referencedBy' ] {
 	counter-reset: mw-ref-linkback -1;
 }
 
-[ rel='mw:referencedBy' ]:before {
+[ rel~='mw:referencedBy' ]:before {
 	content: '↑ ';
 }
 
-span[ rel='mw:referencedBy' ] a:before {
+span[ rel~='mw:referencedBy' ] a:before {
 	counter-increment: mw-ref-linkback;
 	content: counters( mw-ref-linkback, '.', decimal );
 	vertical-align: super;
@@ -89,7 +95,7 @@ span[ rel='mw:referencedBy' ] a:before {
 	font-size: smaller;
 }
 
-span[ rel='mw:referencedBy' ] a:after {
+span[ rel~='mw:referencedBy' ] a:after {
 	content: ' ';
 }
 

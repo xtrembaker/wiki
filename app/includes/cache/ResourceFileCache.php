@@ -1,4 +1,5 @@
 <?php
+
 /**
  * ResourceLoader request result caching in the file system.
  *
@@ -21,6 +22,10 @@
  * @ingroup Cache
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\ResourceLoader as RL;
+
 /**
  * ResourceLoader request result caching in the file system.
  *
@@ -30,14 +35,14 @@ class ResourceFileCache extends FileCacheBase {
 	protected $mCacheWorthy;
 
 	/* @todo configurable? */
-	const MISS_THRESHOLD = 360; // 6/min * 60 min
+	private const MISS_THRESHOLD = 360; // 6/min * 60 min
 
 	/**
 	 * Construct an ResourceFileCache from a context
-	 * @param ResourceLoaderContext $context
+	 * @param RL\Context $context
 	 * @return ResourceFileCache
 	 */
-	public static function newFromContext( ResourceLoaderContext $context ) {
+	public static function newFromContext( RL\Context $context ) {
 		$cache = new self();
 
 		if ( $context->getImage() ) {
@@ -60,23 +65,26 @@ class ResourceFileCache extends FileCacheBase {
 	/**
 	 * Check if an RL request can be cached.
 	 * Caller is responsible for checking if any modules are private.
-	 * @param ResourceLoaderContext $context
+	 * @param RL\Context $context
 	 * @return bool
 	 */
-	public static function useFileCache( ResourceLoaderContext $context ) {
-		global $wgUseFileCache, $wgDefaultSkin, $wgLanguageCode;
-		if ( !$wgUseFileCache ) {
+	public static function useFileCache( RL\Context $context ) {
+		$mainConfig = MediaWikiServices::getInstance()->getMainConfig();
+		$useFileCache = $mainConfig->get( MainConfigNames::UseFileCache );
+		$defaultSkin = $mainConfig->get( MainConfigNames::DefaultSkin );
+		$languageCode = $mainConfig->get( MainConfigNames::LanguageCode );
+		if ( !$useFileCache ) {
 			return false;
 		}
 		// Get all query values
 		$queryVals = $context->getRequest()->getValues();
 		foreach ( $queryVals as $query => $val ) {
-			if ( in_array( $query, [ 'modules', 'image', 'variant', 'version', '*' ] ) ) {
+			if ( in_array( $query, [ 'modules', 'image', 'variant', 'version' ] ) ) {
 				// Use file cache regardless of the value of this parameter
-				continue; // note: &* added as IE fix
-			} elseif ( $query === 'skin' && $val === $wgDefaultSkin ) {
 				continue;
-			} elseif ( $query === 'lang' && $val === $wgLanguageCode ) {
+			} elseif ( $query === 'skin' && $val === $defaultSkin ) {
+				continue;
+			} elseif ( $query === 'lang' && $val === $languageCode ) {
 				continue;
 			} elseif ( $query === 'only' && in_array( $val, [ 'styles', 'scripts' ] ) ) {
 				continue;

@@ -6,14 +6,20 @@ if ( !wfIsCLI() ) {
 
 require_once __DIR__ . '/../LuaCommon/LuaInterpreterTest.php';
 
+use MediaWiki\Extension\Scribunto\Engines\LuaStandalone\LuaStandaloneEngine;
+use MediaWiki\Extension\Scribunto\Engines\LuaStandalone\LuaStandaloneInterpreter;
+use MediaWiki\Extension\Scribunto\Engines\LuaStandalone\LuaStandaloneInterpreterFunction;
+use MediaWiki\Extension\Scribunto\ScribuntoException;
 use Wikimedia\TestingAccessWrapper;
 
 /**
  * @group Lua
  * @group LuaStandalone
- * @covers Scribunto_LuaStandaloneInterpreter
+ * @group Standalone
+ * @covers \MediaWiki\Extension\Scribunto\Engines\LuaStandalone\LuaStandaloneInterpreter
  */
-class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTest {
+class LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTest {
+	/** @var array */
 	public $stdOpts = [
 		'errorFile' => null,
 		'luaPath' => null,
@@ -27,9 +33,9 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 	}
 
 	protected function newInterpreter( $opts = [] ) {
-		$opts = $opts + $this->stdOpts;
-		$engine = new Scribunto_LuaStandaloneEngine( $this->stdOpts );
-		return new Scribunto_LuaStandaloneInterpreter( $engine, $opts );
+		$opts += $this->stdOpts;
+		$engine = new LuaStandaloneEngine( $this->stdOpts );
+		return new LuaStandaloneInterpreter( $engine, $opts );
 	}
 
 	public function testIOErrorExit() {
@@ -60,13 +66,12 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 		$startTime = microtime( true );
 		if ( php_uname( 's' ) !== 'Linux' ) {
 			$this->markTestSkipped( "getStatus() not supported on platforms other than Linux" );
-			return;
 		}
 		$interpreter = $this->newInterpreter();
 		$engine = TestingAccessWrapper::newFromObject( $interpreter->engine );
 		$status = $interpreter->getStatus();
 		$pid = $status['pid'];
-		$this->assertInternalType( 'integer', $status['pid'] );
+		$this->assertIsInt( $status['pid'] );
 		$initialVsize = $this->getVsize( $pid );
 		$this->assertGreaterThan( 0, $initialVsize, 'Initial vsize' );
 
@@ -80,7 +85,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 		$time = $status['time'] / $engine->getClockTick();
 		$this->assertGreaterThan( 0.1, $time, 'getStatus() time usage' );
 		$this->assertLessThan( 1.5, $time, 'getStatus() time usage' );
-		$this->assertEquals( $vsize, $status['vsize'], 'vsize', $vsize * 0.1 );
+		$this->assertEqualsWithDelta( $vsize, $status['vsize'], $vsize * 0.1, 'vsize' );
 	}
 
 	/**
@@ -129,7 +134,8 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 	 */
 	public function testLuaToPhpArrayKeyConversion( $lua, $expect ) {
 		if ( $expect instanceof Exception ) {
-			$this->setExpectedException( Scribunto_LuaError::class, $expect->getMessage() );
+			$this->expectException( Scribunto_LuaError::class );
+			$this->expectExceptionMessage( $expect->getMessage() );
 		}
 
 		$interpreter = $this->newInterpreter();
@@ -199,7 +205,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 		);
 		$ret = null;
 		$interpreter->cleanupLuaChunks();
-		$testfunc = new Scribunto_LuaStandaloneInterpreterFunction( $interpreter->id, $id );
+		$testfunc = new LuaStandaloneInterpreterFunction( $interpreter->id, $id );
 		try {
 			$interpreter->callFunction( $testfunc );
 			$this->fail( "Expected exception because function #1 should have been freed" );
@@ -215,7 +221,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 			$interpreter->loadString( 'return function() return "testFreeFunction #2" end', 'test' )
 		);
 		$id = $ret[0]->id;
-		$func = new Scribunto_LuaStandaloneInterpreterFunction( $interpreter->id, $id );
+		$func = new LuaStandaloneInterpreterFunction( $interpreter->id, $id );
 		$ret = null;
 		$interpreter->cleanupLuaChunks();
 		$this->assertEquals(
@@ -224,7 +230,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 		);
 		$func = null;
 		$interpreter->cleanupLuaChunks();
-		$testfunc = new Scribunto_LuaStandaloneInterpreterFunction( $interpreter->id, $id );
+		$testfunc = new LuaStandaloneInterpreterFunction( $interpreter->id, $id );
 		try {
 			$interpreter->callFunction( $testfunc );
 			$this->fail( "Expected exception because function #2 should have been freed" );
@@ -249,7 +255,7 @@ class Scribunto_LuaStandaloneInterpreterTest extends Scribunto_LuaInterpreterTes
 		);
 		$func = null;
 		$interpreter->cleanupLuaChunks();
-		$testfunc = new Scribunto_LuaStandaloneInterpreterFunction( $interpreter->id, $id );
+		$testfunc = new LuaStandaloneInterpreterFunction( $interpreter->id, $id );
 		try {
 			$interpreter->callFunction( $testfunc );
 			$this->fail( "Expected exception because function #3 should have been freed" );

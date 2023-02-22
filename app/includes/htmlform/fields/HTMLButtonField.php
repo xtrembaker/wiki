@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+
 /**
  * Adds a generic button inline to the form. Does not do anything, you must add
  * click handling code in JavaScript. Use a HTMLSubmitField if you merely
@@ -17,21 +19,22 @@
  *   client-side form validation. Used in HTMLFormFieldCloner for add/remove
  *   buttons.
  *
- * Note that the buttonlabel parameters are not supported on IE6 and IE7 due to
- * bugs in those browsers. If detected, they will be served buttons using the
- * value of 'default' as the button label.
- *
+ * @stable to extend
  * @since 1.22
  */
 class HTMLButtonField extends HTMLFormField {
 	protected $buttonType = 'button';
 	protected $buttonLabel = null;
 
-	/** @var array $mFlags Flags to add to OOUI Button widget */
+	/** @var array Flags to add to OOUI Button widget */
 	protected $mFlags = [];
 
 	protected $mFormnovalidate = false;
 
+	/**
+	 * @stable to call
+	 * @inheritDoc
+	 */
 	public function __construct( $info ) {
 		$info['nodata'] = true;
 
@@ -66,7 +69,7 @@ class HTMLButtonField extends HTMLFormField {
 		$flags = '';
 		$prefix = 'mw-htmlform-';
 		if ( $this->mParent instanceof VFormHTMLForm ||
-			$this->mParent->getConfig()->get( 'UseMediaWikiUIEverywhere' )
+			$this->mParent->getConfig()->get( MainConfigNames::UseMediaWikiUIEverywhere )
 		) {
 			$prefix = 'mw-ui-';
 			// add mw-ui-button separately, so the descriptor doesn't need to set it
@@ -94,6 +97,7 @@ class HTMLButtonField extends HTMLFormField {
 
 	/**
 	 * Get the OOUI widget for this field.
+	 * @stable to override
 	 * @param string $value
 	 * @return OOUI\ButtonInputWidget
 	 */
@@ -114,12 +118,17 @@ class HTMLButtonField extends HTMLFormField {
 		) );
 	}
 
+	/**
+	 * @inheritDoc
+	 * @stable to override
+	 */
 	protected function needsLabel() {
 		return false;
 	}
 
 	/**
 	 * Button cannot be invalid
+	 * @stable to override
 	 *
 	 * @param string $value
 	 * @param array $alldata

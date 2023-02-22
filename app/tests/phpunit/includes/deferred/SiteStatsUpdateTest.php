@@ -5,7 +5,7 @@ use Wikimedia\TestingAccessWrapper;
 /**
  * @group Database
  */
-class SiteStatsUpdateTest extends MediaWikiTestCase {
+class SiteStatsUpdateTest extends MediaWikiIntegrationTestCase {
 	/**
 	 * @covers SiteStatsUpdate::factory
 	 * @covers SiteStatsUpdate::merge
@@ -17,9 +17,9 @@ class SiteStatsUpdateTest extends MediaWikiTestCase {
 		$update1->merge( $update2 );
 		$wrapped = TestingAccessWrapper::newFromObject( $update1 );
 
-		$this->assertEquals( 1, $wrapped->pages );
+		$this->assertSame( 1, $wrapped->pages );
 		$this->assertEquals( 3, $wrapped->users );
-		$this->assertEquals( 1, $wrapped->images );
+		$this->assertSame( 1, $wrapped->images );
 		$this->assertSame( 0, $wrapped->edits );
 		$this->assertSame( 0, $wrapped->articles );
 	}
@@ -29,10 +29,7 @@ class SiteStatsUpdateTest extends MediaWikiTestCase {
 	 * @covers SiteStatsInit::refresh()
 	 */
 	public function testDoUpdate() {
-		$this->setMwGlobals( 'wgSiteStatsAsyncFactor', false );
-		$this->setMwGlobals( 'wgCommandLineMode', false ); // disable opportunistic updates
-
-		$dbw = wfGetDB( DB_MASTER );
+		$dbw = wfGetDB( DB_PRIMARY );
 		$statsInit = new SiteStatsInit( $dbw );
 		$statsInit->refresh();
 
@@ -49,7 +46,7 @@ class SiteStatsUpdateTest extends MediaWikiTestCase {
 		DeferredUpdates::addUpdate(
 			SiteStatsUpdate::factory( [ 'pages' => 2, 'images' => 1, 'edits' => 2 ] )
 		);
-		$this->assertEquals( 1, DeferredUpdates::pendingUpdatesCount() );
+		$this->assertSame( 1, DeferredUpdates::pendingUpdatesCount() );
 
 		// Still the same
 		SiteStats::unload();
@@ -58,12 +55,10 @@ class SiteStatsUpdateTest extends MediaWikiTestCase {
 		$this->assertEquals( $ui, SiteStats::users(), 'user count' );
 		$this->assertEquals( $fi, SiteStats::images(), 'file count' );
 		$this->assertEquals( $ai, SiteStats::articles(), 'article count' );
-		$this->assertEquals( 1, DeferredUpdates::pendingUpdatesCount() );
+		$this->assertSame( 1, DeferredUpdates::pendingUpdatesCount() );
 
+		// This also notifies DeferredUpdates to do an opportunistic run
 		$dbw->commit( __METHOD__ );
-
-		$this->assertEquals( 1, DeferredUpdates::pendingUpdatesCount() );
-		DeferredUpdates::doUpdates();
 		$this->assertSame( 0, DeferredUpdates::pendingUpdatesCount() );
 
 		SiteStats::unload();

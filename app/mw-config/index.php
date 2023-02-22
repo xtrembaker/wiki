@@ -21,6 +21,8 @@
  * @file
  */
 
+use MediaWiki\MediaWikiServices;
+
 // Bail on old versions of PHP, or if composer has not been run yet to install
 // dependencies. Using dirname( __FILE__ ) here because __DIR__ is PHP5.3+.
 // phpcs:ignore MediaWiki.Usage.DirUsage.FunctionFound
@@ -34,6 +36,8 @@ define( 'MEDIAWIKI_INSTALL', true );
 // instead of mw-config subdirectory.
 chdir( dirname( __DIR__ ) );
 require dirname( __DIR__ ) . '/includes/WebStart.php';
+
+wfInstallerMain();
 
 function wfInstallerMain() {
 	global $wgLang, $wgMetaNamespace, $wgCanonicalNamespaceNames;
@@ -68,7 +72,7 @@ function wfInstallerMain() {
 	} else {
 		$langCode = 'en';
 	}
-	$wgLang = Language::factory( $langCode );
+	$wgLang = MediaWikiServices::getInstance()->getLanguageFactory()->getLanguage( $langCode );
 	RequestContext::getMain()->setLanguage( $wgLang );
 
 	$installer->setParserLanguage( $wgLang );
@@ -79,5 +83,3 @@ function wfInstallerMain() {
 
 	$_SESSION['installData'][$fingerprint] = $session;
 }
-
-wfInstallerMain();

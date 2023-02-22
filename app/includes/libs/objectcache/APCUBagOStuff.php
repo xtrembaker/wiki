@@ -22,7 +22,7 @@
  */
 
 /**
- * This is a wrapper for APCU's shared memory functions
+ * This is a wrapper for APCu's shared memory functions
  *
  * Use PHP serialization to avoid bugs and easily create CAS tokens.
  * APCu has a memory corruption bug when the serializer is set to 'default'.
@@ -42,41 +42,60 @@ class APCUBagOStuff extends MediumSpecificBagOStuff {
 	 *  whenever the handling of values is changed, to prevent existing code
 	 *  from encountering older values which it cannot handle.
 	 */
-	const KEY_SUFFIX = ':4';
+	private const KEY_SUFFIX = ':4';
+
+	/** @var int Max attempts for implicit CAS operations */
+	private static $CAS_MAX_ATTEMPTS = 100;
 
 	public function __construct( array $params = [] ) {
-		$params['segmentationSize'] = $params['segmentationSize'] ?? INF;
+		// No use in segmenting values
+		$params['segmentationSize'] = INF;
 		parent::__construct( $params );
 		// The extension serializer is still buggy, unlike "php" and "igbinary"
 		$this->nativeSerialize = ( ini_get( 'apc.serializer' ) !== 'default' );
+		// Avoid back-dated values that expire too soon. In particular, regenerating a hot
+		// key before it expires should never have the end-result of purging that key. Using
+		// the web request time becomes increasingly problematic the longer the request lasts.
+		ini_set( 'apc.use_request_time', '0' );
+
+		if ( PHP_SAPI === 'cli' ) {
+			$this->attrMap[self::ATTR_DURABILITY] = ini_get( 'apc.enable_cli' )
+				? self::QOS_DURABILITY_SCRIPT
+				: self::QOS_DURABILITY_NONE;
+		} else {
+			$this->attrMap[self::ATTR_DURABILITY] = self::QOS_DURABILITY_SERVICE;
+		}
 	}
 
 	protected function doGet( $key, $flags = 0, &$casToken = null ) {
+		$getToken = ( $casToken === self::PASS_BY_REF );
 		$casToken = null;
 
 		$blob = apcu_fetch( $key . self::KEY_SUFFIX );
 		$value = $this->nativeSerialize ? $blob : $this->unserialize( $blob );
-		if ( $value !== false ) {
-			$casToken = $blob; // don't bother hashing this
+		if ( $getToken && $value !== false ) {
+			// Note that if the driver handles serialization then this uses the PHP value
+			// as the token. This might require inspection or re-serialization in doCas().
+			$casToken = $blob;
 		}
 
 		return $value;
 	}
 
 	protected function doSet( $key, $value, $exptime = 0, $flags = 0 ) {
-		return apcu_store(
-			$key . self::KEY_SUFFIX,
-			$this->nativeSerialize ? $value : $this->serialize( $value ),
-			$exptime
-		);
+		$blob = $this->nativeSerialize ? $value : $this->getSerialized( $value, $key );
+		$ttl = $this->getExpirationAsTTL( $exptime );
+		return apcu_store( $key . self::KEY_SUFFIX, $blob, $ttl );
 	}
 
 	protected function doAdd( $key, $value, $exptime = 0, $flags = 0 ) {
-		return apcu_add(
-			$key . self::KEY_SUFFIX,
-			$this->nativeSerialize ? $value : $this->serialize( $value ),
-			$exptime
-		);
+		if ( apcu_exists( $key . self::KEY_SUFFIX ) ) {
+			return false;
+		}
+
+		$blob = $this->nativeSerialize ? $value : $this->getSerialized( $value, $key );
+		$ttl = $this->getExpirationAsTTL( $exptime );
+		return apcu_add( $key . self::KEY_SUFFIX, $blob, $ttl );
 	}
 
 	protected function doDelete( $key, $flags = 0 ) {
@@ -86,20 +105,91 @@ class APCUBagOStuff extends MediumSpecificBagOStuff {
 	}
 
 	public function incr( $key, $value = 1, $flags = 0 ) {
+		$result = false;
+		$value = (int)$value;
+
 		// https://github.com/krakjoe/apcu/issues/166
-		if ( apcu_exists( $key . self::KEY_SUFFIX ) ) {
-			return apcu_inc( $key . self::KEY_SUFFIX, $value );
-		} else {
-			return false;
+		for ( $i = 0; $i < self::$CAS_MAX_ATTEMPTS; ++$i ) {
+			$oldCount = apcu_fetch( $key . self::KEY_SUFFIX );
+			if ( !is_int( $oldCount ) ) {
+				break;
+			}
+			$count = $oldCount + $value;
+			if ( apcu_cas( $key . self::KEY_SUFFIX, $oldCount, $count ) ) {
+				$result = $count;
+				break;
+			}
 		}
+
+		return $result;
 	}
 
 	public function decr( $key, $value = 1, $flags = 0 ) {
+		$result = false;
+		$value = (int)$value;
+
 		// https://github.com/krakjoe/apcu/issues/166
-		if ( apcu_exists( $key . self::KEY_SUFFIX ) ) {
-			return apcu_dec( $key . self::KEY_SUFFIX, $value );
-		} else {
-			return false;
+		for ( $i = 0; $i < self::$CAS_MAX_ATTEMPTS; ++$i ) {
+			$oldCount = apcu_fetch( $key . self::KEY_SUFFIX );
+			if ( !is_int( $oldCount ) ) {
+				break;
+			}
+			$count = $oldCount - $value;
+			if ( apcu_cas( $key . self::KEY_SUFFIX, $oldCount, $count ) ) {
+				$result = $count;
+				break;
+			}
 		}
+
+		return $result;
+	}
+
+	protected function doIncrWithInit( $key, $exptime, $step, $init, $flags ) {
+		// Use apcu 5.1.12 $ttl argument if apcu_inc() will initialize to $init:
+		// https://www.php.net/manual/en/function.apcu-inc.php
+		if ( $step === $init ) {
+			/** @noinspection PhpMethodParametersCountMismatchInspection */
+			$ttl = $this->getExpirationAsTTL( $exptime );
+			$result = apcu_inc( $key . self::KEY_SUFFIX, $step, $success, $ttl );
+		} else {
+			$result = false;
+			for ( $i = 0; $i < self::$CAS_MAX_ATTEMPTS; ++$i ) {
+				$oldCount = apcu_fetch( $key . self::KEY_SUFFIX );
+				if ( $oldCount === false ) {
+					$count = $init;
+					$ttl = $this->getExpirationAsTTL( $exptime );
+					if ( apcu_add( $key . self::KEY_SUFFIX, $count, $ttl ) ) {
+						$result = $count;
+						break;
+					}
+				} elseif ( is_int( $oldCount ) ) {
+					$count = $oldCount + $step;
+					if ( apcu_cas( $key . self::KEY_SUFFIX, $oldCount, $count ) ) {
+						$result = $count;
+						break;
+					}
+				} else {
+					break;
+				}
+			}
+		}
+
+		return $result;
+	}
+
+	public function setNewPreparedValues( array $valueByKey ) {
+		// Do not bother staging serialized values if the PECL driver does the serializing
+		return $this->nativeSerialize
+			? $this->guessSerialSizeOfValues( $valueByKey )
+			: parent::setNewPreparedValues( $valueByKey );
+	}
+
+	public function makeKeyInternal( $keyspace, $components ) {
+		return $this->genericKeyFromComponents( $keyspace, ...$components );
+	}
+
+	protected function convertGenericKey( $key ) {
+		// short-circuit; already uses "generic" keys
+		return $key;
 	}
 }

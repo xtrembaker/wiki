@@ -1,7 +1,5 @@
 <?php
 /**
- * Generator of database load balancing objects.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -18,15 +16,15 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
-
 namespace Wikimedia\Rdbms;
 
 use InvalidArgumentException;
 
 /**
- * A simple single-master LBFactory that gets its configuration from the b/c globals
+ * Manage a simple setup with one primary database and optionally some replicas.
+ *
+ * @ingroup Database
  */
 class LBFactorySimple extends LBFactory {
 	/** @var LoadBalancer */
@@ -34,13 +32,13 @@ class LBFactorySimple extends LBFactory {
 	/** @var LoadBalancer[] */
 	private $externalLBs = [];
 
+	/** @var array Configuration for the LoadMonitor to use within LoadBalancer instances */
+	private $loadMonitorConfig;
+
 	/** @var array[] Map of (server index => server config map) */
-	private $mainServers = [];
+	private $mainServers;
 	/** @var array[][] Map of (cluster => server index => server config map) */
 	private $externalServersByCluster = [];
-
-	/** @var string */
-	private $loadMonitorClass;
 
 	/**
 	 * @see LBFactory::__construct()
@@ -53,61 +51,66 @@ class LBFactorySimple extends LBFactory {
 	 *      replication sync checks (intended for archive servers with unchanging data).
 	 *   - externalClusters : map of cluster names to server arrays. The servers arrays have the
 	 *      same format as "servers" above.
+	 *   - loadMonitor: LoadMonitor::__construct() parameters with "class" field. [optional]
 	 */
 	public function __construct( array $conf ) {
 		parent::__construct( $conf );
 
 		$this->mainServers = $conf['servers'] ?? [];
-		foreach ( $this->mainServers as $i => $server ) {
-			if ( $i == 0 ) {
-				$this->mainServers[$i]['master'] = true;
-			} else {
-				$this->mainServers[$i]['replica'] = true;
-			}
-		}
-
 		foreach ( ( $conf['externalClusters'] ?? [] ) as $cluster => $servers ) {
 			foreach ( $servers as $index => $server ) {
 				$this->externalServersByCluster[$cluster][$index] = $server;
 			}
 		}
 
-		$this->loadMonitorClass = $conf['loadMonitorClass'] ?? LoadMonitor::class;
+		if ( isset( $conf['loadMonitor'] ) ) {
+			$this->loadMonitorConfig = $conf['loadMonitor'];
+		} elseif ( isset( $conf['loadMonitorClass'] ) ) { // b/c
+			$this->loadMonitorConfig = [ 'class' => $conf['loadMonitorClass'] ];
+		} else {
+			$this->loadMonitorConfig = [ 'class' => LoadMonitor::class ];
+		}
 	}
 
-	public function newMainLB( $domain = false, $owner = null ) {
-		return $this->newLoadBalancer( $this->mainServers, $owner );
+	public function newMainLB( $domain = false ): ILoadBalancerForOwner {
+		return $this->newLoadBalancer(
+			self::CLUSTER_MAIN_DEFAULT,
+			$this->mainServers
+		);
 	}
 
-	public function getMainLB( $domain = false ) {
+	public function getMainLB( $domain = false ): ILoadBalancer {
 		if ( $this->mainLB === null ) {
-			$this->mainLB = $this->newMainLB( $domain, $this->getOwnershipId() );
+			$this->mainLB = $this->newMainLB( $domain );
 		}
 
 		return $this->mainLB;
 	}
 
-	public function newExternalLB( $cluster, $owner = null ) {
+	public function newExternalLB( $cluster ): ILoadBalancerForOwner {
 		if ( !isset( $this->externalServersByCluster[$cluster] ) ) {
 			throw new InvalidArgumentException( "Unknown cluster '$cluster'." );
 		}
 
-		return $this->newLoadBalancer( $this->externalServersByCluster[$cluster], $owner );
+		return $this->newLoadBalancer(
+			$cluster,
+			$this->externalServersByCluster[$cluster]
+		);
 	}
 
-	public function getExternalLB( $cluster ) {
+	public function getExternalLB( $cluster ): ILoadBalancer {
 		if ( !isset( $this->externalLBs[$cluster] ) ) {
-			$this->externalLBs[$cluster] = $this->newExternalLB( $cluster, $this->getOwnershipId() );
+			$this->externalLBs[$cluster] = $this->newExternalLB( $cluster );
 		}
 
 		return $this->externalLBs[$cluster];
 	}
 
-	public function getAllMainLBs() {
+	public function getAllMainLBs(): array {
 		return [ self::CLUSTER_MAIN_DEFAULT => $this->getMainLB() ];
 	}
 
-	public function getAllExternalLBs() {
+	public function getAllExternalLBs(): array {
 		$lbs = [];
 		foreach ( array_keys( $this->externalServersByCluster ) as $cluster ) {
 			$lbs[$cluster] = $this->getExternalLB( $cluster );
@@ -116,12 +119,13 @@ class LBFactorySimple extends LBFactory {
 		return $lbs;
 	}
 
-	private function newLoadBalancer( array $servers, $owner ) {
+	private function newLoadBalancer( string $clusterName, array $servers ) {
 		$lb = new LoadBalancer( array_merge(
-			$this->baseLoadBalancerParams( $owner ),
+			$this->baseLoadBalancerParams(),
 			[
 				'servers' => $servers,
-				'loadMonitor' => [ 'class' => $this->loadMonitorClass ],
+				'loadMonitor' => $this->loadMonitorConfig,
+				'clusterName' => $clusterName
 			]
 		) );
 		$this->initLoadBalancer( $lb );
@@ -130,11 +134,21 @@ class LBFactorySimple extends LBFactory {
 	}
 
 	public function forEachLB( $callback, array $params = [] ) {
+		wfDeprecated( __METHOD__, '1.39' );
 		if ( $this->mainLB !== null ) {
 			$callback( $this->mainLB, ...$params );
 		}
 		foreach ( $this->externalLBs as $lb ) {
 			$callback( $lb, ...$params );
+		}
+	}
+
+	protected function getLBsForOwner() {
+		if ( $this->mainLB !== null ) {
+			yield $this->mainLB;
+		}
+		foreach ( $this->externalLBs as $lb ) {
+			yield $lb;
 		}
 	}
 }

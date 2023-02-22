@@ -1,5 +1,5 @@
 CREATE TABLE /*_*/site_identifiers_tmp (
-  -- Key on site.site_id
+  -- Key on sites.site_id
   si_site                    INT UNSIGNED        NOT NULL,
 
   -- local key type, ie 'interwiki' or 'langlink'
@@ -11,8 +11,8 @@ CREATE TABLE /*_*/site_identifiers_tmp (
   PRIMARY KEY (si_type, si_key)
 ) /*$wgDBTableOptions*/;
 
-INSERT INTO /*_*/site_identifiers_tmp
-	SELECT * FROM /*_*/site_identifiers;
+INSERT INTO /*_*/site_identifiers_tmp(si_site, si_type, si_key)
+	SELECT si_site, si_type, si_key FROM /*_*/site_identifiers;
 
 DROP TABLE /*_*/site_identifiers;
 

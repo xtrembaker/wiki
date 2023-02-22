@@ -50,39 +50,39 @@ class LegacyHandler extends AbstractProcessingHandler {
 
 	/**
 	 * Log sink descriptor
-	 * @var string $uri
+	 * @var string
 	 */
 	protected $uri;
 
 	/**
 	 * Filter log events using legacy rules
-	 * @var bool $useLegacyFilter
+	 * @var bool
 	 */
 	protected $useLegacyFilter;
 
 	/**
 	 * Log sink
-	 * @var resource $sink
+	 * @var resource|null
 	 */
 	protected $sink;
 
 	/**
-	 * @var string $error
+	 * @var string|null
 	 */
 	protected $error;
 
 	/**
-	 * @var string $host
+	 * @var string
 	 */
 	protected $host;
 
 	/**
-	 * @var int $port
+	 * @var int
 	 */
 	protected $port;
 
 	/**
-	 * @var string $prefix
+	 * @var string
 	 */
 	protected $prefix;
 
@@ -90,7 +90,7 @@ class LegacyHandler extends AbstractProcessingHandler {
 	 * @param string $stream Stream URI
 	 * @param bool $useLegacyFilter Filter log events using legacy rules
 	 * @param int $level Minimum logging level that will trigger handler
-	 * @param bool $bubble Can handled meesages bubble up the handler stack?
+	 * @param bool $bubble Can handled messages bubble up the handler stack?
 	 */
 	public function __construct(
 		$stream,
@@ -142,6 +142,7 @@ class LegacyHandler extends AbstractProcessingHandler {
 				$domain = AF_INET;
 			}
 
+			// @phan-suppress-next-line PhanTypeMismatchProperty False positive caused by PHP 8.0 resource transition
 			$this->sink = socket_create( $domain, SOCK_DGRAM, SOL_UDP );
 
 		} else {
@@ -149,10 +150,11 @@ class LegacyHandler extends AbstractProcessingHandler {
 		}
 		restore_error_handler();
 
-		if ( !is_resource( $this->sink ) ) {
+		if ( !$this->sink ) {
 			$this->sink = null;
 			throw new UnexpectedValueException( sprintf(
 				'The stream or file "%s" could not be opened: %s',
+				// @phan-suppress-next-line PhanTypeMismatchArgumentInternalProbablyReal Set by error handler
 				$this->uri, $this->error
 			) );
 		}
@@ -175,7 +177,7 @@ class LegacyHandler extends AbstractProcessingHandler {
 		return $this->host !== null;
 	}
 
-	protected function write( array $record ) {
+	protected function write( array $record ): void {
 		if ( $this->useLegacyFilter &&
 			!LegacyLogger::shouldEmit(
 				$record['channel'], $record['message'],
@@ -200,7 +202,7 @@ class LegacyHandler extends AbstractProcessingHandler {
 					$record['channel'] : $this->prefix;
 				$text = preg_replace( '/^/m', "{$leader} ", $text );
 
-				// Limit to 64KB
+				// Limit to 64 KiB
 				if ( strlen( $text ) > 65506 ) {
 					$text = substr( $text, 0, 65506 );
 				}
@@ -214,7 +216,13 @@ class LegacyHandler extends AbstractProcessingHandler {
 			}
 
 			socket_sendto(
-				$this->sink, $text, strlen( $text ), 0, $this->host, $this->port
+				// @phan-suppress-next-line PhanTypeMismatchArgumentInternal False positive caused by PHP 8.0 transition
+				$this->sink,
+				$text,
+				strlen( $text ),
+				0,
+				$this->host,
+				$this->port
 			);
 
 		} else {
@@ -222,9 +230,10 @@ class LegacyHandler extends AbstractProcessingHandler {
 		}
 	}
 
-	public function close() {
-		if ( is_resource( $this->sink ) ) {
+	public function close(): void {
+		if ( $this->sink ) {
 			if ( $this->useUdp() ) {
+				// @phan-suppress-next-line PhanTypeMismatchArgumentInternal
 				socket_close( $this->sink );
 
 			} else {

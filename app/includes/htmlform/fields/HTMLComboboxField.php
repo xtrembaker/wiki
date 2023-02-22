@@ -13,6 +13,8 @@
  *   options-messages - As for HTMLSelectField
  *   options - As for HTMLSelectField
  *   options-message - As for HTMLSelectField
+ *
+ * @stable to extend
  */
 class HTMLComboboxField extends HTMLTextField {
 	// FIXME Ewww, this shouldn't be adding any attributes not requested in $list :(
@@ -46,6 +48,10 @@ class HTMLComboboxField extends HTMLTextField {
 
 		if ( !empty( $this->mParams['disabled'] ) ) {
 			$disabled = true;
+		}
+
+		if ( $this->mPlaceholder !== '' ) {
+			$attribs['placeholder'] = $this->mPlaceholder;
 		}
 
 		return new OOUI\ComboBoxInputWidget( [

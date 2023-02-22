@@ -17,33 +17,81 @@
  *
  * @file
  */
+
+use MediaWiki\HookContainer\ProtectedHookAccessorTrait;
 use MediaWiki\MediaWikiServices;
 
 /**
- * Generic wrapper for template functions, with interface
- * compatible with what we use of PHPTAL 0.7.
+ * PHP-based skin template that holds data.
+ *
+ * Modern usage with returned output:
+ *
+ *     class MyTemplate extends QuickTemplate {
+ *         public function execute() {
+ *             $html = 'Hello, ' . Html::element( 'strong', [], $this->get( 'name' ) );
+ *             echo $html;
+ *         }
+ *     }
+ *     $tpl = new MyTemplate();
+ *     $tpl->set( 'name', 'World' );
+ *     $output = $tpl->getHTML();
+ *
+ * Classic usage with native HTML echo:
+ *
+ *     class MyTemplate extends QuickTemplate {
+ *         public function execute() { ?>
+ *
+ *             Hello, <strong><?php $this->text( 'name' ); ?></strong>
+ *
+ *         <?php
+ *         }
+ *     }
+ *     $tpl = new MyTemplate();
+ *     $tpl->set( 'name', 'World' );
+ *
+ *     $tpl->execute(); // echo output
+ *
+ *
+ * QuickTemplate was originally developed as drop-in replacement for PHPTAL 0.7 (<http://phptal.org/>).
+ *
+ * @stable to extend
  * @ingroup Skins
  */
 abstract class QuickTemplate {
+	use ProtectedHookAccessorTrait;
 
 	/**
 	 * @var array
 	 */
 	public $data;
 
-	/** @var Config $config */
+	/** @var Config */
 	protected $config;
+
+	/** @var array */
+	private $deprecated = [];
 
 	/**
 	 * @param Config|null $config
 	 */
-	function __construct( Config $config = null ) {
+	public function __construct( Config $config = null ) {
 		$this->data = [];
 		if ( $config === null ) {
 			wfDebug( __METHOD__ . ' was called with no Config instance passed to it' );
 			$config = MediaWikiServices::getInstance()->getMainConfig();
 		}
 		$this->config = $config;
+	}
+
+	/**
+	 * Sets a template key as deprecated.
+	 *
+	 * @internal only for usage inside Skin and SkinTemplate class.
+	 * @param string $name
+	 * @param string $version When it was deprecated e.g. 1.38
+	 */
+	public function deprecate( string $name, string $version ) {
+		$this->deprecated[$name] = $version;
 	}
 
 	/**
@@ -70,27 +118,31 @@ abstract class QuickTemplate {
 	}
 
 	/**
+	 * Checks if the template key is deprecated
+	 *
+	 * @param string $name
+	 */
+	private function checkDeprecationStatus( string $name ) {
+		$deprecated = $this->deprecated[ $name ] ?? false;
+		if ( $deprecated ) {
+			wfDeprecated(
+				'QuickTemplate::(get/html/text/haveData) with parameter `' . $name . '`',
+				$deprecated
+			);
+		}
+	}
+
+	/**
 	 * Gets the template data requested
 	 * @since 1.22
 	 * @param string $name Key for the data
 	 * @param mixed|null $default Optional default (or null)
-	 * @return mixed The value of the data requested or the deafult
+	 * @return mixed The value of the data requested or the default
 	 * @return-taint onlysafefor_htmlnoent
 	 */
 	public function get( $name, $default = null ) {
+		$this->checkDeprecationStatus( $name );
 		return $this->data[$name] ?? $default;
-	}
-
-	/**
-	 * @deprecated since 1.31 This function is a now-redundant optimisation intended
-	 *  for very old versions of PHP. The use of references here makes the code
-	 *  more fragile and is incompatible with plans like T140664. Use set() instead.
-	 * @param string $name
-	 * @param mixed &$value
-	 */
-	public function setRef( $name, &$value ) {
-		wfDeprecated( __METHOD__, '1.31' );
-		$this->data[$name] =& $value;
 	}
 
 	/**
@@ -100,60 +152,44 @@ abstract class QuickTemplate {
 	abstract public function execute();
 
 	/**
-	 * @private
 	 * @param string $str
 	 * @suppress SecurityCheck-DoubleEscaped $this->data can be either
 	 */
-	function text( $str ) {
+	protected function text( $str ) {
+		$this->checkDeprecationStatus( $str );
 		echo htmlspecialchars( $this->data[$str] );
 	}
 
 	/**
-	 * @private
 	 * @param string $str
 	 * @suppress SecurityCheck-XSS phan-taint-check cannot tell if $str is pre-escaped
 	 */
-	function html( $str ) {
+	public function html( $str ) {
+		$this->checkDeprecationStatus( $str );
 		echo $this->data[$str];
 	}
 
 	/**
-	 * @private
 	 * @param string $msgKey
 	 */
-	function msg( $msgKey ) {
+	public function msg( $msgKey ) {
 		echo htmlspecialchars( wfMessage( $msgKey )->text() );
 	}
 
 	/**
-	 * An ugly, ugly hack.
-	 * @deprecated since 1.33 Use ->msg() instead.
-	 * @param string $msgKey
-	 */
-	function msgWiki( $msgKey ) {
-		wfDeprecated( __METHOD__, '1.33' );
-		global $wgOut;
-
-		$text = wfMessage( $msgKey )->plain();
-		echo $wgOut->parseAsInterface( $text );
-	}
-
-	/**
-	 * @private
 	 * @param string $str
 	 * @return bool
 	 */
-	function haveData( $str ) {
+	private function haveData( $str ) {
+		$this->checkDeprecationStatus( $str );
 		return isset( $this->data[$str] );
 	}
 
 	/**
-	 * @private
-	 *
 	 * @param string $msgKey
 	 * @return bool
 	 */
-	function haveMsg( $msgKey ) {
+	protected function haveMsg( $msgKey ) {
 		$msg = wfMessage( $msgKey );
 		return $msg->exists() && !$msg->isDisabled();
 	}

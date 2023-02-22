@@ -1,18 +1,19 @@
 {
 	"@metadata": {
 		"authors": [
+			"Bugoslav",
 			"Dalibor Bosits",
 			"Dnik",
 			"Ex13",
+			"MaGa",
 			"Roberta F.",
 			"SpeedyGonsales",
 			"Tivek",
-			"MaGa",
-			"Bugoslav"
+			"Ponor"
 		]
 	},
 	"renameuser": "Preimenuj suradnika",
-	"renameuser-linkoncontribs": "preimenuj suradnika",
+	"renameuser-linkoncontribs": "preimenuj {{GENDER:$1|suradnika|suradnicu|suradnika/suradnicu}}",
 	"renameuser-linkoncontribs-text": "Preimenuj ovog suradnika",
 	"renameuser-desc": "Dodaje [[Special:RenameUser|posebnu stranicu]] za preimenovanje suradnika (potrebno je ''renameuser'' pravo)",
 	"renameuserold": "Trenutačno suradničko ime:",
@@ -24,7 +25,6 @@
 	"renameuserwarnings": "Upozorenja:",
 	"renameuserconfirm": "Da, preimenuj suradnika",
 	"renameusersubmit": "Potvrdi",
-	"renameuser-submit-blocklog": "Prikaži suradnikovu ili suradničinu evidenciju blokiranja",
 	"renameusererrordoesnotexist": "Suradnik \"<nowiki>$1</nowiki>\" ne postoji (suradničko ime nije zauzeto).",
 	"renameusererrorexists": "Suradničko ime \"<nowiki>$1</nowiki>\" već postoji",
 	"renameusererrorinvalid": "Suradničko ime \"<nowiki>$1</nowiki>\" nije valjano",

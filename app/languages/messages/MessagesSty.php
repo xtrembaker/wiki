@@ -1,10 +1,10 @@
 <?php
-/** Siberian Tatar (cебертатар)
+/** Siberian Tatar (себертатар)
  *
  * To improve a translation please visit https://translatewiki.net
  *
- * @ingroup Language
  * @file
+ * @ingroup Languages
  */
 
 $fallback = 'ru';

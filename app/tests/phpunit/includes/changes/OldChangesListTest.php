@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+
 /**
  * @covers OldChangesList
  *
@@ -18,19 +20,12 @@ class OldChangesListTest extends MediaWikiLangTestCase {
 	 */
 	private $testRecentChangesHelper;
 
-	public function __construct( $name = null, array $data = [], $dataName = '' ) {
-		parent::__construct( $name, $data, $dataName );
-
-		$this->testRecentChangesHelper = new TestRecentChangesHelper();
-	}
-
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( [
-			'wgArticlePath' => '/wiki/$1',
-		] );
+		$this->overrideConfigValue( MainConfigNames::ArticlePath, '/wiki/$1' );
 		$this->setUserLang( 'qqx' );
+		$this->testRecentChangesHelper = new TestRecentChangesHelper();
 	}
 
 	/**
@@ -106,13 +101,13 @@ class OldChangesListTest extends MediaWikiLangTestCase {
 
 		$line = $oldChangesList->recentChangesLine( $recentChange, false, 1 );
 
-		$this->assertContains(
+		$this->assertStringContainsString(
 			'<abbr class="newpage" title="(recentchanges-label-newpage)">(newpageletter)</abbr>',
 			$line,
 			'new page flag'
 		);
 
-		$this->assertContains(
+		$this->assertStringContainsString(
 			'<abbr class="botedit" title="(recentchanges-label-bot)">(boteditletter)</abbr>',
 			$line,
 			'bot flag'
@@ -123,9 +118,19 @@ class OldChangesListTest extends MediaWikiLangTestCase {
 		$recentChange = $this->getEditChange();
 		$recentChange->mAttribs['ts_tags'] = 'vandalism,newbie';
 
+		$this->setTemporaryHook( 'OldChangesListRecentChangesLine', static function (
+			$oldChangesList, &$html, $rc, $classes, $attribs
+		) {
+			$html = $html . '/<div>Additional change line </div>/';
+		} );
+
 		$oldChangesList = $this->getOldChangesList();
 		$line = $oldChangesList->recentChangesLine( $recentChange, false, 1 );
 
+		$this->assertStringContainsString(
+			'/<div>Additional change line </div>/',
+			$line
+		);
 		$this->assertRegExp(
 			'/<li data-mw-revid="\d+" data-mw-ts="\d+" class="[\w\s-]*mw-tag-vandalism[\w\s-]*">/',
 			$line
@@ -170,10 +175,10 @@ class OldChangesListTest extends MediaWikiLangTestCase {
 
 	public function testRecentChangesLine_prefix() {
 		$mockContext = $this->getMockBuilder( RequestContext::class )
-			->setMethods( [ 'getTitle' ] )
+			->onlyMethods( [ 'getTitle' ] )
 			->getMock();
 		$mockContext->method( 'getTitle' )
-			->will( $this->returnValue( Title::newFromText( 'Expected Context Title' ) ) );
+			->willReturn( Title::makeTitle( NS_MAIN, 'Expected Context Title' ) );
 
 		$oldChangesList = $this->getOldChangesList();
 		$oldChangesList->setContext( $mockContext );

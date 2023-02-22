@@ -1,16 +1,21 @@
 <?php
 
+namespace MediaWiki\Extension\SpamBlacklist;
+
+use LogicException;
+use Title;
+use User;
+use Wikimedia\AtEase\AtEase;
+
 /**
  * Email Blacklisting
  */
 class EmailBlacklist extends BaseBlacklist {
 	/**
-	 * @param array $links
-	 * @param Title $title
-	 * @param bool $preventLog
-	 * @return mixed
+	 * @inheritDoc
+	 * @suppress PhanPluginNeverReturnMethod LSP/ISP violation
 	 */
-	public function filter( array $links, Title $title, $preventLog = false ) {
+	public function filter( array $links, ?Title $title, User $user, $preventLog = false ) {
 		throw new LogicException( __CLASS__ . ' cannot be used to filter links.' );
 	}
 
@@ -46,7 +51,10 @@ class EmailBlacklist extends BaseBlacklist {
 			wfDebugLog( 'SpamBlacklist', "Excluding whitelisted email addresses from " .
 				count( $whitelists ) . " regexes: " . implode( ', ', $whitelists ) . "\n" );
 			foreach ( $whitelists as $regex ) {
-				if ( preg_match( $regex, $email ) ) {
+				AtEase::suppressWarnings();
+				$match = preg_match( $regex, $email );
+				AtEase::restoreWarnings();
+				if ( $match ) {
 					// Whitelisted email
 					return true;
 				}
@@ -57,7 +65,10 @@ class EmailBlacklist extends BaseBlacklist {
 		wfDebugLog( 'SpamBlacklist', "Checking e-mail address against " . count( $blacklists ) .
 			" regexes: " . implode( ', ', $blacklists ) . "\n" );
 		foreach ( $blacklists as $regex ) {
-			if ( preg_match( $regex, $email ) ) {
+			AtEase::suppressWarnings();
+			$match = preg_match( $regex, $email );
+			AtEase::restoreWarnings();
+			if ( $match ) {
 				return false;
 			}
 		}

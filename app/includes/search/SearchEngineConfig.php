@@ -1,5 +1,11 @@
 <?php
 
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\HookContainer\HookRunner;
+use MediaWiki\MainConfigNames;
+use MediaWiki\User\UserIdentity;
+use MediaWiki\User\UserOptionsLookup;
+
 /**
  * Configuration handling class for SearchEngine.
  * Provides added service over plain configuration.
@@ -20,9 +26,45 @@ class SearchEngineConfig {
 	 */
 	private $language;
 
-	public function __construct( Config $config, Language $lang ) {
+	/**
+	 * Search Engine Mappings
+	 *
+	 * Key is the canonical name (used in $wgSearchType and $wgSearchTypeAlternatives).
+	 * Value is a specification for ObjectFactory.
+	 *
+	 * @var array
+	 */
+	private $engineMappings;
+
+	/**
+	 * @var HookRunner
+	 */
+	private $hookRunner;
+
+	/**
+	 * @var UserOptionsLookup
+	 */
+	private $userOptionsLookup;
+
+	/**
+	 * @param Config $config
+	 * @param Language $lang
+	 * @param HookContainer $hookContainer
+	 * @param array $mappings
+	 * @param UserOptionsLookup $userOptionsLookup
+	 */
+	public function __construct(
+		Config $config,
+		Language $lang,
+		HookContainer $hookContainer,
+		array $mappings,
+		UserOptionsLookup $userOptionsLookup
+	) {
 		$this->config = $config;
 		$this->language = $lang;
+		$this->engineMappings = $mappings;
+		$this->hookRunner = new HookRunner( $hookContainer );
+		$this->userOptionsLookup = $userOptionsLookup;
 	}
 
 	/**
@@ -34,8 +76,9 @@ class SearchEngineConfig {
 	}
 
 	/**
-	 * Make a list of searchable namespaces and their canonical names.
-	 * @return array Namespace ID => name
+	 * Make a list of searchable namespaces and their localized names.
+	 * @return string[] Namespace ID => name
+	 * @phan-return array<int,string>
 	 */
 	public function searchableNamespaces() {
 		$arr = [];
@@ -45,7 +88,7 @@ class SearchEngineConfig {
 			}
 		}
 
-		Hooks::run( 'SearchableNamespaces', [ &$arr ] );
+		$this->hookRunner->onSearchableNamespaces( $arr );
 		return $arr;
 	}
 
@@ -53,13 +96,13 @@ class SearchEngineConfig {
 	 * Extract default namespaces to search from the given user's
 	 * settings, returning a list of index numbers.
 	 *
-	 * @param user $user
+	 * @param UserIdentity $user
 	 * @return int[]
 	 */
 	public function userNamespaces( $user ) {
 		$arr = [];
 		foreach ( $this->searchableNamespaces() as $ns => $name ) {
-			if ( $user->getOption( 'searchNs' . $ns ) ) {
+			if ( $this->userOptionsLookup->getOption( $user, 'searchNs' . $ns ) ) {
 				$arr[] = $ns;
 			}
 		}
@@ -73,7 +116,8 @@ class SearchEngineConfig {
 	 * @return int[] Namespace IDs
 	 */
 	public function defaultNamespaces() {
-		return array_keys( $this->config->get( 'NamespacesToBeSearchedDefault' ), true );
+		return array_keys( $this->config->get( MainConfigNames::NamespacesToBeSearchedDefault ),
+			true );
 	}
 
 	/**
@@ -83,8 +127,8 @@ class SearchEngineConfig {
 	 * @return array
 	 */
 	public function getSearchTypes() {
-		$alternatives = $this->config->get( 'SearchTypeAlternatives' ) ?: [];
-		array_unshift( $alternatives, $this->config->get( 'SearchType' ) );
+		$alternatives = $this->config->get( MainConfigNames::SearchTypeAlternatives ) ?: [];
+		array_unshift( $alternatives, $this->config->get( MainConfigNames::SearchType ) );
 
 		return $alternatives;
 	}
@@ -95,7 +139,31 @@ class SearchEngineConfig {
 	 * @return string|null
 	 */
 	public function getSearchType() {
-		return $this->config->get( 'SearchType' );
+		return $this->config->get( MainConfigNames::SearchType );
+	}
+
+	/**
+	 * Returns the mappings between canonical search name and underlying PHP class
+	 *
+	 * Key is the canonical name (used in $wgSearchType and $wgSearchTypeAlternatives).
+	 * Value is a specification for ObjectFactory.
+	 *
+	 * For example to be able to use 'foobarsearch' in $wgSearchType and
+	 * $wgSearchTypeAlternatives but the PHP class for 'foobarsearch'
+	 * is 'MediaWiki\Extension\FoobarSearch\FoobarSearch' set:
+	 *
+	 * @par extension.json Example:
+	 * @code
+	 * "SearchMappings": {
+	 * 	"foobarsearch": { "class": "MediaWiki\\Extension\\FoobarSearch\\FoobarSearch" }
+	 * }
+	 * @endcode
+	 *
+	 * @since 1.35
+	 * @return array
+	 */
+	public function getSearchMappings() {
+		return $this->engineMappings;
 	}
 
 	/**

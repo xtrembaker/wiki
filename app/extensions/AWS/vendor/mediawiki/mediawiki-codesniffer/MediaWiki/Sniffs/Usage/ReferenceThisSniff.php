@@ -32,7 +32,7 @@ class ReferenceThisSniff implements Sniff {
 	/**
 	 * @inheritDoc
 	 */
-	public function register() {
+	public function register(): array {
 		// As per https://www.mediawiki.org/wiki/Manual:Coding_conventions/PHP#Other
 		return [
 			T_BITWISE_AND
@@ -46,13 +46,18 @@ class ReferenceThisSniff implements Sniff {
 	 */
 	public function process( File $phpcsFile, $stackPtr ) {
 		$tokens = $phpcsFile->getTokens();
+		if ( !isset( $tokens[$stackPtr + 1] ) ) {
+			// Syntax error or live coding, bow out.
+			return;
+		}
+
 		$next = $tokens[$stackPtr + 1];
 		if ( $next['code'] === T_VARIABLE && $next['content'] === '$this' ) {
 			$after = $phpcsFile->findNext( T_WHITESPACE, $stackPtr + 2, null, true );
 			if ( $after !== false &&
 				in_array(
 					$tokens[$after]['code'],
-					[ T_OBJECT_OPERATOR, T_OPEN_SQUARE_BRACKET, T_DOUBLE_COLON ]
+					[ T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR, T_OPEN_SQUARE_BRACKET, T_DOUBLE_COLON ]
 				)
 			) {
 				return;

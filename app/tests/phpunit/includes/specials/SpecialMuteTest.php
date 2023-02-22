@@ -1,33 +1,42 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\User\UserOptionsManager;
+
 /**
  * @group SpecialPage
  * @covers SpecialMute
  */
 class SpecialMuteTest extends SpecialPageTestBase {
 
-	protected function setUp() {
+	/** @var UserOptionsManager */
+	private $userOptionsManager;
+
+	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( [
-			'wgEnableUserEmailBlacklist' => true
-		] );
+		$this->userOptionsManager = $this->getServiceContainer()->getUserOptionsManager();
+		$this->overrideConfigValue( MainConfigNames::EnableUserEmailMuteList, true );
 	}
 
 	/**
 	 * @inheritDoc
 	 */
 	protected function newSpecialPage() {
-		return new SpecialMute();
+		return new SpecialMute(
+			$this->getServiceContainer()->getCentralIdLookupFactory()->getLookup( 'local' ),
+			$this->userOptionsManager,
+			$this->getServiceContainer()->getUserIdentityLookup()
+		);
 	}
 
 	/**
 	 * @covers SpecialMute::execute
-	 * @expectedExceptionMessage username requested could not be found
-	 * @expectedException ErrorPageError
 	 */
 	public function testInvalidTarget() {
 		$user = $this->getTestUser()->getUser();
+		$this->expectException( ErrorPageError::class );
+		$this->expectExceptionMessage( "username requested could not be found" );
 		$this->executeSpecialPage(
 			'InvalidUser', null, 'qqx', $user
 		);
@@ -35,8 +44,6 @@ class SpecialMuteTest extends SpecialPageTestBase {
 
 	/**
 	 * @covers SpecialMute::execute
-	 * @expectedExceptionMessage Mute features are unavailable
-	 * @expectedException ErrorPageError
 	 */
 	public function testEmailBlacklistNotEnabled() {
 		$this->setTemporaryHook(
@@ -44,11 +51,11 @@ class SpecialMuteTest extends SpecialPageTestBase {
 			null
 		);
 
-		$this->setMwGlobals( [
-			'wgEnableUserEmailBlacklist' => false
-		] );
+		$this->overrideConfigValue( MainConfigNames::EnableUserEmailMuteList, false );
 
 		$user = $this->getTestUser()->getUser();
+		$this->expectException( ErrorPageError::class );
+		$this->expectExceptionMessage( "Mute features are unavailable" );
 		$this->executeSpecialPage(
 			$user->getName(), null, 'qqx', $user
 		);
@@ -56,9 +63,9 @@ class SpecialMuteTest extends SpecialPageTestBase {
 
 	/**
 	 * @covers SpecialMute::execute
-	 * @expectedException UserNotLoggedIn
 	 */
 	public function testUserNotLoggedIn() {
+		$this->expectException( UserNotLoggedIn::class );
 		$this->executeSpecialPage( 'TestUser' );
 	}
 
@@ -66,14 +73,10 @@ class SpecialMuteTest extends SpecialPageTestBase {
 	 * @covers SpecialMute::execute
 	 */
 	public function testMuteAddsUserToEmailBlacklist() {
-		$this->setMwGlobals( [
-			'wgCentralIdLookupProvider' => 'local',
-		] );
-
 		$targetUser = $this->getTestUser()->getUser();
 
 		$loggedInUser = $this->getMutableTestUser()->getUser();
-		$loggedInUser->setOption( 'email-blacklist', "999" );
+		$this->userOptionsManager->setOption( $loggedInUser, 'email-blacklist', "999" );
 		$loggedInUser->confirmEmail();
 		$loggedInUser->saveSettings();
 
@@ -82,10 +85,10 @@ class SpecialMuteTest extends SpecialPageTestBase {
 			$targetUser->getName(), $fauxRequest, 'qqx', $loggedInUser
 		);
 
-		$this->assertContains( 'specialmute-success', $html );
+		$this->assertStringContainsString( 'specialmute-success', $html );
 		$this->assertEquals(
 			"999\n" . $targetUser->getId(),
-			$loggedInUser->getOption( 'email-blacklist' )
+			$this->userOptionsManager->getOption( $loggedInUser, 'email-blacklist' )
 		);
 	}
 
@@ -93,14 +96,10 @@ class SpecialMuteTest extends SpecialPageTestBase {
 	 * @covers SpecialMute::execute
 	 */
 	public function testUnmuteRemovesUserFromEmailBlacklist() {
-		$this->setMwGlobals( [
-			'wgCentralIdLookupProvider' => 'local',
-		] );
-
 		$targetUser = $this->getTestUser()->getUser();
 
 		$loggedInUser = $this->getMutableTestUser()->getUser();
-		$loggedInUser->setOption( 'email-blacklist', "999\n" . $targetUser->getId() );
+		$this->userOptionsManager->setOption( $loggedInUser, 'email-blacklist', "999\n" . $targetUser->getId() );
 		$loggedInUser->confirmEmail();
 		$loggedInUser->saveSettings();
 
@@ -109,7 +108,7 @@ class SpecialMuteTest extends SpecialPageTestBase {
 			$targetUser->getName(), $fauxRequest, 'qqx', $loggedInUser
 		);
 
-		$this->assertContains( 'specialmute-success', $html );
-		$this->assertEquals( "999", $loggedInUser->getOption( 'email-blacklist' ) );
+		$this->assertStringContainsString( 'specialmute-success', $html );
+		$this->assertSame( "999", $this->userOptionsManager->getOption( $loggedInUser, 'email-blacklist' ) );
 	}
 }

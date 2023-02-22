@@ -1,14 +1,19 @@
 #!/usr/bin/env php
 <?php
 // pdep is a tool to help explore dependencies of classes.
+// @phan-file-suppress PhanPluginRemoveDebugEcho
 
 use Phan\CLIBuilder;
 use Phan\Phan;
 
 define("PDEP_IGNORE_STATIC", 1 << 0);
 define("PDEP_HIDE_LABELS", 1 << 1);
+define("PDEP_IGNORE_NEW", 1 << 2);
 
-/** Prints a usage message for 'pdep' and exits. */
+/**
+ * Prints a usage message for 'pdep' and exits.
+ * @return never
+ */
 function pdep_usage(int $status) : void {
     global $argv;
     echo <<<EOT
@@ -24,6 +29,7 @@ Usage: {$argv[0]} [options] [files or classes...]
  -m, --graphml       GraphML output
      --hide-labels   Labels are hidden - hover in yEd to see them
      --ignore-static Don't include static calls and static var dependencies
+     --ignore-new    Don't include instantiation dependencies
  -d, --depth <depth_level>
     When walking the dependency graph, limit it to this depth. For
     example,
@@ -66,6 +72,7 @@ call_user_func(static function () : void {
             'graph',
             'graphml',
             'ignore-static',
+            'ignore-new',
             'hide-labels',
             'find-classes',
             'find-files',
@@ -113,7 +120,6 @@ call_user_func(static function () : void {
         return;
     }
 
-    $code_base = require_once __DIR__ . '/../src/codebase.php';
     require_once __DIR__ . '/../src/Phan/Bootstrap.php';
 
     $cli_builder = new CLIBuilder();
@@ -133,6 +139,9 @@ call_user_func(static function () : void {
                 break;
             case 'ignore-static':
                 $graph_flags |= \PDEP_IGNORE_STATIC;
+                break;
+            case 'ignore-new':
+                $graph_flags |= \PDEP_IGNORE_NEW;
                 break;
             case 'hide-labels':
                 $graph_flags |= \PDEP_HIDE_LABELS;
@@ -160,6 +169,7 @@ call_user_func(static function () : void {
                 break;
             case 'i':
             case 'import':
+                $cli_builder->setOption('no-progress-bar');
                 $graph_file = (string)$value;
                 break;
         }
@@ -179,7 +189,6 @@ call_user_func(static function () : void {
 
     $cwd = \getcwd();
 
-    // @phan-suppress-next-line PhanThrowTypeAbsentForCall
     $cli_builder->setOption('allow-polyfill-parser');
     $cli_builder->setOption('processes', '1');
     $cli_builder->setOption('plugin', dirname($tool_dir) . '/src/Phan/Plugin/Internal/DependencyGraphPlugin.php');
@@ -195,6 +204,8 @@ call_user_func(static function () : void {
     $putenv("PDEP_DEPTH", (string)$depth);
     $putenv("PDEP_ARGS", $arg_string);
     $putenv("PDEP_GRAPH_FLAGS", (string)$graph_flags);
+    // Generate codebase info after parsing configs (e.g. included_extension_subset)
+    $code_base = require(__DIR__ . '/../src/codebase.php');
 
     if (isset($options['i'])) {
         $data = @file_get_contents($graph_file);

@@ -83,7 +83,7 @@ final class StringFunctionPlugin extends PluginV3 implements
                 $expected_const_pos,
                 $expected_variable_pos,
                 $expected_arg_count
-): void {
+            ): void {
                 if (\count($args) < $expected_arg_count) {
                     return;
                 }
@@ -158,7 +158,9 @@ final class StringFunctionPlugin extends PluginV3 implements
             'sha1'                      => $var_1_const_2,
             'sscanf'                    => $var_1_const_2,
             'strchr'                    => $var_1_const_2,
+            'str_contains'              => $var_1_const_2,
             'strcspn'                   => $var_1_const_2,
+            'str_ends_with'             => $var_1_const_2,
             'str_getcsv'                => $var_1_const_2,
             'stripos'                   => $var_1_const_2,
             'strip_tags'                => $var_1_const_2,
@@ -168,6 +170,7 @@ final class StringFunctionPlugin extends PluginV3 implements
             'strpbrk'                   => $var_1_const_2,
             'strpos'                    => $var_1_const_2,
             'str_replace'               => $var_3_const_1,
+            'str_starts_with'           => $var_1_const_2,
             'strripos'                  => $var_1_const_2,
             'strrpos'                   => $var_1_const_2,
             'str_split'                 => $var_1_const_2,

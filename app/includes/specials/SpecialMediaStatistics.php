@@ -22,31 +22,56 @@
  * @author Brian Wolff
  */
 
-use Wikimedia\Rdbms\IResultWrapper;
+use MediaWiki\Cache\LinkBatchFactory;
 use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\ILoadBalancer;
+use Wikimedia\Rdbms\IResultWrapper;
 
 /**
  * @ingroup SpecialPage
  */
 class SpecialMediaStatistics extends QueryPage {
+
+	public const MAX_LIMIT = 5000;
+
 	protected $totalCount = 0, $totalBytes = 0;
 
 	/**
-	 * @var int $totalPerType Combined file size of all files in a section
+	 * @var int Combined file size of all files in a section
 	 */
 	protected $totalPerType = 0;
 
 	/**
-	 * @var int $totalSize Combined file size of all files
+	 * @var int Combined file count of all files in a section
+	 */
+	protected $countPerType = 0;
+
+	/**
+	 * @var int Combined file size of all files
 	 */
 	protected $totalSize = 0;
 
-	function __construct( $name = 'MediaStatistics' ) {
-		parent::__construct( $name );
+	/** @var MimeAnalyzer */
+	private $mimeAnalyzer;
+
+	/**
+	 * @param MimeAnalyzer $mimeAnalyzer
+	 * @param ILoadBalancer $loadBalancer
+	 * @param LinkBatchFactory $linkBatchFactory
+	 */
+	public function __construct(
+		MimeAnalyzer $mimeAnalyzer,
+		ILoadBalancer $loadBalancer,
+		LinkBatchFactory $linkBatchFactory
+	) {
+		parent::__construct( 'MediaStatistics' );
 		// Generally speaking there is only a small number of file types,
 		// so just show all of them.
-		$this->limit = 5000;
+		$this->limit = self::MAX_LIMIT;
 		$this->shownavigation = false;
+		$this->mimeAnalyzer = $mimeAnalyzer;
+		$this->setDBLoadBalancer( $loadBalancer );
+		$this->setLinkBatchFactory( $linkBatchFactory );
 	}
 
 	public function isExpensive() {
@@ -68,7 +93,7 @@ class SpecialMediaStatistics extends QueryPage {
 	 * @return array
 	 */
 	public function getQueryInfo() {
-		$dbr = wfGetDB( DB_REPLICA );
+		$dbr = $this->getDBLoadBalancer()->getConnectionRef( ILoadBalancer::DB_REPLICA );
 		$fakeTitle = $dbr->buildConcat( [
 			'img_media_type',
 			$dbr->addQuotes( ';' ),
@@ -104,7 +129,7 @@ class SpecialMediaStatistics extends QueryPage {
 	 * tables will be fragmented.
 	 * @return array Fields to sort by
 	 */
-	function getOrderFields() {
+	protected function getOrderFields() {
 		return [ 'img_media_type', 'count(*)', 'img_major_mime', 'img_minor_mime' ];
 	}
 
@@ -134,6 +159,7 @@ class SpecialMediaStatistics extends QueryPage {
 				}
 				$this->outputMediaType( $mediaType );
 				$this->totalPerType = 0;
+				$this->countPerType = 0;
 				$this->outputTableStart( $mediaType );
 				$prevMediaType = $mediaType;
 			}
@@ -147,6 +173,7 @@ class SpecialMediaStatistics extends QueryPage {
 				$this->msg( 'mediastatistics-allbytes' )
 					->numParams( $this->totalSize )
 					->sizeParams( $this->totalSize )
+					->numParams( $this->totalCount )
 					->text()
 			);
 		}
@@ -165,6 +192,8 @@ class SpecialMediaStatistics extends QueryPage {
 					->numParams( $this->totalPerType )
 					->sizeParams( $this->totalPerType )
 					->numParams( $this->makePercentPretty( $this->totalPerType / $this->totalBytes ) )
+					->numParams( $this->countPerType )
+					->numParams( $this->makePercentPretty( $this->countPerType / $this->totalCount ) )
 					->text()
 		);
 		$this->totalSize += $this->totalPerType;
@@ -212,6 +241,7 @@ class SpecialMediaStatistics extends QueryPage {
 				->parse()
 		);
 		$this->totalPerType += $bytes;
+		$this->countPerType += $count;
 		$this->getOutput()->addHTML( Html::rawElement( 'tr', [], $row ) );
 	}
 
@@ -240,18 +270,15 @@ class SpecialMediaStatistics extends QueryPage {
 	 * @return string Comma separated list of allowed extensions (e.g. ".ogg, .oga")
 	 */
 	private function getExtensionList( $mime ) {
-		$exts = MediaWiki\MediaWikiServices::getInstance()->getMimeAnalyzer()
-			->getExtensionsForType( $mime );
-		if ( $exts === null ) {
+		$exts = $this->mimeAnalyzer->getExtensionsFromMimeType( $mime );
+		if ( !$exts ) {
 			return '';
 		}
-		$extArray = explode( ' ', $exts );
-		$extArray = array_unique( $extArray );
-		foreach ( $extArray as &$ext ) {
+		foreach ( $exts as &$ext ) {
 			$ext = htmlspecialchars( '.' . $ext );
 		}
 
-		return $this->getLanguage()->commaList( $extArray );
+		return $this->getLanguage()->commaList( $exts );
 	}
 
 	/**
@@ -293,7 +320,7 @@ class SpecialMediaStatistics extends QueryPage {
 				[],
 				// for grep:
 				// mediastatistics-table-mimetype, mediastatistics-table-extensions
-				// tatistics-table-count, mediastatistics-table-totalbytes
+				// mediastatistics-table-count, mediastatistics-table-totalbytes
 				$this->msg( 'mediastatistics-table-' . $header )->parse()
 			);
 		}
@@ -332,7 +359,7 @@ class SpecialMediaStatistics extends QueryPage {
 	 * parse the fake title format that this special page abuses querycache with.
 	 *
 	 * @param string $fakeTitle A string formatted as <media type>;<mime type>;<count>;<bytes>
-	 * @return array The constituant parts of $fakeTitle
+	 * @return array The constituent parts of $fakeTitle
 	 */
 	private function splitFakeTitle( $fakeTitle ) {
 		return explode( ';', $fakeTitle, 4 );
@@ -354,6 +381,7 @@ class SpecialMediaStatistics extends QueryPage {
 	 * @param stdClass $result Result row
 	 * @return bool|string|void
 	 * @throws MWException
+	 * @suppress PhanPluginNeverReturnMethod
 	 */
 	public function formatResult( $skin, $result ) {
 		throw new MWException( "unimplemented" );

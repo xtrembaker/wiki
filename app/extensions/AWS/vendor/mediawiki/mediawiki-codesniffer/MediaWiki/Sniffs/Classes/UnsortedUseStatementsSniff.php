@@ -26,10 +26,13 @@ use PHP_CodeSniffer\Util\Tokens;
 
 class UnsortedUseStatementsSniff implements Sniff {
 
+	// Preferred order is classes → functions → constants
+	private const ORDER = [ 'function' => 1, 'const' => 2 ];
+
 	/**
 	 * @inheritDoc
 	 */
-	public function register() : array {
+	public function register(): array {
 		return [ T_USE ];
 	}
 
@@ -43,147 +46,196 @@ class UnsortedUseStatementsSniff implements Sniff {
 	public function process( File $phpcsFile, $stackPtr ) {
 		$tokens = $phpcsFile->getTokens();
 
-		// Only check use statements in the global scope.
+		// In case this is a `use` of a class (or constant or function) within
+		// a bracketed namespace rather than in the global scope, update the end
+		// accordingly
+		$useScopeEnd = $phpcsFile->numTokens;
+
 		if ( !empty( $tokens[$stackPtr]['conditions'] ) ) {
+			// We only care about use statements in the global scope, or the
+			// equivalent for bracketed namespace (use statements in the namespace
+			// and not in any class, etc.)
 			// TODO: Use array_key_first() if available
 			$scope = key( $tokens[$stackPtr]['conditions'] );
-			return $tokens[$scope]['scope_closer'] ?? $stackPtr;
-		}
-
-		// Seek to the end of the statement and get the string before the semi colon.
-		$semiColon = $phpcsFile->findEndOfStatement( $stackPtr );
-		if ( $tokens[$semiColon]['code'] !== T_SEMICOLON ) {
-			return;
-		}
-
-		$useStatementList = $this->makeUseStatementList( $phpcsFile, $stackPtr );
-		$sortedStatements = [
-			'classes' => $this->sortStatements( $useStatementList['classes'] ),
-			'functions' => $this->sortStatements( $useStatementList['functions'] ),
-			'constants' => $this->sortStatements( $useStatementList['constants'] )
-		];
-
-		$lastUseStatementToken = max( array_merge( ...array_values( $useStatementList ) ) );
-
-		if ( !$this->useStatementsAreSorted( $useStatementList, $sortedStatements ) ) {
-			$fix = $phpcsFile->addFixableWarning(
-				'Use statements are not alphabetically sorted',
-				$stackPtr,
-				'UnsortedUse'
-			);
-
-			if ( $fix ) {
-				$phpcsFile->fixer->beginChangeset();
-
-				foreach (
-					$useStatementList['classes'] +
-					$useStatementList['functions'] +
-					$useStatementList['constants'] as $useStatementPtr
-				) {
-					$endOfUseStatement = $phpcsFile->findEndOfStatement( $useStatementPtr );
-
-					for ( $i = $useStatementPtr; $i < $endOfUseStatement; $i++ ) {
-						$phpcsFile->fixer->replaceToken( $i, '' );
-					}
-				}
-
-				$sortedStatements = array_merge(
-					$sortedStatements['classes'],
-					$sortedStatements['functions'],
-					$sortedStatements['constants']
-				);
-
-				foreach ( $sortedStatements as $statement ) {
-					$phpcsFile->fixer->addContent( $stackPtr, "$statement;" );
-					$phpcsFile->fixer->addNewline( $stackPtr );
-				}
-
-				$phpcsFile->fixer->endChangeset();
+			if ( count( $tokens[$stackPtr]['conditions'] ) === 1
+				&& $tokens[$stackPtr]['conditions'][$scope] === T_NAMESPACE
+			) {
+				$useScopeEnd = $tokens[$scope]['scope_closer'];
+			} else {
+				return $tokens[$scope]['scope_closer'] ?? $stackPtr;
 			}
 		}
 
-		// Continue *after* the last use token, to not process it twice
-		return $lastUseStatementToken + 1;
-	}
-
-	/**
-	 * This sorts full qualified class names similar to PHPStorm and other tools.
-	 *
-	 * @param int[] $statementList Array mapping class names to stack pointers
-	 * @return string[] Sorted list of class names
-	 */
-	private function sortStatements( array $statementList ) : array {
-		$map = [];
-		foreach ( $statementList as $use => $_ ) {
-			// This is a fast way to strip the leading "use " as well as leading backslashes
-			$map[$use] = strtolower( ltrim( substr( $use, 4 ), '\\' ) );
+		$useStatementList = $this->makeUseStatementList( $phpcsFile, $stackPtr, $useScopeEnd );
+		// Nothing to do, bail out as fast as possible
+		if ( count( $useStatementList ) <= 1 ) {
+			return;
 		}
-		natsort( $map );
-		// @phan-suppress-next-line PhanTypeMismatchReturn False positive as array_keys can return list<string>
-		return array_keys( $map );
-	}
 
-	/**
-	 * @param array[] $useStatements Three arrays mapping class names to stack pointers
-	 * @param array[] $sortedStatements Three lists of class names
-	 * @return bool
-	 */
-	private function useStatementsAreSorted( array $useStatements, array $sortedStatements ) : bool {
-		$useStatements = [
-			'classes' => array_keys( $useStatements['classes'] ),
-			'functions' => array_keys( $useStatements['functions'] ),
-			'constants' => array_keys( $useStatements['constants'] )
-		];
+		$sortedStatements = $this->sortByFullQualifiedClassName( $useStatementList );
+		// Continue *after* the last use token to not process it twice
+		$afterLastUse = end( $useStatementList )['end'] + 1;
 
-		return $sortedStatements === $useStatements;
+		if ( $useStatementList === $sortedStatements ) {
+			return $afterLastUse;
+		}
+
+		$fix = $phpcsFile->addFixableWarning(
+			'Use statements are not alphabetically sorted',
+			$stackPtr,
+			'UnsortedUse'
+		);
+		if ( !$fix ) {
+			return $afterLastUse;
+		}
+
+		// Find how much whitespace there was before the T_USE for the first
+		// use statement, so that we can indent the rest the same amount,
+		// used for bracketed namespaces
+		$leadingWhitespace = '';
+		$firstOnLine = $phpcsFile->findFirstOnLine(
+			[ T_WHITESPACE ],
+			$stackPtr
+		);
+
+		$phpcsFile->fixer->beginChangeset();
+
+		// If there was no leading whitespace, we will be inserting the
+		// sorted list in the location of the first T_USE, but if there
+		// was whitespace, insert at the start of that line
+		$insertPoint = $stackPtr;
+		if ( $firstOnLine ) {
+			$insertPoint = $firstOnLine;
+			for ( $iii = $firstOnLine; $iii < $stackPtr; $iii++ ) {
+				if ( $tokens[$iii]['code'] === T_WHITESPACE ) {
+					// Handle tabs converted to spaces automatically
+					// by using orig_content if available
+					$leadingWhitespace .= $tokens[$iii]['orig_content'] ?? $tokens[$iii]['content'];
+					// Remove the whitespace from before the first
+					// use statement, will be added back when the
+					// statement is rewritten
+					$phpcsFile->fixer->replaceToken( $iii, '' );
+				}
+			}
+		}
+
+		foreach ( $useStatementList as $statement ) {
+			// Remove any whitespace before the start, so that it
+			// doesn't add up for use statements in a bracketed namespace
+			$thisLine = $tokens[ $statement['start'] ]['line'];
+			$i = $statement['start'] - 1;
+			while ( $tokens[$i]['line'] === $thisLine &&
+				$tokens[$i]['code'] === T_WHITESPACE
+			) {
+				$phpcsFile->fixer->replaceToken( $i, '' );
+				$i--;
+			}
+			for ( $i = $statement['start']; $i <= $statement['end']; $i++ ) {
+				$phpcsFile->fixer->replaceToken( $i, '' );
+			}
+			// Also remove the newline at the end of the line, if there is one
+			if ( $tokens[$i]['code'] === T_WHITESPACE
+				&& $tokens[$i]['line'] < $tokens[$i + 1]['line']
+			) {
+				$phpcsFile->fixer->replaceToken( $i, '' );
+			}
+		}
+
+		foreach ( $sortedStatements as $statement ) {
+			$phpcsFile->fixer->addContent( $insertPoint, $leadingWhitespace );
+			$phpcsFile->fixer->addContent( $insertPoint, $statement['originalContent'] );
+			$phpcsFile->fixer->addNewline( $insertPoint );
+		}
+
+		$phpcsFile->fixer->endChangeset();
+
+		return $afterLastUse;
 	}
 
 	/**
 	 * @param File $phpcsFile
 	 * @param int $stackPtr
-	 * @return array[] Three arrays mapping full qualified class names to stack pointers
+	 * @param int $useScopeEnd
+	 * @return array[]
 	 */
-	private function makeUseStatementList( File $phpcsFile, int $stackPtr ) : array {
+	private function makeUseStatementList( File $phpcsFile, int $stackPtr, int $useScopeEnd ): array {
 		$tokens = $phpcsFile->getTokens();
-		$useStatementList = [
-			'classes' => [],
-			'functions' => [],
-			'constants' => []
-		];
+		$next = $stackPtr;
+		$list = [];
 
 		do {
-			// Seek to the end of the statement and get the string before the semi colon.
-			$semiColon = $phpcsFile->findEndOfStatement( $stackPtr );
+			$originalContent = '';
+			$group = 0;
+			$sortKey = '';
+			$collectSortKey = false;
+			$start = $next;
 
-			$fqnclass = $phpcsFile->getTokensAsString( $stackPtr, $semiColon - $stackPtr );
+			// The end condition here is for when a file ends directly after a "use"
+			// in the case of statements in the global scope, or to properly limit the
+			// search in case of a bracketed namespace
+			for ( ; $next < $useScopeEnd; $next++ ) {
+				[ 'code' => $code, 'content' => $content ] = $tokens[$next];
+				$originalContent .= $content;
 
-			$next = $phpcsFile->findNext( Tokens::$emptyTokens, $stackPtr + 1, null, true );
+				if ( $code === T_STRING ) {
+					// Reserved keywords "function" and "const" can not appear anywhere else
+					if ( strcasecmp( $content, 'function' ) === 0
+						|| strcasecmp( $content, 'const' ) === 0
+					) {
+						$group = self::ORDER[ strtolower( $content ) ];
+					} elseif ( !$sortKey ) {
+						// The first non-reserved string is where the class name starts
+						$collectSortKey = true;
+					}
+				} elseif ( $code === T_AS ) {
+					// The string after an "as" is not part of the class name any more
+					$collectSortKey = false;
+				} elseif ( $code === T_SEMICOLON && $sortKey ) {
+					$list[] = [
+						'start' => $start,
+						'end' => $next,
+						'originalContent' => $originalContent,
+						'group' => $group,
+						// No need to trim(), no spaces or leading backslashes have been collected
+						'sortKey' => strtolower( $sortKey ),
+					];
 
-			// Check if this is an use for a constant or a function.
-			if ( $this->isToken( $tokens, $next, 'function' ) ) {
-				$useStatementList['functions'][$fqnclass] = $stackPtr;
-			} elseif ( $this->isToken( $tokens, $next, 'const' ) ) {
-				$useStatementList['constants'][$fqnclass] = $stackPtr;
-			} else {
-				$useStatementList['classes'][$fqnclass] = $stackPtr;
+					// Try to find the next "use" token after the current one
+					// We don't care about the end of the findNext since that is enforced
+					// via the for condition
+					$next = $phpcsFile->findNext( Tokens::$emptyTokens, $next + 1, null, true );
+					break;
+				} elseif ( isset( Tokens::$emptyTokens[$code] ) ) {
+					// We never want any space or comment in the sort key
+					continue;
+				} elseif ( $code !== T_USE && $code !== T_NS_SEPARATOR ) {
+					// Unexpected token, stop searching for more "use" keywords
+					break 2;
+				}
+
+				if ( $collectSortKey ) {
+					$sortKey .= $content;
+				}
 			}
+		} while ( $next && isset( $tokens[$next] ) && $tokens[$next]['code'] === T_USE );
 
-			$stackPtr = $phpcsFile->findNext( T_USE, $semiColon );
-		} while ( $stackPtr !== false && empty( $tokens[$stackPtr]['conditions'] ) );
-
-		return $useStatementList;
+		return $list;
 	}
 
 	/**
-	 * @param array[] $tokens
-	 * @param int $stackPtr
-	 * @param string $content
-	 * @return bool
+	 * @param array[] $list
+	 * @return array[]
 	 */
-	private function isToken( array $tokens, int $stackPtr, string $content ) : bool {
-		return $tokens[$stackPtr]['code'] === T_STRING &&
-			$tokens[$stackPtr]['content'] === $content &&
-			// Namespace separators must follow T_STRING, so no white space check is required.
-			$tokens[$stackPtr + 1]['code'] !== T_NS_SEPARATOR;
+	private function sortByFullQualifiedClassName( array $list ): array {
+		usort( $list, static function ( array $a, array $b ) {
+			if ( $a['group'] !== $b['group'] ) {
+				return $a['group'] <=> $b['group'];
+			}
+			// Can't use strnatcasecmp() because it behaves different, compared to e.g. PHPStorm
+			return strnatcmp( $a['sortKey'], $b['sortKey'] );
+		} );
+
+		return $list;
 	}
+
 }

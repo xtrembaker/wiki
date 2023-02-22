@@ -19,9 +19,19 @@
  *
  * @file
  */
+
+use MediaWiki\HookContainer\ProtectedHookAccessorTrait;
+use MediaWiki\Linker\LinkTarget;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\PageIdentity;
+use MediaWiki\Page\PageReference;
+use Wikimedia\Rdbms\SelectQueryBuilder;
 
 class CategoryViewer extends ContextSource {
+	use ProtectedHookAccessorTrait;
+	use DeprecationHelper;
+
 	/** @var int */
 	public $limit;
 
@@ -61,8 +71,8 @@ class CategoryViewer extends ContextSource {
 	/** @var array */
 	public $flip;
 
-	/** @var Title */
-	public $title;
+	/** @var PageIdentity */
+	protected $page;
 
 	/** @var Collation */
 	public $collation;
@@ -76,29 +86,47 @@ class CategoryViewer extends ContextSource {
 	/** @var array The original query array, to be used in generating paging links. */
 	private $query;
 
+	/** @var ILanguageConverter */
+	private $languageConverter;
+
 	/**
 	 * @since 1.19 $context is a second, required parameter
-	 * @param Title $title
+	 * @param PageIdentity $page
 	 * @param IContextSource $context
 	 * @param array $from An array with keys page, subcat,
 	 *        and file for offset of results of each section (since 1.17)
 	 * @param array $until An array with 3 keys for until of each section (since 1.17)
 	 * @param array $query
 	 */
-	function __construct( $title, IContextSource $context, $from = [],
-		$until = [], $query = []
+	public function __construct( PageIdentity $page, IContextSource $context, array $from = [],
+		array $until = [], array $query = []
 	) {
-		$this->title = $title;
+		$this->page = $page;
+
+		$this->deprecatePublicPropertyFallback(
+			'title',
+			'1.37',
+			function (): Title {
+				// @phan-suppress-next-line PhanTypeMismatchReturnNullable castFrom does not return null here
+				return Title::castFromPageIdentity( $this->page );
+			},
+			function ( PageIdentity $page ) {
+				$this->page = $page;
+			}
+		);
+
 		$this->setContext( $context );
 		$this->getOutput()->addModuleStyles( [
-			'mediawiki.action.view.categoryPage.styles'
+			'mediawiki.action.styles',
 		] );
 		$this->from = $from;
 		$this->until = $until;
-		$this->limit = $context->getConfig()->get( 'CategoryPagingLimit' );
-		$this->cat = Category::newFromTitle( $title );
+		$this->limit = $context->getConfig()->get( MainConfigNames::CategoryPagingLimit );
+		$this->cat = Category::newFromTitle( $page );
 		$this->query = $query;
-		$this->collation = Collation::singleton();
+		$this->collation = MediaWikiServices::getInstance()->getCollationFactory()->getCategoryCollation();
+		$this->languageConverter = MediaWikiServices::getInstance()
+			->getLanguageConverterFactory()->getLanguageConverter();
 		unset( $this->query['title'] );
 	}
 
@@ -108,7 +136,7 @@ class CategoryViewer extends ContextSource {
 	 * @return string HTML output
 	 */
 	public function getHTML() {
-		$this->showGallery = $this->getConfig()->get( 'CategoryMagicGallery' )
+		$this->showGallery = $this->getConfig()->get( MainConfigNames::CategoryMagicGallery )
 			&& !$this->getOutput()->mNoGallery;
 
 		$this->clearCategoryState();
@@ -144,12 +172,12 @@ class CategoryViewer extends ContextSource {
 			'dir' => $lang->getDir()
 		];
 		# put a div around the headings which are in the user language
-		$r = Html::openElement( 'div', $attribs ) . $r . '</div>';
+		$r = Html::rawElement( 'div', $attribs, $r );
 
 		return $r;
 	}
 
-	function clearCategoryState() {
+	protected function clearCategoryState() {
 		$this->articles = [];
 		$this->articles_start_char = [];
 		$this->children = [];
@@ -159,7 +187,7 @@ class CategoryViewer extends ContextSource {
 			$mode = $this->getRequest()->getVal( 'gallerymode', null );
 			try {
 				$this->gallery = ImageGalleryBase::factory( $mode, $this->getContext() );
-			} catch ( Exception $e ) {
+			} catch ( ImageGalleryClassNotFoundException $e ) {
 				// User specified something invalid, fallback to default.
 				$this->gallery = ImageGalleryBase::factory( false, $this->getContext() );
 			}
@@ -177,33 +205,62 @@ class CategoryViewer extends ContextSource {
 	 * @param string $sortkey
 	 * @param int $pageLength
 	 */
-	function addSubcategoryObject( Category $cat, $sortkey, $pageLength ) {
+	public function addSubcategoryObject( Category $cat, $sortkey, $pageLength ) {
+		$page = $cat->getPage();
+		if ( !$page ) {
+			return;
+		}
+
 		// Subcategory; strip the 'Category' namespace from the link text.
-		$title = $cat->getTitle();
+		$pageRecord = MediaWikiServices::getInstance()->getPageStore()
+			->getPageByReference( $page );
+		if ( !$pageRecord ) {
+			return;
+		}
 
 		$this->children[] = $this->generateLink(
 			'subcat',
-			$title,
-			$title->isRedirect(),
-			htmlspecialchars( $title->getText() )
+			$pageRecord,
+			$pageRecord->isRedirect(),
+			htmlspecialchars( str_replace( '_', ' ', $pageRecord->getDBkey() ) )
 		);
 
 		$this->children_start_char[] =
-			$this->getSubcategorySortChar( $cat->getTitle(), $sortkey );
+			$this->getSubcategorySortChar( $page, $sortkey );
 	}
 
-	function generateLink( $type, Title $title, $isRedirect, $html = null ) {
+	/**
+	 * @param string $type
+	 * @param PageReference $page
+	 * @param bool $isRedirect
+	 * @param string|null $html
+	 * @return string
+	 * Annotations needed to tell taint about HtmlArmor,
+	 * due to the use of the hook it is not possible to avoid raw html handling here
+	 * @param-taint $html tainted
+	 * @return-taint escaped
+	 */
+	private function generateLink(
+		string $type, PageReference $page, bool $isRedirect, ?string $html = null
+	): string {
 		$link = null;
-		Hooks::run( 'CategoryViewer::generateLink', [ $type, $title, $html, &$link ] );
+		$legacyTitle = MediaWikiServices::getInstance()->getTitleFactory()
+			->castFromPageReference( $page );
+		// @phan-suppress-next-line PhanTypeMismatchArgument castFrom does not return null here
+		$this->getHookRunner()->onCategoryViewer__generateLink( $type, $legacyTitle, $html, $link );
 		if ( $link === null ) {
 			$linkRenderer = MediaWikiServices::getInstance()->getLinkRenderer();
 			if ( $html !== null ) {
 				$html = new HtmlArmor( $html );
 			}
-			$link = $linkRenderer->makeLink( $title, $html );
+			$link = $linkRenderer->makeLink( $page, $html );
 		}
 		if ( $isRedirect ) {
-			$link = '<span class="redirect-in-category">' . $link . '</span>';
+			$link = Html::rawElement(
+				'span',
+				[ 'class' => 'redirect-in-category' ],
+				$link
+			);
 		}
 
 		return $link;
@@ -216,60 +273,70 @@ class CategoryViewer extends ContextSource {
 	 * Workaround: If sortkey == "Category:".$title, than use $title for sorting,
 	 * else use sortkey...
 	 *
-	 * @param Title $title
+	 * @param PageIdentity $page
 	 * @param string $sortkey The human-readable sortkey (before transforming to icu or whatever).
 	 * @return string
 	 */
-	function getSubcategorySortChar( $title, $sortkey ) {
-		if ( $title->getPrefixedText() == $sortkey ) {
-			$word = $title->getDBkey();
+	public function getSubcategorySortChar( PageIdentity $page, string $sortkey ): string {
+		$titleText = MediaWikiServices::getInstance()->getTitleFormatter()
+			->getPrefixedText( $page );
+		if ( $titleText === $sortkey ) {
+			$word = $page->getDBkey();
 		} else {
 			$word = $sortkey;
 		}
 
 		$firstChar = $this->collation->getFirstLetter( $word );
 
-		return MediaWikiServices::getInstance()->getContentLanguage()->convert( $firstChar );
+		return $this->languageConverter->convert( $firstChar );
 	}
 
 	/**
 	 * Add a page in the image namespace
-	 * @param Title $title
+	 * @param PageReference $page
 	 * @param string $sortkey
 	 * @param int $pageLength
 	 * @param bool $isRedirect
 	 */
-	function addImage( Title $title, $sortkey, $pageLength, $isRedirect = false ) {
+	public function addImage(
+		PageReference $page, string $sortkey, int $pageLength, bool $isRedirect = false
+	): void {
+		$title = MediaWikiServices::getInstance()->getTitleFactory()
+			->castFromPageReference( $page );
 		if ( $this->showGallery ) {
 			$flip = $this->flip['file'];
 			if ( $flip ) {
+				// @phan-suppress-next-line PhanTypeMismatchArgumentNullable castFrom does not return null here
 				$this->gallery->insert( $title );
 			} else {
+				// @phan-suppress-next-line PhanTypeMismatchArgumentNullable castFrom does not return null here
 				$this->gallery->add( $title );
 			}
 		} else {
-			$this->imgsNoGallery[] = $this->generateLink( 'image', $title, $isRedirect );
+			$this->imgsNoGallery[] = $this->generateLink( 'image', $page, $isRedirect );
 
-			$this->imgsNoGallery_start_char[] = MediaWikiServices::getInstance()->
-				getContentLanguage()->convert( $this->collation->getFirstLetter( $sortkey ) );
+			$this->imgsNoGallery_start_char[] =
+				$this->languageConverter->convert( $this->collation->getFirstLetter( $sortkey ) );
 		}
 	}
 
 	/**
 	 * Add a miscellaneous page
-	 * @param Title $title
+	 * @param PageReference $page
 	 * @param string $sortkey
 	 * @param int $pageLength
 	 * @param bool $isRedirect
 	 */
-	function addPage( $title, $sortkey, $pageLength, $isRedirect = false ) {
-		$this->articles[] = $this->generateLink( 'page', $title, $isRedirect );
+	public function addPage(
+		PageReference $page, string $sortkey, int $pageLength, bool $isRedirect = false
+	): void {
+		$this->articles[] = $this->generateLink( 'page', $page, $isRedirect );
 
-		$this->articles_start_char[] = MediaWikiServices::getInstance()->
-			getContentLanguage()->convert( $this->collation->getFirstLetter( $sortkey ) );
+		$this->articles_start_char[] =
+			$this->languageConverter->convert( $this->collation->getFirstLetter( $sortkey ) );
 	}
 
-	function finaliseCategoryState() {
+	protected function finaliseCategoryState() {
 		if ( $this->flip['subcat'] ) {
 			$this->children = array_reverse( $this->children );
 			$this->children_start_char = array_reverse( $this->children_start_char );
@@ -284,7 +351,7 @@ class CategoryViewer extends ContextSource {
 		}
 	}
 
-	function doCategoryQuery() {
+	protected function doCategoryQuery() {
 		$dbr = wfGetDB( DB_REPLICA, 'category' );
 
 		$this->nextPage = [
@@ -305,22 +372,19 @@ class CategoryViewer extends ContextSource {
 			# the collation in the database differs from the one
 			# set in $wgCategoryCollation, pagination might go totally haywire.
 			$extraConds = [ 'cl_type' => $type ];
-			if ( isset( $this->from[$type] ) && $this->from[$type] !== null ) {
+			if ( isset( $this->from[$type] ) ) {
 				$extraConds[] = 'cl_sortkey >= '
 					. $dbr->addQuotes( $this->collation->getSortKey( $this->from[$type] ) );
-			} elseif ( isset( $this->until[$type] ) && $this->until[$type] !== null ) {
+			} elseif ( isset( $this->until[$type] ) ) {
 				$extraConds[] = 'cl_sortkey < '
 					. $dbr->addQuotes( $this->collation->getSortKey( $this->until[$type] ) );
 				$this->flip[$type] = true;
 			}
 
-			$res = $dbr->select(
-				[ 'page', 'categorylinks', 'category' ],
-				array_merge(
+			$queryBuilder = $dbr->newSelectQueryBuilder();
+			$queryBuilder->select( array_merge(
 					LinkCache::getSelectFields(),
 					[
-						'page_namespace',
-						'page_title',
 						'cl_sortkey',
 						'cat_id',
 						'cat_title',
@@ -330,24 +394,30 @@ class CategoryViewer extends ContextSource {
 						'cl_sortkey_prefix',
 						'cl_collation'
 					]
-				),
-				array_merge( [ 'cl_to' => $this->title->getDBkey() ], $extraConds ),
-				__METHOD__,
-				[
-					'USE INDEX' => [ 'categorylinks' => 'cl_sortkey' ],
-					'LIMIT' => $this->limit + 1,
-					'ORDER BY' => $this->flip[$type] ? 'cl_sortkey DESC' : 'cl_sortkey',
-				],
-				[
-					'categorylinks' => [ 'JOIN', 'cl_from = page_id' ],
-					'category' => [ 'LEFT JOIN', [
-						'cat_title = page_title',
-						'page_namespace' => NS_CATEGORY
-					] ]
-				]
-			);
+				) )
+				->from( 'page' )
+				->where( [ 'cl_to' => $this->page->getDBkey() ] )
+				->andWhere( $extraConds )
+				->useIndex( [ 'categorylinks' => 'cl_sortkey' ] );
 
-			Hooks::run( 'CategoryViewer::doCategoryQuery', [ $type, $res ] );
+			if ( $this->flip[$type] ) {
+				$queryBuilder->orderBy( 'cl_sortkey', SelectQueryBuilder::SORT_DESC );
+			} else {
+				$queryBuilder->orderBy( 'cl_sortkey' );
+			}
+
+			$queryBuilder
+				->join( 'categorylinks', null, [ 'cl_from = page_id' ] )
+				->leftJoin( 'category', null, [
+					'cat_title = page_title',
+					'page_namespace' => NS_CATEGORY
+				] )
+				->limit( $this->limit + 1 )
+				->caller( __METHOD__ );
+
+			$res = $queryBuilder->fetchResultSet();
+
+			$this->getHookRunner()->onCategoryViewer__doCategoryQuery( $type, $res );
 			$linkCache = MediaWikiServices::getInstance()->getLinkCache();
 
 			$count = 0;
@@ -374,10 +444,10 @@ class CategoryViewer extends ContextSource {
 					$this->prevPage[$type] = $humanSortkey;
 				}
 
-				if ( $title->getNamespace() == NS_CATEGORY ) {
+				if ( $title->getNamespace() === NS_CATEGORY ) {
 					$cat = Category::newFromRow( $row, $title );
 					$this->addSubcategoryObject( $cat, $humanSortkey, $row->page_len );
-				} elseif ( $title->getNamespace() == NS_FILE ) {
+				} elseif ( $title->getNamespace() === NS_FILE ) {
 					$this->addImage( $title, $humanSortkey, $row->page_len, $row->page_is_redirect );
 				} else {
 					$this->addPage( $title, $humanSortkey, $row->page_len, $row->page_is_redirect );
@@ -389,7 +459,7 @@ class CategoryViewer extends ContextSource {
 	/**
 	 * @return string
 	 */
-	function getCategoryTop() {
+	protected function getCategoryTop() {
 		$r = $this->getCategoryBottom();
 		return $r === ''
 			? $r
@@ -399,7 +469,7 @@ class CategoryViewer extends ContextSource {
 	/**
 	 * @return string
 	 */
-	function getSubcategorySection() {
+	protected function getSubcategorySection() {
 		# Don't show subcategories section if there are none.
 		$r = '';
 		$rescnt = count( $this->children );
@@ -409,13 +479,13 @@ class CategoryViewer extends ContextSource {
 
 		if ( $rescnt > 0 ) {
 			# Showing subcategories
-			$r .= "<div id=\"mw-subcategories\">\n";
-			$r .= '<h2>' . $this->msg( 'subcategories' )->parse() . "</h2>\n";
+			$r .= Html::openElement( 'div', [ 'id' => 'mw-subcategories' ] ) . "\n";
+			$r .= Html::rawElement( 'h2', [], $this->msg( 'subcategories' )->parse() ) . "\n";
 			$r .= $countmsg;
 			$r .= $this->getSectionPagingLinks( 'subcat' );
 			$r .= $this->formatList( $this->children, $this->children_start_char );
 			$r .= $this->getSectionPagingLinks( 'subcat' );
-			$r .= "\n</div>";
+			$r .= "\n" . Html::closeElement( 'div' );
 		}
 		return $r;
 	}
@@ -423,7 +493,7 @@ class CategoryViewer extends ContextSource {
 	/**
 	 * @return string
 	 */
-	function getPagesSection() {
+	protected function getPagesSection() {
 		$name = $this->getOutput()->getUnprefixedDisplayTitle();
 		# Don't show articles section if there are none.
 		$r = '';
@@ -432,20 +502,23 @@ class CategoryViewer extends ContextSource {
 		# with this rigmarole if the entire category contents fit on one page
 		# and have already been retrieved.  We can just use $rescnt in that
 		# case and save a query and some logic.
-		$dbcnt = $this->cat->getPageCount() - $this->cat->getSubcatCount()
-			- $this->cat->getFileCount();
+		$dbcnt = $this->cat->getPageCount( Category::COUNT_CONTENT_PAGES );
 		$rescnt = count( $this->articles );
 		// This function should be called even if the result isn't used, it has side-effects
 		$countmsg = $this->getCountMessage( $rescnt, $dbcnt, 'article' );
 
 		if ( $rescnt > 0 ) {
-			$r = "<div id=\"mw-pages\">\n";
-			$r .= '<h2>' . $this->msg( 'category_header' )->rawParams( $name )->parse() . "</h2>\n";
+			$r .= Html::openElement( 'div', [ 'id' => 'mw-pages' ] ) . "\n";
+			$r .= Html::rawElement(
+				'h2',
+				[],
+				$this->msg( 'category_header' )->rawParams( $name )->parse()
+			) . "\n";
 			$r .= $countmsg;
 			$r .= $this->getSectionPagingLinks( 'page' );
 			$r .= $this->formatList( $this->articles, $this->articles_start_char );
 			$r .= $this->getSectionPagingLinks( 'page' );
-			$r .= "\n</div>";
+			$r .= "\n" . Html::closeElement( 'div' );
 		}
 		return $r;
 	}
@@ -453,7 +526,7 @@ class CategoryViewer extends ContextSource {
 	/**
 	 * @return string
 	 */
-	function getImageSection() {
+	protected function getImageSection() {
 		$name = $this->getOutput()->getUnprefixedDisplayTitle();
 		$r = '';
 		$rescnt = $this->showGallery ? $this->gallery->count() : count( $this->imgsNoGallery );
@@ -462,10 +535,12 @@ class CategoryViewer extends ContextSource {
 		$countmsg = $this->getCountMessage( $rescnt, $dbcnt, 'file' );
 
 		if ( $rescnt > 0 ) {
-			$r .= "<div id=\"mw-category-media\">\n";
-			$r .= '<h2>' .
-				$this->msg( 'category-media-header' )->rawParams( $name )->parse() .
-				"</h2>\n";
+			$r .= Html::openElement( 'div', [ 'id' => 'mw-category-media' ] ) . "\n";
+			$r .= Html::rawElement(
+				'h2',
+				[],
+				$this->msg( 'category-media-header' )->rawParams( $name )->parse()
+			) . "\n";
 			$r .= $countmsg;
 			$r .= $this->getSectionPagingLinks( 'file' );
 			if ( $this->showGallery ) {
@@ -474,7 +549,7 @@ class CategoryViewer extends ContextSource {
 				$r .= $this->formatList( $this->imgsNoGallery, $this->imgsNoGallery_start_char );
 			}
 			$r .= $this->getSectionPagingLinks( 'file' );
-			$r .= "\n</div>";
+			$r .= "\n" . Html::closeElement( 'div' );
 		}
 		return $r;
 	}
@@ -487,7 +562,7 @@ class CategoryViewer extends ContextSource {
 	 * @return string HTML output, possibly empty if there are no other pages
 	 */
 	private function getSectionPagingLinks( $type ) {
-		if ( isset( $this->until[$type] ) && $this->until[$type] !== null ) {
+		if ( isset( $this->until[$type] ) ) {
 			// The new value for the until parameter should be pointing to the first
 			// result displayed on the page which is the second last result retrieved
 			// from the database.The next link should have a from parameter pointing
@@ -497,11 +572,9 @@ class CategoryViewer extends ContextSource {
 			} else {
 				// If the nextPage variable is null, it means that we have reached the first page
 				// and therefore the previous link should be disabled.
-				return $this->pagingLinks( null, $this->until[$type], $type );
+				return $this->pagingLinks( '', $this->until[$type], $type );
 			}
-		} elseif ( $this->nextPage[$type] !== null
-			|| ( isset( $this->from[$type] ) && $this->from[$type] !== null )
-		) {
+		} elseif ( $this->nextPage[$type] !== null || isset( $this->from[$type] ) ) {
 			return $this->pagingLinks( $this->from[$type], $this->nextPage[$type], $type );
 		} else {
 			return '';
@@ -511,7 +584,7 @@ class CategoryViewer extends ContextSource {
 	/**
 	 * @return string
 	 */
-	function getCategoryBottom() {
+	protected function getCategoryBottom() {
 		return '';
 	}
 
@@ -523,9 +596,9 @@ class CategoryViewer extends ContextSource {
 	 * @param array $articles_start_char
 	 * @param int $cutoff
 	 * @return string
-	 * @private
+	 * @internal
 	 */
-	function formatList( $articles, $articles_start_char, $cutoff = 6 ) {
+	private function formatList( $articles, $articles_start_char, $cutoff = 6 ) {
 		$list = '';
 		if ( count( $articles ) > $cutoff ) {
 			$list = self::columnList( $articles, $articles_start_char );
@@ -534,7 +607,9 @@ class CategoryViewer extends ContextSource {
 			$list = self::shortList( $articles, $articles_start_char );
 		}
 
-		$pageLang = $this->title->getPageLanguage();
+		$pageLang = MediaWikiServices::getInstance()->getTitleFactory()
+			->castFromPageIdentity( $this->page )
+			->getPageLanguage();
 		$attribs = [ 'lang' => $pageLang->getHtmlCode(), 'dir' => $pageLang->getDir(),
 			'class' => 'mw-content-' . $pageLang->getDir() ];
 		$list = Html::rawElement( 'div', $attribs, $list );
@@ -546,20 +621,20 @@ class CategoryViewer extends ContextSource {
 	 * Format a list of articles chunked by letter in a three-column list, ordered
 	 * vertically. This is used for categories with a significant number of pages.
 	 *
-	 * TODO: Take the headers into account when creating columns, so they're
-	 * more visually equal.
-	 *
-	 * TODO: shortList and columnList are similar, need merging
-	 *
 	 * @param string[] $articles HTML links to each article
 	 * @param string[] $articles_start_char The header characters for each article
+	 * @param string $cssClasses CSS classes for the wrapper element
 	 * @return string HTML to output
-	 * @private
+	 * @internal
 	 */
-	static function columnList( $articles, $articles_start_char ) {
+	public static function columnList(
+		$articles,
+		$articles_start_char,
+		$cssClasses = 'mw-category mw-category-columns'
+	) {
 		$columns = array_combine( $articles, $articles_start_char );
 
-		$ret = Html::openElement( 'div', [ 'class' => 'mw-category' ] );
+		$ret = Html::openElement( 'div', [ 'class' => $cssClasses ] );
 
 		$colContents = [];
 
@@ -576,12 +651,19 @@ class CategoryViewer extends ContextSource {
 			# Change space to non-breaking space to keep headers aligned
 			$h3char = $char === ' ' ? "\u{00A0}" : htmlspecialchars( $char );
 
-			$ret .= '<div class="mw-category-group"><h3>' . $h3char;
-			$ret .= "</h3>\n";
-
-			$ret .= '<ul><li>';
-			$ret .= implode( "</li>\n<li>", $articles );
-			$ret .= '</li></ul></div>';
+			$ret .= Html::openElement( 'div', [ 'class' => 'mw-category-group' ] );
+			$ret .= Html::rawElement( 'h3', [], $h3char ) . "\n";
+			$ret .= Html::openElement( 'ul' );
+			$ret .= implode(
+				"\n",
+				array_map(
+					static function ( $article ) {
+						return Html::rawElement( 'li', [], $article );
+					},
+					$articles
+				)
+			);
+			$ret .= Html::closeElement( 'ul' ) . Html::closeElement( 'div' );
 
 		}
 
@@ -595,21 +677,10 @@ class CategoryViewer extends ContextSource {
 	 * @param string[] $articles HTML links to each article
 	 * @param string[] $articles_start_char The header characters for each article
 	 * @return string HTML to output
-	 * @private
+	 * @internal
 	 */
-	static function shortList( $articles, $articles_start_char ) {
-		$r = '<h3>' . htmlspecialchars( $articles_start_char[0] ) . "</h3>\n";
-		$r .= '<ul><li>' . $articles[0] . '</li>';
-		$articleCount = count( $articles );
-		for ( $index = 1; $index < $articleCount; $index++ ) {
-			if ( $articles_start_char[$index] != $articles_start_char[$index - 1] ) {
-				$r .= "</ul><h3>" . htmlspecialchars( $articles_start_char[$index] ) . "</h3>\n<ul>";
-			}
-
-			$r .= "<li>{$articles[$index]}</li>";
-		}
-		$r .= '</ul>';
-		return $r;
+	public static function shortList( $articles, $articles_start_char ) {
+		return self::columnList( $articles, $articles_start_char, 'mw-category' );
 	}
 
 	/**
@@ -630,7 +701,7 @@ class CategoryViewer extends ContextSource {
 			$prevQuery["{$type}until"] = $first;
 			unset( $prevQuery["{$type}from"] );
 			$prevLink = $linkRenderer->makeKnownLink(
-				$this->addFragmentToTitle( $this->title, $type ),
+				$this->addFragmentToTitle( $this->page, $type ),
 				new HtmlArmor( $prevLink ),
 				[],
 				$prevQuery
@@ -644,7 +715,7 @@ class CategoryViewer extends ContextSource {
 			$lastQuery["{$type}from"] = $last;
 			unset( $lastQuery["{$type}until"] );
 			$nextLink = $linkRenderer->makeKnownLink(
-				$this->addFragmentToTitle( $this->title, $type ),
+				$this->addFragmentToTitle( $this->page, $type ),
 				new HtmlArmor( $nextLink ),
 				[],
 				$lastQuery
@@ -658,12 +729,12 @@ class CategoryViewer extends ContextSource {
 	 * Takes a title, and adds the fragment identifier that
 	 * corresponds to the correct segment of the category.
 	 *
-	 * @param Title $title The title (usually $this->title)
+	 * @param PageReference $page The title (usually $this->title)
 	 * @param string $section Which section
 	 * @throws MWException
-	 * @return Title
+	 * @return LinkTarget
 	 */
-	private function addFragmentToTitle( $title, $section ) {
+	private function addFragmentToTitle( PageReference $page, string $section ): LinkTarget {
 		switch ( $section ) {
 			case 'page':
 				$fragment = 'mw-pages';
@@ -679,8 +750,8 @@ class CategoryViewer extends ContextSource {
 					" Invalid section $section." );
 		}
 
-		return Title::makeTitle( $title->getNamespace(),
-			$title->getDBkey(), $fragment );
+		return new TitleValue( $page->getNamespace(),
+			$page->getDBkey(), $fragment );
 	}
 
 	/**
@@ -695,10 +766,10 @@ class CategoryViewer extends ContextSource {
 	 */
 	private function getCountMessage( $rescnt, $dbcnt, $type ) {
 		// There are three cases:
-		//   1) The category table figure seems sane.  It might be wrong, but
+		//   1) The category table figure seems good.  It might be wrong, but
 		//      we can't do anything about it if we don't recalculate it on ev-
 		//      ery category view.
-		//   2) The category table figure isn't sane, like it's smaller than the
+		//   2) The category table figure isn't good, like it's smaller than the
 		//      number of actual results, *but* the number of results is less
 		//      than $this->limit and there's no offset.  In this case we still
 		//      know the right figure.
@@ -715,19 +786,17 @@ class CategoryViewer extends ContextSource {
 		}
 
 		$fromOrUntil = false;
-		if ( ( isset( $this->from[$pagingType] ) && $this->from[$pagingType] !== null ) ||
-			( isset( $this->until[$pagingType] ) && $this->until[$pagingType] !== null )
-		) {
+		if ( isset( $this->from[$pagingType] ) || isset( $this->until[$pagingType] ) ) {
 			$fromOrUntil = true;
 		}
 
 		if ( $dbcnt == $rescnt ||
 			( ( $rescnt == $this->limit || $fromOrUntil ) && $dbcnt > $rescnt )
 		) {
-			// Case 1: seems sane.
+			// Case 1: seems good.
 			$totalcnt = $dbcnt;
 		} elseif ( $rescnt < $this->limit && !$fromOrUntil ) {
-			// Case 2: not sane, but salvageable.  Use the number of results.
+			// Case 2: not good, but salvageable.  Use the number of results.
 			$totalcnt = $rescnt;
 		} else {
 			// Case 3: hopeless.  Don't give a total count at all.

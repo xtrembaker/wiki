@@ -23,6 +23,8 @@
 
 require_once __DIR__ . '/Maintenance.php';
 
+use MediaWiki\MediaWikiServices;
+
 /**
  * Maintenance script that cleans up invalid titles in various tables.
  *
@@ -135,28 +137,37 @@ TEXT
 		// the hypothesis that invalid rows will be old and in all likelihood
 		// unreferenced, we should be fine to do it like this.
 		$dbr = $this->getDB( DB_REPLICA, 'vslow' );
+		$linksMigration = MediaWikiServices::getInstance()->getLinksMigration();
+		$joinConds = [];
+		$tables = [ $table ];
+		if ( isset( $linksMigration::$mapping[$table] ) ) {
+			list( $nsField,$titleField ) = $linksMigration->getTitleFields( $table );
+			$joinConds = $linksMigration->getQueryInfo( $table )['joins'];
+			$tables = $linksMigration->getQueryInfo( $table )['tables'];
+		}
 
 		// Find all TitleValue-invalid titles.
-		$percent = $dbr->anyString(); // DBMS-agnostic equivalent of '%' LIKE wildcard
-		$res = $dbr->select(
-			$table,
-			[
+		$percent = $dbr->anyString();
+		$res = $dbr->newSelectQueryBuilder()
+			->select( [
 				'id' => $idField,
 				'ns' => $nsField,
 				'title' => $titleField,
-			],
+			] )
+			->tables( $tables )
 			// The REGEXP operator is not cross-DBMS, so we have to use lots of LIKEs
-			[ $dbr->makeList( [
+			->where( $dbr->makeList( [
 				$titleField . $dbr->buildLike( $percent, ' ', $percent ),
 				$titleField . $dbr->buildLike( $percent, "\r", $percent ),
 				$titleField . $dbr->buildLike( $percent, "\n", $percent ),
 				$titleField . $dbr->buildLike( $percent, "\t", $percent ),
 				$titleField . $dbr->buildLike( '_', $percent ),
 				$titleField . $dbr->buildLike( $percent, '_' ),
-			], LIST_OR ) ],
-			__METHOD__,
-			[ 'LIMIT' => $this->getBatchSize() ]
-		);
+			], LIST_OR ) )
+			->joinConds( $joinConds )
+			->limit( $this->getBatchSize() )
+			->caller( __METHOD__ )
+			->fetchResultSet();
 
 		$this->outputStatus( "Number of invalid rows: " . $res->numRows() . "\n" );
 		if ( !$res->numRows() ) {
@@ -192,8 +203,11 @@ TEXT
 			return;
 		}
 
+		$services = MediaWikiServices::getInstance();
+		$lbFactory = $services->getDBLoadBalancerFactory();
+
 		// Fix the bad data, using different logic for the various tables
-		$dbw = $this->getDB( DB_MASTER );
+		$dbw = $this->getDB( DB_PRIMARY );
 		switch ( $table ) {
 			case 'page':
 			case 'redirect':
@@ -229,7 +243,7 @@ TEXT
 						__METHOD__ );
 					$affectedRowCount += $dbw->affectedRows();
 				}
-				wfWaitForSlaves();
+				$lbFactory->waitForReplication();
 				$this->outputStatus( "Updated $affectedRowCount rows on $table.\n" );
 
 				break;
@@ -242,7 +256,7 @@ TEXT
 				// recently, so we can just remove these rows.
 				$this->outputStatus( "Deleting invalid $table rows...\n" );
 				$dbw->delete( $table, [ $idField => $ids ], __METHOD__ );
-				wfWaitForSlaves();
+				$lbFactory->waitForReplication();
 				$this->outputStatus( 'Deleted ' . $dbw->affectedRows() . " rows from $table.\n" );
 				break;
 
@@ -258,7 +272,7 @@ TEXT
 						__METHOD__ );
 					$affectedRowCount += $dbw->affectedRows();
 				}
-				wfWaitForSlaves();
+				$lbFactory->waitForReplication();
 				$this->outputStatus( "Deleted $affectedRowCount rows from $table.\n" );
 				break;
 
@@ -269,18 +283,28 @@ TEXT
 				// located. If the invalid rows don't go away after these jobs go through,
 				// they're probably being added by a buggy hook.
 				$this->outputStatus( "Queueing link update jobs for the pages in $idField...\n" );
+				$linksMigration = MediaWikiServices::getInstance()->getLinksMigration();
+				$wikiPageFactory = $services->getWikiPageFactory();
 				foreach ( $res as $row ) {
-					$wp = WikiPage::newFromID( $row->id );
+					$wp = $wikiPageFactory->newFromID( $row->id );
 					if ( $wp ) {
 						RefreshLinks::fixLinksFromArticle( $row->id );
 					} else {
+						if ( isset( $linksMigration::$mapping[$table] ) ) {
+							$conds = $linksMigration->getLinksConditions(
+								$table,
+								Title::makeTitle( $row->ns, $row->title )
+							);
+						} else {
+							$conds = [ $nsField => $row->ns, $titleField => $row->title ];
+						}
 						// This link entry points to a nonexistent page, so just get rid of it
 						$dbw->delete( $table,
-							[ $idField => $row->id, $nsField => $row->ns, $titleField => $row->title ],
+							array_merge( [ $idField => $row->id ], $conds ),
 							__METHOD__ );
 					}
 				}
-				wfWaitForSlaves();
+				$lbFactory->waitForReplication();
 				$this->outputStatus( "Link update jobs have been added to the job queue.\n" );
 				break;
 		}

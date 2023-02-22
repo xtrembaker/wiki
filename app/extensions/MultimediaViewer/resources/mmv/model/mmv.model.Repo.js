@@ -15,8 +15,6 @@
  * along with MultimediaViewer.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/* eslint-disable no-use-before-define */
-
 ( function () {
 	/**
 	 * Represents information about a single image repository
@@ -77,16 +75,16 @@
 	 * @return {boolean}
 	 */
 	Repo.prototype.isCommons = function () {
-		// there does not seem to be a sane way to do this
+		// there does not seem to be a sensible way to do this
 		return this.displayName === 'Wikimedia Commons';
 	};
 
 	/**
-	* Gets the article path for the repository.
-	*
-	* @param {boolean} absolute if true, the URL will be absolute (if false, it still might be)
-	* @return {string} Replace $1 with the page name you want to link to.
-	*/
+	 * Gets the article path for the repository.
+	 *
+	 * @param {boolean} absolute if true, the URL will be absolute (if false, it still might be)
+	 * @return {string} Replace $1 with the page name you want to link to.
+	 */
 	Repo.prototype.getArticlePath = function ( absolute ) {
 		var articlePath = mw.config.get( 'wgArticlePath' );
 		if ( absolute ) {
@@ -146,17 +144,17 @@
 	OO.inheritClass( ForeignApiRepo, Repo );
 
 	/**
-	* @override
-	* @inheritdoc
-	*/
+	 * @override
+	 * @inheritdoc
+	 */
 	ForeignApiRepo.prototype.getArticlePath = function () {
 		return this.absoluteArticlePath;
 	};
 
 	/**
-	* @override
-	* @inheritdoc
-	*/
+	 * @override
+	 * @inheritdoc
+	 */
 	ForeignApiRepo.prototype.isCommons = function () {
 		return /^(https?:)?\/\/commons.wikimedia.org/.test( this.server );
 	};
@@ -188,17 +186,17 @@
 	OO.inheritClass( ForeignDbRepo, Repo );
 
 	/**
-	* @override
-	* @inheritdoc
-	*/
+	 * @override
+	 * @inheritdoc
+	 */
 	ForeignDbRepo.prototype.getArticlePath = function () {
 		return this.descBaseUrl.replace( /[^/:]*:$/, '$1' );
 	};
 
 	/**
-	* @override
-	* @inheritdoc
-	*/
+	 * @override
+	 * @inheritdoc
+	 */
 	ForeignDbRepo.prototype.isCommons = function () {
 		return /^(https?:)?\/\/commons.wikimedia.org/.test( this.descBaseUrl );
 	};

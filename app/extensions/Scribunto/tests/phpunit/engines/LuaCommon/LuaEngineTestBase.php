@@ -1,5 +1,7 @@
 <?php
 
+use PHPUnit\Framework\TestSuite;
+
 /**
  * This is the subclass for Lua library tests. It will automatically run all
  * tests against LuaSandbox and LuaStandalone.
@@ -12,9 +14,13 @@
 abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 	use Scribunto_LuaEngineTestHelper;
 
+	/** @var string|null */
 	private static $staticEngineName = null;
+	/** @var string|null */
 	private $engineName = null;
+	/** @var Scribunto_LuaEngine|null */
 	private $engine = null;
+	/** @var Scribunto_LuaDataProvider|null */
 	private $luaDataProvider = null;
 
 	/**
@@ -33,7 +39,7 @@ abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 	 * Class to use for the data provider
 	 * @var string
 	 */
-	protected static $dataProviderClass = 'Scribunto_LuaDataProvider';
+	protected static $dataProviderClass = Scribunto_LuaDataProvider::class;
 
 	/**
 	 * Tests to skip. Associative array mapping test name to skip reason.
@@ -41,6 +47,12 @@ abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 	 */
 	protected $skipTests = [];
 
+	/**
+	 * @param string|null $name
+	 * @param array $data
+	 * @param string $dataName
+	 * @param string|null $engineName Engine to test with
+	 */
 	public function __construct(
 		$name = null, array $data = [], $dataName = '', $engineName = null
 	) {
@@ -51,11 +63,16 @@ abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 		parent::__construct( $name, $data, $dataName );
 	}
 
+	/**
+	 * Create a PHPUnit test suite to run the test against all engines
+	 * @param string $className Test class name
+	 * @return TestSuite
+	 */
 	public static function suite( $className ) {
 		return self::makeSuite( $className );
 	}
 
-	protected function tearDown() {
+	protected function tearDown(): void {
 		if ( $this->luaDataProvider ) {
 			$this->luaDataProvider->destroy();
 			$this->luaDataProvider = null;
@@ -76,7 +93,7 @@ abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 		return Title::newMainPage();
 	}
 
-	public function toString() {
+	public function toString(): string {
 		// When running tests written in Lua, return a nicer representation in
 		// the failure message.
 		if ( $this->luaTestName ) {
@@ -85,6 +102,10 @@ abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 		return $this->engineName . ': ' . parent::toString();
 	}
 
+	/**
+	 * Modules that should exist
+	 * @return string[] Mapping module names to files
+	 */
 	protected function getTestModules() {
 		return [
 			'TestFramework' => __DIR__ . '/TestFramework.lua',
@@ -122,29 +143,5 @@ abstract class Scribunto_LuaEngineTestBase extends MediaWikiLangTestCase {
 			$this->assertSame( $expected, $actual );
 		}
 		$this->luaTestName = null;
-	}
-}
-
-class Scribunto_LuaEngineTestSkip extends PHPUnit\Framework\TestCase {
-	private $className = '';
-	private $message = '';
-
-	public function __construct( $className = '', $message = '' ) {
-		$this->className = $className;
-		$this->message = $message;
-		parent::__construct( 'testDummy' );
-	}
-
-	public function testDummy() {
-		if ( $this->className ) {
-			$this->markTestSkipped( $this->message );
-		} else {
-			// Dummy
-			$this->assertTrue( true );
-		}
-	}
-
-	public function toString() {
-		return $this->className;
 	}
 }

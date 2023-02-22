@@ -45,6 +45,7 @@
 
 		/**
 		 * List of thumbnail width bucket sizes, in pixels.
+		 *
 		 * @property {number[]}
 		 */
 		this.widthBuckets = options.widthBuckets;
@@ -52,6 +53,7 @@
 
 		/**
 		 * Screen pixel count per CSS pixel.
+		 *
 		 * @property {number}
 		 */
 		this.devicePixelRatio = options.devicePixelRatio;
@@ -61,6 +63,7 @@
 
 	/**
 	 * The default list of image widths
+	 *
 	 * @static
 	 * @property {Object}
 	 */
@@ -159,9 +162,9 @@
 			ratio = sampleHeight / sampleWidth;
 
 		cssWidth = this.calculateFittingWidth( boundingWidth, boundingHeight, sampleWidth, sampleHeight );
-		cssHeight = Math.round( cssWidth * ratio );
+		cssHeight = Math.max( 1, Math.round( cssWidth * ratio ) );
 
-		screenPixelWidth = cssWidth * this.devicePixelRatio;
+		screenPixelWidth = Math.max( 1, cssWidth * this.devicePixelRatio );
 
 		bucketedWidth = this.findNextBucket( screenPixelWidth );
 

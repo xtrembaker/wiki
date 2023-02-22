@@ -21,6 +21,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -55,8 +57,9 @@ class CopyFileBackend extends Maintenance {
 	}
 
 	public function execute() {
-		$src = FileBackendGroup::singleton()->get( $this->getOption( 'src' ) );
-		$dst = FileBackendGroup::singleton()->get( $this->getOption( 'dst' ) );
+		$backendGroup = MediaWikiServices::getInstance()->getFileBackendGroup();
+		$src = $backendGroup->get( $this->getOption( 'src' ) );
+		$dst = $backendGroup->get( $this->getOption( 'dst' ) );
 		$containers = explode( '|', $this->getOption( 'containers' ) );
 		$subDir = rtrim( $this->getOption( 'subdir', '' ), '/' );
 
@@ -258,22 +261,22 @@ class CopyFileBackend extends Maintenance {
 			}
 			$fsFiles[] = $fsFile; // keep TempFSFile objects alive as needed
 			// Note: prepare() is usually fast for key/value backends
-			$status = $dst->prepare( [ 'dir' => dirname( $dstPath ), 'bypassReadOnly' => 1 ] );
+			$status = $dst->prepare( [ 'dir' => dirname( $dstPath ), 'bypassReadOnly' => true ] );
 			if ( !$status->isOK() ) {
 				$this->error( Status::wrap( $status )->getMessage( false, false, 'en' )->text() );
 				$this->fatalError( "$domainId: Could not copy $srcPath to $dstPath." );
 			}
 			$ops[] = [ 'op' => 'store',
-				'src' => $fsFile->getPath(), 'dst' => $dstPath, 'overwrite' => 1 ];
+				'src' => $fsFile->getPath(), 'dst' => $dstPath, 'overwrite' => true ];
 			$copiedRel[] = $srcPathRel;
 		}
 
 		// Copy in the batch of source files...
 		$t_start = microtime( true );
-		$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => 1 ] );
+		$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => true ] );
 		if ( !$status->isOK() ) {
 			sleep( 10 ); // wait and retry copy again
-			$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => 1 ] );
+			$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => true ] );
 		}
 		$elapsed_ms = floor( ( microtime( true ) - $t_start ) * 1000 );
 		if ( !$status->isOK() ) {
@@ -307,10 +310,10 @@ class CopyFileBackend extends Maintenance {
 
 		// Delete the batch of source files...
 		$t_start = microtime( true );
-		$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => 1 ] );
+		$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => true ] );
 		if ( !$status->isOK() ) {
 			sleep( 10 ); // wait and retry copy again
-			$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => 1 ] );
+			$status = $dst->doQuickOperations( $ops, [ 'bypassReadOnly' => true ] );
 		}
 		$elapsed_ms = floor( ( microtime( true ) - $t_start ) * 1000 );
 		if ( !$status->isOK() ) {
@@ -341,7 +344,7 @@ class CopyFileBackend extends Maintenance {
 		}
 		// Initial fast checks to see if files are obviously different
 		$sameFast = (
-			is_array( $srcStat ) // sanity check that source exists
+			is_array( $srcStat )
 			&& is_array( $dstStat ) // dest exists
 			&& $srcStat['size'] === $dstStat['size']
 		);

@@ -21,6 +21,10 @@
  * @file
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use Wikimedia\ObjectFactory\ObjectFactory;
+
 /**
  * When you have many workers (threads/servers) giving service, and a
  * cached item expensive to produce expires, you may get several workers
@@ -44,15 +48,15 @@
  */
 abstract class PoolCounter {
 	/* Return codes */
-	const LOCKED = 1; /* Lock acquired */
-	const RELEASED = 2; /* Lock released */
-	const DONE = 3; /* Another worker did the work for you */
+	public const LOCKED = 1; /* Lock acquired */
+	public const RELEASED = 2; /* Lock released */
+	public const DONE = 3; /* Another worker did the work for you */
 
-	const ERROR = -1; /* Indeterminate error */
-	const NOT_LOCKED = -2; /* Called release() with no lock held */
-	const QUEUE_FULL = -3; /* There are already maxqueue workers on this lock */
-	const TIMEOUT = -4; /* Timeout exceeded */
-	const LOCK_HELD = -5; /* Cannot acquire another lock while you have one lock held */
+	public const ERROR = -1; /* Indeterminate error */
+	public const NOT_LOCKED = -2; /* Called release() with no lock held */
+	public const QUEUE_FULL = -3; /* There are already maxqueue workers on this lock */
+	public const TIMEOUT = -4; /* Timeout exceeded */
+	public const LOCK_HELD = -5; /* Cannot acquire another lock while you have one lock held */
 
 	/** @var string All workers with the same key share the lock */
 	protected $key;
@@ -67,7 +71,7 @@ abstract class PoolCounter {
 	protected $slots = 0;
 	/** @var int If this number of workers are already working/waiting, fail instead of wait */
 	protected $maxqueue;
-	/** @var float Maximum time in seconds to wait for the lock */
+	/** @var int Maximum time in seconds to wait for the lock */
 	protected $timeout;
 
 	/**
@@ -75,22 +79,28 @@ abstract class PoolCounter {
 	 */
 	private $isMightWaitKey;
 	/**
-	 * @var bool Whether this process holds a "might wait" lock key
+	 * @var int Whether this process holds a "might wait" lock key
 	 */
 	private static $acquiredMightWaitKey = 0;
+
+	/**
+	 * @var bool Enable fast stale mode (T250248). This may be overridden by the work class.
+	 */
+	private $fastStale;
 
 	/**
 	 * @param array $conf
 	 * @param string $type The class of actions to limit concurrency for (task type)
 	 * @param string $key
 	 */
-	protected function __construct( $conf, $type, $key ) {
+	protected function __construct( array $conf, string $type, string $key ) {
 		$this->workers = $conf['workers'];
 		$this->maxqueue = $conf['maxqueue'];
 		$this->timeout = $conf['timeout'];
 		if ( isset( $conf['slots'] ) ) {
 			$this->slots = $conf['slots'];
 		}
+		$this->fastStale = $conf['fastStale'] ?? false;
 
 		if ( $this->slots ) {
 			$key = $this->hashKeyIntoSlots( $type, $key, $this->slots );
@@ -108,15 +118,24 @@ abstract class PoolCounter {
 	 *
 	 * @return PoolCounter
 	 */
-	public static function factory( $type, $key ) {
-		global $wgPoolCounterConf;
-		if ( !isset( $wgPoolCounterConf[$type] ) ) {
+	public static function factory( string $type, string $key ) {
+		$poolCounterConf = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::PoolCounterConf );
+		if ( !isset( $poolCounterConf[$type] ) ) {
 			return new PoolCounterNull;
 		}
-		$conf = $wgPoolCounterConf[$type];
-		$class = $conf['class'];
+		$conf = $poolCounterConf[$type];
 
-		return new $class( $conf, $type, $key );
+		/** @var PoolCounter $poolCounter */
+		$poolCounter = ObjectFactory::getObjectFromSpec(
+			$conf,
+			[
+				'extraArgs' => [ $conf, $type, $key ],
+				'assertClass' => self::class
+			]
+		);
+
+		return $poolCounter;
 	}
 
 	/**
@@ -129,17 +148,21 @@ abstract class PoolCounter {
 	/**
 	 * I want to do this task and I need to do it myself.
 	 *
+	 * @param int|null $timeout Wait timeout, or null to use value passed to
+	 *   the constructor
 	 * @return Status Value is one of Locked/Error
 	 */
-	abstract public function acquireForMe();
+	abstract public function acquireForMe( $timeout = null );
 
 	/**
 	 * I want to do this task, but if anyone else does it
 	 * instead, it's also fine for me. I will read its cached data.
 	 *
+	 * @param int|null $timeout Wait timeout, or null to use value passed to
+	 *   the constructor
 	 * @return Status Value is one of Locked/Done/Error
 	 */
-	abstract public function acquireForAnyone();
+	abstract public function acquireForAnyone( $timeout = null );
 
 	/**
 	 * I have successfully finished my task.
@@ -151,8 +174,8 @@ abstract class PoolCounter {
 	abstract public function release();
 
 	/**
-	 * Checks that the lock request is sane.
-	 * @return Status - good for sane requests fatal for insane
+	 * Checks that the lock request is sensible.
+	 * @return Status good for sensible requests, fatal for the not so sensible
 	 * @since 1.25
 	 */
 	final protected function precheckAcquire() {
@@ -206,5 +229,15 @@ abstract class PoolCounter {
 	 */
 	protected function hashKeyIntoSlots( $type, $key, $slots ) {
 		return $type . ':' . ( hexdec( substr( sha1( $key ), 0, 4 ) ) % $slots );
+	}
+
+	/**
+	 * Is fast stale mode (T250248) enabled? This may be overridden by the
+	 * PoolCounterWork subclass.
+	 *
+	 * @return bool
+	 */
+	public function isFastStaleEnabled() {
+		return $this->fastStale;
 	}
 }

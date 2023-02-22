@@ -35,6 +35,7 @@ class ExtensionInfo {
 	 */
 	private $info = null;
 
+	/** @var bool[] */
 	private $supportCache = [];
 
 	/**
@@ -54,9 +55,10 @@ class ExtensionInfo {
 	}
 
 	/**
+	 * @internal For tests only, use ExtensionInfo::newFromFile instead
 	 * @param string $dir Path of extension
 	 */
-	private function __construct( $dir ) {
+	public function __construct( $dir ) {
 		$this->dir = $dir;
 	}
 

@@ -74,6 +74,20 @@ has two implementations:
   appropriate separators. It has a "list type" (using constants defined in the
   **ListType** class) defining the desired separators.
 
+#### Machine-readable messages
+
+**DataMessageValue** represents a message with additional machine-readable
+data. In addition to the key and message parameters, it holds a "code" and
+structured data that would be a useful representation of the message in an API
+response or the like.
+
+For example, a message for an "integer out of range" error might have one of
+three different keys depending on whether the range has a minimum, maximum, or
+both. But all should have the same code (representing the concept of "integer
+out of range") and should likely have structured data representing the range
+directly as `[ 'min' => 1, 'max' => 10 ]` rather than as a flat array of
+MessageParam objects.
+
 ### Formatters
 
 A formatter for a particular language is obtained from an implementation of
@@ -101,8 +115,8 @@ generate the output string:
      to fall back to appropriate other languages. Details of the fallback are
      unspecified here.
    - If no translation can be found in any fallback language, a string should
-	 be returned that indicates at minimum the message key that was unable to
-	 be found.
+     be returned that indicates at minimum the message key that was unable to
+     be found.
 2. Replace placeholders with parameter values.
    - Note that placeholders must not be replaced recursively. That is, if a
      parameter's value contains text that looks like a placeholder, it must not
@@ -182,7 +196,7 @@ are to be balanced, e.g. `{{NAME:foo|{{bar|baz}}}}` has $value1 as "foo" and
 $value2 as "{{bar|baz}}". The name is always case-insensitive.
 
 Anything syntactically resembling a placeholder or formatting command that does
-not correspond to an actual paramter or known command should be left unchanged
+not correspond to an actual parameter or known command should be left unchanged
 for processing by the markup language processor.
 
 Libraries providing messages for use by externally-defined formatters should
@@ -278,6 +292,16 @@ In brief, the base directory of the library should contain a directory named
 Formatter implementations should be able to consume message data supplied in
 this format, either directly via registration of i18n directories to check or
 by providing tooling to incorporate it during a build step.
+
+### Machine-readable data
+
+Libraries producing MessageValues as error messages should generally produce
+DataMessageValues instead. Codes should be similar to message keys but need
+not be prefixed. Data should be restricted to values that will produce valid
+output when passed to `json_encode()`.
+
+Libraries producing MessageValues in other contexts should consider whether the
+same applies to those contexts.
 
 
 ---

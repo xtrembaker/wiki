@@ -3,8 +3,8 @@
 		"authors": [
 			"DCLXVI",
 			"Spiritia",
-			"Vodnokon4e",
-			"StanProg"
+			"StanProg",
+			"Vodnokon4e"
 		]
 	},
 	"inputbox-desc": "Позволява вмъкването на HTML формуляри",
@@ -15,5 +15,6 @@
 	"inputbox-createarticle": "Създаване",
 	"inputbox-movearticle": "Преместване на страница",
 	"inputbox-postcomment": "Нов раздел",
-	"inputbox-postcommenttitle": "Нов раздел"
+	"inputbox-postcommenttitle": "Нов раздел",
+	"inputbox-ns-main": "Основно"
 }

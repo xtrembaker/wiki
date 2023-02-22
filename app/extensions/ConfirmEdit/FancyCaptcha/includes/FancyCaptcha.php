@@ -2,6 +2,9 @@
 
 use MediaWiki\Auth\AuthenticationRequest;
 use MediaWiki\Auth\AuthManager;
+use MediaWiki\Extension\ConfirmEdit\Auth\CaptchaAuthenticationRequest;
+use MediaWiki\Extension\ConfirmEdit\SimpleCaptcha\SimpleCaptcha;
+use MediaWiki\MediaWikiServices;
 
 /**
  * FancyCaptcha for displaying captchas precomputed by captcha.py
@@ -18,13 +21,14 @@ class FancyCaptcha extends SimpleCaptcha {
 		global $wgCaptchaFileBackend, $wgCaptchaDirectory;
 
 		if ( $wgCaptchaFileBackend ) {
-			return FileBackendGroup::singleton()->get( $wgCaptchaFileBackend );
+			return MediaWikiServices::getInstance()->getFileBackendGroup()
+				->get( $wgCaptchaFileBackend );
 		} else {
 			static $backend = null;
 			if ( !$backend ) {
 				$backend = new FSFileBackend( [
 					'name'           => 'captcha-backend',
-					'wikiId'         => wfWikiID(),
+					'wikiId'         => WikiMap::getCurrentWikiId(),
 					'lockManager'    => new NullLockManager( [] ),
 					'containerPaths' => [ 'captcha-render' => $wgCaptchaDirectory ],
 					'fileMode'       => 777,
@@ -34,15 +38,6 @@ class FancyCaptcha extends SimpleCaptcha {
 			}
 			return $backend;
 		}
-	}
-
-	/**
-	 * @deprecated Use getCaptchaCount instead for an accurate figure
-	 * @return int Number of captcha files
-	 */
-	public function estimateCaptchaCount() {
-		wfDeprecated( __METHOD__ );
-		return $this->getCaptchaCount();
 	}
 
 	/**
@@ -202,18 +197,22 @@ class FancyCaptcha extends SimpleCaptcha {
 	 * @return array|bool
 	 */
 	protected function pickImageDir( $directory, $levels, &$lockouts ) {
-		global $wgMemc;
-
 		if ( $levels <= 0 ) {
 			// $directory has regular files
 			return $this->pickImageFromDir( $directory, $lockouts );
 		}
 
 		$backend = $this->getBackend();
+		$cache = ObjectCache::getLocalClusterInstance();
 
-		$key = "fancycaptcha:dirlist:{$backend->getWikiId()}:" . sha1( $directory );
+		$key = $cache->makeGlobalKey(
+			'fancycaptcha-dirlist',
+			$backend->getDomainId(),
+			sha1( $directory )
+		);
+
 		// check cache
-		$dirs = $wgMemc->get( $key );
+		$dirs = $cache->get( $key );
 		if ( !is_array( $dirs ) || !count( $dirs ) ) {
 			// cache miss
 			$dirs = [];
@@ -225,7 +224,7 @@ class FancyCaptcha extends SimpleCaptcha {
 			}
 			wfDebug( "Cache miss for $directory subdirectory listing.\n" );
 			if ( count( $dirs ) ) {
-				$wgMemc->set( $key, $dirs, 86400 );
+				$cache->set( $key, $dirs, 86400 );
 			}
 		}
 
@@ -249,7 +248,7 @@ class FancyCaptcha extends SimpleCaptcha {
 			} else {
 				wfDebug( "Could not find captcha in $directory.\n" );
 				// files changed on disk?
-				$wgMemc->delete( $key );
+				$cache->delete( $key );
 			}
 		}
 
@@ -263,13 +262,17 @@ class FancyCaptcha extends SimpleCaptcha {
 	 * @return array|bool
 	 */
 	protected function pickImageFromDir( $directory, &$lockouts ) {
-		global $wgMemc;
-
 		$backend = $this->getBackend();
+		$cache = ObjectCache::getLocalClusterInstance();
 
-		$key = "fancycaptcha:filelist:{$backend->getWikiId()}:" . sha1( $directory );
+		$key = $cache->makeGlobalKey(
+			'fancycaptcha-filelist',
+			$backend->getDomainId(),
+			sha1( $directory )
+		);
+
 		// check cache
-		$files = $wgMemc->get( $key );
+		$files = $cache->get( $key );
 		if ( !is_array( $files ) || !count( $files ) ) {
 			// cache miss
 			$files = [];
@@ -282,7 +285,7 @@ class FancyCaptcha extends SimpleCaptcha {
 				}
 			}
 			if ( count( $files ) ) {
-				$wgMemc->set( $key, $files, 86400 );
+				$cache->set( $key, $files, 86400 );
 			}
 			wfDebug( "Cache miss for $directory captcha listing.\n" );
 		}
@@ -297,7 +300,7 @@ class FancyCaptcha extends SimpleCaptcha {
 		if ( !$info ) {
 			wfDebug( "Could not find captcha in $directory.\n" );
 			// files changed on disk?
-			$wgMemc->delete( $key );
+			$cache->delete( $key );
 		}
 
 		return $info;
@@ -310,7 +313,7 @@ class FancyCaptcha extends SimpleCaptcha {
 	 * @return array|bool
 	 */
 	protected function pickImageFromList( $directory, array $files, &$lockouts ) {
-		global $wgMemc, $wgCaptchaDeleteOnSolve;
+		global $wgCaptchaDeleteOnSolve;
 
 		if ( !count( $files ) ) {
 			// none found
@@ -318,6 +321,8 @@ class FancyCaptcha extends SimpleCaptcha {
 		}
 
 		$backend = $this->getBackend();
+		$cache = ObjectCache::getLocalClusterInstance();
+
 		// pick a random file
 		$place = mt_rand( 0, count( $files ) - 1 );
 		// number of files in listing that don't actually exist
@@ -328,9 +333,13 @@ class FancyCaptcha extends SimpleCaptcha {
 			if ( preg_match( '/^image_([0-9a-f]+)_([0-9a-f]+)\\.png$/', $entry, $matches ) ) {
 				if ( $wgCaptchaDeleteOnSolve ) {
 					// captcha will be deleted when solved
-					$key = "fancycaptcha:filelock:{$backend->getWikiId()}:" . sha1( $entry );
+					$key = $cache->makeGlobalKey(
+						'fancycaptcha-filelock',
+						$backend->getDomainId(),
+						sha1( $entry )
+					);
 					// Try to claim this captcha for 10 minutes (for the user to solve)...
-					if ( ++$lockouts <= 10 && !$wgMemc->add( $key, '1', 600 ) ) {
+					if ( ++$lockouts <= 10 && !$cache->add( $key, '1', 600 ) ) {
 						// could not acquire (skip it to avoid race conditions)
 						continue;
 					}
@@ -394,7 +403,7 @@ class FancyCaptcha extends SimpleCaptcha {
 
 		$file = $this->getBackend()->getRootStoragePath() . '/captcha-render/';
 		for ( $i = 0; $i < $wgCaptchaDirectoryLevels; $i++ ) {
-			$file .= $hash{ $i } . '/';
+			$file .= $hash[ $i ] . '/';
 		}
 		$file .= "image_{$salt}_{$hash}.png";
 

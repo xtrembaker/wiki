@@ -2,16 +2,17 @@
 	"@metadata": {
 		"authors": [
 			"DaBler",
-			"LTM3",
 			"Dvorapa",
-			"Mormegil",
+			"LTM3",
 			"Matěj Suchánek",
-			"Patriccck"
+			"Mormegil",
+			"Patriccck",
+			"Patrik L."
 		]
 	},
 	"skinname-timeless": "Nadčasový",
 	"timeless-desc": "Nadčasový vzhled navržený podle prototypu Winter, vytvořeného Brandonem Harrisem, a dalších vzhledů vytvořených nadací Wikimedia",
-	"timeless-anonymous": "Anonym",
+	"timeless-anonymous": "Neregistrovaný",
 	"timeless-loggedinas": "{{GENDER:$1|Přihlášen|Přihlášena}} jako '''$1'''",
 	"timeless-notloggedin": "Nepřihlášen(a)",
 	"timeless-userpage": "Stránka {{GENDER:$1|uživatele|uživatelky}}",
@@ -29,5 +30,7 @@
 	"timeless-languages": "Jazyky",
 	"timeless-projects": "Na jiných projektech",
 	"timeless.css": "/* Zde uvedené CSS bude ovlivňovat pouze „Nadčasový“ vzhled */",
-	"timeless.js": "/* Zde uvedený JavaScript bude použit pouze pro uživatele „Nadčasového“ vzhledu */"
+	"timeless.js": "/* Zde uvedený JavaScript bude použit pouze pro uživatele „Nadčasového“ vzhledu */",
+	"timeless-view-history": "Historie",
+	"timeless-action-undelete": "Obnovit $1 {{PLURAL:$1|verzi|verze|verzí}}"
 }

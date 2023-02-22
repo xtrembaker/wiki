@@ -14,6 +14,8 @@
  * specific language governing permissions and limitations under the License.
  */
 
+use Wikimedia\AtEase\AtEase;
+
 /**
  * Read the directory of a Microsoft Compound File Binary file, a.k.a. an OLE
  * file, and detect the MIME type.
@@ -41,19 +43,18 @@ class MSCompoundFileReader {
 	private $sectorLength;
 	private $difat;
 	private $fat = [];
-	private $fileLength;
 
-	const TYPE_UNALLOCATED = 0;
-	const TYPE_STORAGE = 1;
-	const TYPE_STREAM = 2;
-	const TYPE_ROOT = 5;
+	private const TYPE_UNALLOCATED = 0;
+	private const TYPE_STORAGE = 1;
+	private const TYPE_STREAM = 2;
+	private const TYPE_ROOT = 5;
 
-	const ERROR_FILE_OPEN = 1;
-	const ERROR_SEEK = 2;
-	const ERROR_READ = 3;
-	const ERROR_INVALID_SIGNATURE = 4;
-	const ERROR_READ_PAST_END = 5;
-	const ERROR_INVALID_FORMAT = 6;
+	public const ERROR_FILE_OPEN = 1;
+	public const ERROR_SEEK = 2;
+	public const ERROR_READ = 3;
+	public const ERROR_INVALID_SIGNATURE = 4;
+	public const ERROR_READ_PAST_END = 5;
+	public const ERROR_INVALID_FORMAT = 6;
 
 	private static $mimesByClsid = [
 		// From http://justsolve.archiveteam.org/wiki/Microsoft_Compound_File
@@ -90,7 +91,7 @@ class MSCompoundFileReader {
 	/**
 	 * Read from an open seekable handle
 	 *
-	 * @param resource $fileHandle The file handle
+	 * @param resource $fileHandle
 	 * @return array An associative array of information about the file:
 	 *    - valid: true if the file is valid, false otherwise
 	 *    - error: An error message in English, should be present if valid=false
@@ -149,7 +150,6 @@ class MSCompoundFileReader {
 			$this->error( 'invalid signature: ' . bin2hex( $this->header['header_signature'] ),
 				self::ERROR_INVALID_SIGNATURE );
 		}
-		// @phan-suppress-next-line PhanTypeInvalidRightOperandOfIntegerOp
 		$this->sectorLength = 1 << $this->header['sector_shift'];
 		$this->readDifat();
 		$this->readDirectory();
@@ -218,9 +218,9 @@ class MSCompoundFileReader {
 
 	private function readOffset( $offset, $length ) {
 		$this->fseek( $offset );
-		Wikimedia\suppressWarnings();
+		AtEase::suppressWarnings();
 		$block = fread( $this->file, $length );
-		Wikimedia\restoreWarnings();
+		AtEase::restoreWarnings();
 		if ( $block === false ) {
 			$this->error( 'error reading from file', self::ERROR_READ );
 		}
@@ -232,18 +232,22 @@ class MSCompoundFileReader {
 	}
 
 	private function readSector( $sectorId ) {
-		// @phan-suppress-next-line PhanTypeInvalidRightOperandOfIntegerOp
 		return $this->readOffset( $this->sectorOffset( $sectorId ), 1 << $this->header['sector_shift'] );
 	}
 
+	/**
+	 * @param string $message
+	 * @param int $code
+	 * @return never
+	 */
 	private function error( $message, $code ) {
 		throw new RuntimeException( $message, $code );
 	}
 
 	private function fseek( $offset ) {
-		Wikimedia\suppressWarnings();
+		AtEase::suppressWarnings();
 		$result = fseek( $this->file, $offset );
-		Wikimedia\restoreWarnings();
+		AtEase::restoreWarnings();
 		if ( $result !== 0 ) {
 			$this->error( "unable to seek to offset $offset", self::ERROR_SEEK );
 		}

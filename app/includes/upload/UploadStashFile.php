@@ -45,14 +45,14 @@ class UploadStashFile extends UnregisteredLocalFile {
 		if ( FileRepo::isVirtualUrl( $path ) ) {
 			$path = $repo->resolveVirtualUrl( $path );
 		} else {
-			// check if path appears to be sane, no parent traversals,
+			// check if path appears to be correct, no parent traversals,
 			// and is in this repo's temp zone.
 			$repoTempPath = $repo->getZonePath( 'temp' );
 			if ( ( !$repo->validateFilename( $path ) ) ||
 				( strpos( $path, $repoTempPath ) !== 0 )
 			) {
 				wfDebug( "UploadStash: tried to construct an UploadStashFile "
-					. "from a file that should already exist at '$path', but path is not valid\n" );
+					. "from a file that should already exist at '$path', but path is not valid" );
 				throw new UploadStashBadPathException(
 					wfMessage( 'uploadstash-bad-path-invalid' )
 				);
@@ -61,7 +61,7 @@ class UploadStashFile extends UnregisteredLocalFile {
 			// check if path exists! and is a plain file.
 			if ( !$repo->fileExists( $path ) ) {
 				wfDebug( "UploadStash: tried to construct an UploadStashFile from "
-					. "a file that should already exist at '$path', but path is not found\n" );
+					. "a file that should already exist at '$path', but path is not found" );
 				throw new UploadStashFileNotFoundException(
 					wfMessage( 'uploadstash-file-not-found-not-exists' )
 				);
@@ -90,7 +90,7 @@ class UploadStashFile extends UnregisteredLocalFile {
 	 * The actual argument is the result of thumbName although we seem to have
 	 * buggy code elsewhere that expects a boolean 'suffix'
 	 *
-	 * @param string $thumbName Name of thumbnail (e.g. "120px-123456.jpg" ),
+	 * @param string|false $thumbName Name of thumbnail (e.g. "120px-123456.jpg" ),
 	 *   or false to just get the path
 	 * @return string Path thumbnail should take on filesystem, or containing
 	 *   directory if thumbname is false
@@ -113,7 +113,7 @@ class UploadStashFile extends UnregisteredLocalFile {
 	 * @param int $flags Bitfield that supports THUMB_* constants
 	 * @return string|null Base name for URL, like '120px-12345.jpg', or null if there is no handler
 	 */
-	function thumbName( $params, $flags = 0 ) {
+	public function thumbName( $params, $flags = 0 ) {
 		return $this->generateThumbName( $this->getUrlName(), $params );
 	}
 
@@ -133,12 +133,12 @@ class UploadStashFile extends UnregisteredLocalFile {
 	 * the thumbnail urls be predictable. However, in our model the URL is
 	 * not based on the filename (that's hidden in the db)
 	 *
-	 * @param string $thumbName Basename of thumbnail file -- however, we don't
+	 * @param string|false $thumbName Basename of thumbnail file -- however, we don't
 	 *   want to use the file exactly
 	 * @return string URL to access thumbnail, or URL with partial path
 	 */
 	public function getThumbUrl( $thumbName = false ) {
-		wfDebug( __METHOD__ . " getting for $thumbName \n" );
+		wfDebug( __METHOD__ . " getting for $thumbName" );
 
 		return $this->getSpecialUrl( 'thumb/' . $this->getUrlName() . '/' . $thumbName );
 	}

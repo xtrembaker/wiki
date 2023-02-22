@@ -106,7 +106,7 @@ class LegacyLogFormatter extends LogFormatter {
 		$type = $this->entry->getType();
 		$subtype = $this->entry->getSubtype();
 
-		// Do nothing. The implementation is handled by the hook modifiying the
+		// Do nothing. The implementation is handled by the hook modifying the
 		// passed-by-ref parameters. This also changes the default value so that
 		// getComment() and getActionLinks() do not call them indefinitely.
 		$this->revert = '';
@@ -119,8 +119,8 @@ class LegacyLogFormatter extends LogFormatter {
 
 		$params = $this->entry->getParameters();
 
-		Hooks::run( 'LogLine', [ $type, $subtype, $title, $params,
-			&$this->comment, &$this->revert, $this->entry->getTimestamp() ] );
+		Hooks::runner()->onLogLine( $type, $subtype, $title, $params, $this->comment,
+			$this->revert, $this->entry->getTimestamp() );
 
 		return $this->revert;
 	}

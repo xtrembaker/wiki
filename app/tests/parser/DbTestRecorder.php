@@ -22,11 +22,14 @@
 use Wikimedia\Rdbms\IMaintainableDatabase;
 
 class DbTestRecorder extends TestRecorder {
+	/** @var string */
 	public $version;
-	/** @var Database */
+	/** @var IMaintainableDatabase */
 	private $db;
+	/** @var int */
+	private $curRun;
 
-	public function __construct( IMaintainableDatabase $db ) {
+	public function __construct( $db ) {
 		$this->db = $db;
 	}
 
@@ -34,7 +37,7 @@ class DbTestRecorder extends TestRecorder {
 	 * Set up result recording; insert a record for the run with the date
 	 * and all that fun stuff
 	 */
-	function start() {
+	public function start() {
 		$this->db->begin( __METHOD__ );
 
 		if ( !$this->db->tableExists( 'testrun' )
@@ -55,24 +58,20 @@ class DbTestRecorder extends TestRecorder {
 				'tr_uname' => php_uname()
 			],
 			__METHOD__ );
-		if ( $this->db->getType() === 'postgres' ) {
-			$this->curRun = $this->db->currentSequenceValue( 'testrun_id_seq' );
-		} else {
-			$this->curRun = $this->db->insertId();
-		}
+		$this->curRun = $this->db->insertId();
 	}
 
 	/**
 	 * Record an individual test item's success or failure to the db
 	 *
-	 * @param array $test
 	 * @param ParserTestResult $result
 	 */
-	function record( $test, ParserTestResult $result ) {
+	public function record( ParserTestResult $result ) {
+		$desc = $result->getDescription();
 		$this->db->insert( 'testitem',
 			[
 				'ti_run' => $this->curRun,
-				'ti_name' => $test['desc'],
+				'ti_name' => $desc,
 				'ti_success' => $result->isSuccess() ? 1 : 0,
 			],
 			__METHOD__ );
@@ -81,7 +80,7 @@ class DbTestRecorder extends TestRecorder {
 	/**
 	 * Commit transaction and clean up for result recording
 	 */
-	function end() {
+	public function end() {
 		$this->db->commit( __METHOD__ );
 	}
 }

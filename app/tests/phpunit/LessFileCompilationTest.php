@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\ResourceLoader\Module;
+
 /**
  * Modelled on Sebastian Bergmann's PHPUnit_Extensions_PhptTestCase class.
  *
@@ -10,22 +12,21 @@
 class LessFileCompilationTest extends ResourceLoaderTestCase {
 
 	/**
-	 * @var string $file
+	 * @var string
 	 */
 	protected $file;
 
 	/**
-	 * @var ResourceLoaderModule The ResourceLoader module that contains
-	 *   the file
+	 * @var Module The ResourceLoader module that contains the file
 	 */
 	protected $module;
 
 	/**
 	 * @param string $file
-	 * @param ResourceLoaderModule $module The ResourceLoader module that
+	 * @param Module $module The ResourceLoader module that
 	 *   contains the file
 	 */
-	public function __construct( $file, ResourceLoaderModule $module ) {
+	public function __construct( $file, Module $module ) {
 		parent::__construct( 'testLessFileCompilation' );
 
 		$this->file = $file;
@@ -34,20 +35,18 @@ class LessFileCompilationTest extends ResourceLoaderTestCase {
 
 	public function testLessFileCompilation() {
 		$thisString = $this->toString();
-		$this->assertTrue(
-			is_string( $this->file ) && is_file( $this->file ) && is_readable( $this->file ),
-			"$thisString must refer to a readable file"
-		);
+		$this->assertIsReadable( $this->file, "$thisString must refer to a readable file" );
 
 		$rlContext = $this->getResourceLoaderContext();
 
 		// Bleh
-		$method = new ReflectionMethod( $this->module, 'compileLessFile' );
+		$method = new ReflectionMethod( $this->module, 'compileLessString' );
 		$method->setAccessible( true );
-		$this->assertNotNull( $method->invoke( $this->module, $this->file, $rlContext ) );
+		$fileContents = file_get_contents( $this->file );
+		$this->assertNotNull( $method->invoke( $this->module, $fileContents, $this->file, $rlContext ) );
 	}
 
-	public function toString() {
+	public function toString(): string {
 		$moduleName = $this->module->getName();
 
 		return "{$this->file} in the \"{$moduleName}\" module";

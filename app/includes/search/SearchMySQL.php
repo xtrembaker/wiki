@@ -25,9 +25,10 @@
  */
 
 use MediaWiki\MediaWikiServices;
+use Wikimedia\AtEase\AtEase;
 
 /**
- * Search engine hook for MySQL 4+
+ * Search engine hook for MySQL
  * @ingroup Search
  */
 class SearchMySQL extends SearchDatabase {
@@ -40,7 +41,7 @@ class SearchMySQL extends SearchDatabase {
 	 * a WHERE condition and an ORDER BY expression
 	 *
 	 * @param string $filteredText
-	 * @param string $fulltext
+	 * @param bool $fulltext
 	 *
 	 * @return array
 	 */
@@ -52,11 +53,15 @@ class SearchMySQL extends SearchDatabase {
 		# @todo FIXME: This doesn't handle parenthetical expressions.
 		$m = [];
 		if ( preg_match_all( '/([-+<>~]?)(([' . $lc . ']+)(\*?)|"[^"]*")/',
-				$filteredText, $m, PREG_SET_ORDER ) ) {
+				$filteredText, $m, PREG_SET_ORDER )
+		) {
+			$services = MediaWikiServices::getInstance();
+			$contLang = $services->getContentLanguage();
+			$langConverter = $services->getLanguageConverterFactory()->getLanguageConverter( $contLang );
 			foreach ( $m as $bits ) {
-				Wikimedia\suppressWarnings();
+				AtEase::suppressWarnings();
 				list( /* all */, $modifier, $term, $nonQuoted, $wildcard ) = $bits;
-				Wikimedia\restoreWarnings();
+				AtEase::restoreWarnings();
 
 				if ( $nonQuoted != '' ) {
 					$term = $nonQuoted;
@@ -76,8 +81,7 @@ class SearchMySQL extends SearchDatabase {
 
 				// Some languages such as Serbian store the input form in the search index,
 				// so we may need to search for matches in multiple writing system variants.
-				$contLang = MediaWikiServices::getInstance()->getContentLanguage();
-				$convertedVariants = $contLang->autoConvertToAllVariants( $term );
+				$convertedVariants = $langConverter->autoConvertToAllVariants( $term );
 				if ( is_array( $convertedVariants ) ) {
 					$variants = array_unique( array_values( $convertedVariants ) );
 				} else {
@@ -118,10 +122,10 @@ class SearchMySQL extends SearchDatabase {
 				$regexp = $this->regexTerm( $term, $wildcard );
 				$this->searchTerms[] = $regexp;
 			}
-			wfDebug( __METHOD__ . ": Would search with '$searchon'\n" );
-			wfDebug( __METHOD__ . ': Match with /' . implode( '|', $this->searchTerms ) . "/\n" );
+			wfDebug( __METHOD__ . ": Would search with '$searchon'" );
+			wfDebug( __METHOD__ . ': Match with /' . implode( '|', $this->searchTerms ) . "/" );
 		} else {
-			wfDebug( __METHOD__ . ": Can't understand search query '{$filteredText}'\n" );
+			wfDebug( __METHOD__ . ": Can't understand search query '{$filteredText}'" );
 		}
 
 		$dbr = $this->lb->getConnectionRef( DB_REPLICA );
@@ -237,10 +241,10 @@ class SearchMySQL extends SearchDatabase {
 	 * @param array &$query
 	 * @since 1.18 (changed)
 	 */
-	function queryNamespaces( &$query ) {
+	private function queryNamespaces( &$query ) {
 		if ( is_array( $this->namespaces ) ) {
 			if ( count( $this->namespaces ) === 0 ) {
-				$this->namespaces[] = '0';
+				$this->namespaces[] = NS_MAIN;
 			}
 			$query['conds']['page_namespace'] = $this->namespaces;
 		}
@@ -341,15 +345,18 @@ class SearchMySQL extends SearchDatabase {
 	 * @param string $title
 	 * @param string $text
 	 */
-	function update( $id, $title, $text ) {
-		$dbw = $this->lb->getConnectionRef( DB_MASTER );
-		$dbw->replace( 'searchindex',
-			[ 'si_page' ],
+	public function update( $id, $title, $text ) {
+		$dbw = $this->lb->getConnectionRef( DB_PRIMARY );
+		$dbw->replace(
+			'searchindex',
+			'si_page',
 			[
 				'si_page' => $id,
 				'si_title' => $this->normalizeText( $title ),
 				'si_text' => $this->normalizeText( $text )
-			], __METHOD__ );
+			],
+			__METHOD__
+		);
 	}
 
 	/**
@@ -359,8 +366,8 @@ class SearchMySQL extends SearchDatabase {
 	 * @param int $id
 	 * @param string $title
 	 */
-	function updateTitle( $id, $title ) {
-		$dbw = $this->lb->getConnectionRef( DB_MASTER );
+	public function updateTitle( $id, $title ) {
+		$dbw = $this->lb->getConnectionRef( DB_PRIMARY );
 		$dbw->update( 'searchindex',
 			[ 'si_title' => $this->normalizeText( $title ) ],
 			[ 'si_page' => $id ],
@@ -375,8 +382,8 @@ class SearchMySQL extends SearchDatabase {
 	 * @param int $id Page id that was deleted
 	 * @param string $title Title of page that was deleted
 	 */
-	function delete( $id, $title ) {
-		$dbw = $this->lb->getConnectionRef( DB_MASTER );
+	public function delete( $id, $title ) {
+		$dbw = $this->lb->getConnectionRef( DB_PRIMARY );
 		$dbw->delete( 'searchindex', [ 'si_page' => $id ], __METHOD__ );
 	}
 
@@ -386,7 +393,7 @@ class SearchMySQL extends SearchDatabase {
 	 * @param string $string
 	 * @return mixed|string
 	 */
-	function normalizeText( $string ) {
+	public function normalizeText( $string ) {
 		$out = parent::normalizeText( $string );
 
 		// MySQL fulltext index doesn't grok utf-8, so we
@@ -410,15 +417,14 @@ class SearchMySQL extends SearchDatabase {
 
 		// Periods within things like hostnames and IP addresses
 		// are also important -- we want a search for "example.com"
-		// or "192.168.1.1" to work sanely.
+		// or "192.168.1.1" to work sensibly.
 		// MySQL's search seems to ignore them, so you'd match on
 		// "example.wikipedia.com" and "192.168.83.1" as well.
-		$out = preg_replace(
+		return preg_replace(
 			"/(\w)\.(\w|\*)/u",
 			"$1u82e$2",
-			$out );
-
-		return $out;
+			$out
+		);
 	}
 
 	/**
@@ -439,7 +445,7 @@ class SearchMySQL extends SearchDatabase {
 	 * @return int
 	 */
 	protected function minSearchLength() {
-		if ( is_null( self::$mMinSearchLength ) ) {
+		if ( self::$mMinSearchLength === null ) {
 			$sql = "SHOW GLOBAL VARIABLES LIKE 'ft\\_min\\_word\\_len'";
 
 			$dbr = $this->lb->getConnectionRef( DB_REPLICA );

@@ -6,12 +6,14 @@
  * @since 1.34
  */
 class SerializedValueContainer {
-	const SCHEMA = '__svc_schema__';
-	const SCHEMA_UNIFIED = 'DAAIDgoKAQw'; // 64 bit UID
-	const SCHEMA_SEGMENTED = 'CAYCDAgCDw4'; // 64 bit UID
+	private const SCHEMA = '__svc_schema__';
+	// 64 bit UID
+	private const SCHEMA_UNIFIED = 'DAAIDgoKAQw';
+	// 64 bit UID
+	private const SCHEMA_SEGMENTED = 'CAYCDAgCDw4';
 
-	const UNIFIED_DATA = '__data__';
-	const SEGMENTED_HASHES = '__hashes__';
+	public const UNIFIED_DATA = '__data__';
+	public const SEGMENTED_HASHES = '__hashes__';
 
 	/**
 	 * @param string $serialized
@@ -40,7 +42,10 @@ class SerializedValueContainer {
 	 * @return bool
 	 */
 	public static function isUnified( $value ) {
-		return self::instanceOf( $value, self::SCHEMA_UNIFIED );
+		return (
+			$value instanceof stdClass &&
+			( $value->{self::SCHEMA} ?? null ) === self::SCHEMA_UNIFIED
+		);
 	}
 
 	/**
@@ -48,19 +53,9 @@ class SerializedValueContainer {
 	 * @return bool
 	 */
 	public static function isSegmented( $value ) {
-		return self::instanceOf( $value, self::SCHEMA_SEGMENTED );
-	}
-
-	/**
-	 * @param mixed $value
-	 * @param string $schema SCHEMA_* class constant
-	 * @return bool
-	 */
-	private static function instanceOf( $value, $schema ) {
 		return (
 			$value instanceof stdClass &&
-			property_exists( $value, self::SCHEMA ) &&
-			$value->{self::SCHEMA} === $schema
+			( $value->{self::SCHEMA} ?? null ) === self::SCHEMA_SEGMENTED
 		);
 	}
 }

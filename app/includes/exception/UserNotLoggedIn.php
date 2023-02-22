@@ -31,7 +31,7 @@
  *
  * @par Example:
  * @code
- * if( $user->isAnon() ) {
+ * if ( $user->isAnon() ) {
  *   throw new UserNotLoggedIn();
  * }
  * @endcode
@@ -41,11 +41,12 @@
  *
  * @par Example:
  * @code
- * if( $user->isAnon() ) {
+ * if ( $user->isAnon() ) {
  *   throw new UserNotLoggedIn( 'action-require-loggedin' );
  * }
  * @endcode
  *
+ * @newable
  * @see T39627
  * @since 1.20
  * @ingroup Exception
@@ -53,6 +54,8 @@
 class UserNotLoggedIn extends ErrorPageError {
 
 	/**
+	 * @stable to call
+	 *
 	 * @note The value of the $reasonMsg parameter must be set with the LoginFormValidErrorMessages
 	 * hook if you want the user to be automatically redirected to the login form.
 	 *
@@ -74,6 +77,7 @@ class UserNotLoggedIn extends ErrorPageError {
 	/**
 	 * Redirect to Special:Userlogin if the specified message is compatible. Otherwise,
 	 * show an error page as usual.
+	 * @param int $action
 	 */
 	public function report( $action = self::SEND_OUTPUT ) {
 		// If an unsupported message is used, don't try redirecting to Special:Userlogin,

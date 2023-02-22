@@ -17,7 +17,7 @@ var HighlightColorPickerWidget = function MwRcfiltersUiHighlightColorPickerWidge
 	HighlightColorPickerWidget.parent.call( this, config );
 	// Mixin constructors
 	OO.ui.mixin.LabelElement.call( this, $.extend( {}, config, {
-		label: mw.message( 'rcfilters-highlightmenu-title' ).text()
+		label: mw.msg( 'rcfilters-highlightmenu-title' )
 	} ) );
 
 	this.controller = controller;
@@ -25,6 +25,12 @@ var HighlightColorPickerWidget = function MwRcfiltersUiHighlightColorPickerWidge
 	this.currentSelection = 'none';
 	this.buttonSelect = new OO.ui.ButtonSelectWidget( {
 		items: colors.map( function ( color ) {
+			// The following classes are used here:
+			// * mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect-color-c1
+			// * mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect-color-c2
+			// * mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect-color-c3
+			// * mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect-color-c4
+			// * mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect-color-c5
 			return new OO.ui.ButtonOptionWidget( {
 				icon: color === 'none' ? 'check' : null,
 				data: color,
@@ -35,7 +41,7 @@ var HighlightColorPickerWidget = function MwRcfiltersUiHighlightColorPickerWidge
 				framed: false
 			} );
 		} ),
-		classes: 'mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect'
+		classes: [ 'mw-rcfilters-ui-highlightColorPickerWidget-buttonSelect' ]
 	} );
 
 	// Event
@@ -68,6 +74,7 @@ OO.mixinClass( HighlightColorPickerWidget, OO.ui.mixin.LabelElement );
 
 /**
  * Bind the color picker to an item
+ *
  * @param {mw.rcfilters.dm.FilterItem} filterItem
  */
 HighlightColorPickerWidget.prototype.setFilterItem = function ( filterItem ) {

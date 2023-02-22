@@ -1,11 +1,19 @@
 <?php
 
+use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Parser\ParserOutputFlags;
+use MediaWiki\Revision\RevisionAccessException;
+use MediaWiki\Revision\SlotRecord;
+
 class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	// Note these caches are naturally limited to
 	// $wgExpensiveParserFunctionLimit + 1 actual Title objects because any
 	// addition besides the one for the current page calls
 	// incrementExpensiveFunctionCount()
+	/** @var Title[] */
 	private $titleCache = [];
+	/** @var (Title|null)[] */
 	private $idCache = [ 0 => null ];
 
 	public function register() {
@@ -19,6 +27,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			'protectionLevels' => [ $this, 'protectionLevels' ],
 			'cascadingProtection' => [ $this, 'cascadingProtection' ],
 			'redirectTarget' => [ $this, 'redirectTarget' ],
+			'recordVaryFlag' => [ $this, 'recordVaryFlag' ],
 		];
 		return $this->getEngine()->registerInterface( 'mw.title.lua', $lib, [
 			'thisTitle' => $this->getInexpensiveTitleData( $this->getTitle() ),
@@ -26,20 +35,25 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		] );
 	}
 
+	/**
+	 * Check a namespace parameter
+	 * @param string $name Function name (for errors)
+	 * @param int $argIdx Argument index (for errors)
+	 * @param mixed &$arg Argument
+	 * @param int|null $default Default value, if $arg is null
+	 */
 	private function checkNamespace( $name, $argIdx, &$arg, $default = null ) {
-		global $wgContLang;
-
 		if ( $arg === null && $default !== null ) {
 			$arg = $default;
 		} elseif ( is_numeric( $arg ) ) {
 			$arg = (int)$arg;
-			if ( !MWNamespace::exists( $arg ) ) {
+			if ( !MediaWikiServices::getInstance()->getNamespaceInfo()->exists( $arg ) ) {
 				throw new Scribunto_LuaError(
 					"bad argument #$argIdx to '$name' (unrecognized namespace number '$arg')"
 				);
 			}
 		} elseif ( is_string( $arg ) ) {
-			$ns = $wgContLang->getNsIndex( $arg );
+			$ns = MediaWikiServices::getInstance()->getContentLanguage()->getNsIndex( $arg );
 			if ( $ns === false ) {
 				throw new Scribunto_LuaError(
 					"bad argument #$argIdx to '$name' (unrecognized namespace name '$arg')"
@@ -60,6 +74,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	private function getInexpensiveTitleData( Title $title ) {
 		$ns = $title->getNamespace();
 		$ret = [
+			'isCurrentTitle' => (bool)$title->equals( $this->getTitle() ),
 			'isLocal' => (bool)$title->isLocal(),
 			'interwiki' => $title->getInterwiki(),
 			'namespace' => $ns,
@@ -73,7 +88,8 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			if ( $this->getParser() && !$title->equals( $this->getTitle() ) ) {
 				$this->getParser()->getOutput()->addLink( $title );
 			}
-			$ret['exists'] = (bool)SpecialPageFactory::exists( $title->getDBkey() );
+			$ret['exists'] = MediaWikiServices::getInstance()
+				->getSpecialPageFactory()->exists( $title->getDBkey() );
 		}
 		if ( $ns !== NS_FILE && $ns !== NS_MEDIA ) {
 			$ret['file'] = false;
@@ -125,7 +141,8 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			'contentModel' => $title->getContentModel(),
 		];
 		if ( $title->getNamespace() === NS_SPECIAL ) {
-			$ret['exists'] = (bool)SpecialPageFactory::exists( $title->getDBkey() );
+			$ret['exists'] = MediaWikiServices::getInstance()
+				->getSpecialPageFactory()->exists( $title->getDBkey() );
 		} else {
 			// bug 70495: don't just check whether the ID != 0
 			$ret['exists'] = $title->exists();
@@ -156,7 +173,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 				$this->idCache[$text_or_id] = $title;
 
 				// Record a link
-				if ( $this->getParser() && $title && !$title->equals( $this->getTitle() ) ) {
+				if ( $title && $this->getParser() && !$title->equals( $this->getTitle() ) ) {
 					$this->getParser()->getOutput()->addLink( $title );
 				}
 			}
@@ -175,8 +192,8 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 				return [ null ];
 			}
 		} else {
-			// This will always fail
 			$this->checkType( 'title.new', 1, $text_or_id, 'number or string' );
+			throw new LogicException( 'checkType above should have failed' );
 		}
 
 		return [ $this->getInexpensiveTitleData( $title ) ];
@@ -261,7 +278,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 	 *
 	 * The title is counted as a transclusion.
 	 *
-	 * @param $text string Title text
+	 * @param string $text Title text
 	 * @return Content|null The Content object of the title, null if missing
 	 */
 	private function getContentInternal( $text ) {
@@ -275,16 +292,30 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			$title, $title->getArticleID(), $title->getLatestRevID()
 		);
 
-		$rev = $this->getParser()->fetchCurrentRevisionOfTitle( $title );
+		$rev = $this->getParser()->fetchCurrentRevisionRecordOfTitle( $title );
 
 		if ( $title->equals( $this->getTitle() ) ) {
 			$parserOutput = $this->getParser()->getOutput();
-			$parserOutput->setFlag( 'vary-revision-sha1' );
+			$parserOutput->setOutputFlag( ParserOutputFlags::VARY_REVISION_SHA1 );
 			$parserOutput->setRevisionUsedSha1Base36( $rev ? $rev->getSha1() : '' );
 			wfDebug( __METHOD__ . ": set vary-revision-sha1 for '$title'" );
 		}
 
-		return $rev ? $rev->getContent() : null;
+		if ( !$rev ) {
+			return null;
+		}
+
+		try {
+			$content = $rev->getContent( SlotRecord::MAIN );
+		} catch ( RevisionAccessException $ex ) {
+			$logger = LoggerFactory::getInstance( 'Scribunto' );
+			$logger->warning(
+				__METHOD__ . ': Unable to transclude revision content',
+				[ 'exception' => $ex ]
+			);
+			$content = null;
+		}
+		return $content;
 	}
 
 	/**
@@ -317,7 +348,7 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		}
 
 		$this->incrementExpensiveFunctionCount();
-		$file = wfFindFile( $title );
+		$file = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $title );
 		if ( !$file ) {
 			return [ [ 'exists' => false ] ];
 		}
@@ -344,11 +375,17 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			'width' => $file->getWidth(),
 			'height' => $file->getHeight(),
 			'mimeType' => $file->getMimeType(),
+			'length' => $file->getLength(),
 			'size' => $file->getSize(),
 			'pages' => $pages
 		] ];
 	}
 
+	/**
+	 * Renumber an array for return to Lua
+	 * @param array $arr
+	 * @return array
+	 */
 	private static function makeArrayOneBased( $arr ) {
 		if ( empty( $arr ) ) {
 			return $arr;
@@ -369,11 +406,14 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			return [ null ];
 		}
 
-		if ( !$title->areRestrictionsLoaded() ) {
+		$restrictionStore = MediaWikiServices::getInstance()->getRestrictionStore();
+
+		if ( !$restrictionStore->areRestrictionsLoaded( $title ) ) {
 			$this->incrementExpensiveFunctionCount();
 		}
 		return [ array_map(
-			'Scribunto_LuaTitleLibrary::makeArrayOneBased', $title->getAllRestrictions()
+			'Scribunto_LuaTitleLibrary::makeArrayOneBased',
+			$restrictionStore->getAllRestrictions( $title )
 		) ];
 	}
 
@@ -390,17 +430,25 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 			return [ null ];
 		}
 
-		if ( !$title->areCascadeProtectionSourcesLoaded() ) {
+		$restrictionStore = MediaWikiServices::getInstance()->getRestrictionStore();
+		$titleFormatter = MediaWikiServices::getInstance()->getTitleFormatter();
+
+		if ( !$restrictionStore->areCascadeProtectionSourcesLoaded( $title ) ) {
 			$this->incrementExpensiveFunctionCount();
 		}
-		list( $sources, $restrictions ) = $title->getCascadeProtectionSources();
+
+		list( $sources, $restrictions ) = $restrictionStore->getCascadeProtectionSources( $title );
+
 		return [ [
 			'sources' => self::makeArrayOneBased( array_map(
-				function ( $t ) {
-					return $t->getPrefixedText();
+				static function ( $t ) use ( $titleFormatter ) {
+					return $titleFormatter->getPrefixedText( $t );
 				},
 				$sources ) ),
-			'restrictions' => array_map( 'Scribunto_LuaTitleLibrary::makeArrayOneBased', $restrictions )
+			'restrictions' => array_map(
+				'Scribunto_LuaTitleLibrary::makeArrayOneBased',
+				$restrictions
+			)
 		] ];
 	}
 
@@ -415,5 +463,24 @@ class Scribunto_LuaTitleLibrary extends Scribunto_LuaLibraryBase {
 		$content = $this->getContentInternal( $text );
 		$redirTitle = $content ? $content->getRedirectTarget() : null;
 		return [ $redirTitle ? $this->getInexpensiveTitleData( $redirTitle ) : null ];
+	}
+
+	/**
+	 * Record a ParserOutput flag when the current title is accessed
+	 * @internal
+	 * @param string $text
+	 * @param string $flag
+	 * @return array
+	 */
+	public function recordVaryFlag( $text, $flag ) {
+		$this->checkType( 'recordVaryFlag', 1, $text, 'string' );
+		$this->checkType( 'recordVaryFlag', 2, $flag, 'string' );
+		$title = Title::newFromText( $text );
+		if ( $title && $title->equals( $this->getTitle() ) ) {
+			// XXX note that we don't check this against the values defined
+			// in ParserOutputFlags
+			$this->getParser()->getOutput()->setOutputFlag( $flag );
+		}
+		return [];
 	}
 }

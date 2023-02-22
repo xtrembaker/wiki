@@ -3,8 +3,8 @@
  *
  * To improve a translation please visit https://translatewiki.net
  *
- * @ingroup Language
  * @file
+ * @ingroup Languages
  *
  * @author Antofa
  * @author Cornelia
@@ -12,6 +12,8 @@
  * @author Jun Misugi
  * @author Kaganer
  */
+
+$fallback = 'it';
 
 $namespaceNames = [
 	NS_SPECIAL          => 'Ippiziari',
@@ -30,11 +32,13 @@ $namespaceNames = [
 	NS_CATEGORY_TALK    => 'Dischussioni_categuria',
 ];
 
+/** @phpcs-require-sorted-array */
 $specialPageAliases = [
 	'Allmessages'               => [ 'Imbasciaddi' ],
 	'Allpages'                  => [ 'TuttiLiPàgini' ],
 	'Ancientpages'              => [ 'PàginiMancuRizzenti' ],
 	'Block'                     => [ 'Brocca' ],
+	'BlockList'                 => [ 'IPBroccaddi' ],
 	'Booksources'               => [ 'ZirchaISBN' ],
 	'BrokenRedirects'           => [ 'RinviiIbbagliaddi' ],
 	'Categories'                => [ 'Categuri' ],
@@ -46,7 +50,6 @@ $specialPageAliases = [
 	'Export'                    => [ 'Ippurtha' ],
 	'Fewestrevisions'           => [ 'PàginiCunMancuRibisioni' ],
 	'Import'                    => [ 'Impurtha' ],
-	'BlockList'                 => [ 'IPBroccaddi' ],
 	'Listadmins'                => [ 'Amministhradori' ],
 	'Listfiles'                 => [ 'Immagini' ],
 	'Listredirects'             => [ 'Rinvii' ],

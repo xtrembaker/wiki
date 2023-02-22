@@ -19,7 +19,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          wget https://getcomposer.org/download/1.10.17/composer.phar
+          wget https://getcomposer.org/download/2.5.4/composer.phar
           php composer.phar install
 
       - name: Lint

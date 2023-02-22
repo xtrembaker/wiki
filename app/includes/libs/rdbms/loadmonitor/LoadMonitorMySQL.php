@@ -16,7 +16,6 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
 
 namespace Wikimedia\Rdbms;
@@ -43,14 +42,14 @@ class LoadMonitorMySQL extends LoadMonitor {
 	}
 
 	protected function getWeightScale( $index, IDatabase $conn = null ) {
-		if ( !$conn ) {
+		if ( $conn === null ) {
 			return parent::getWeightScale( $index, $conn );
 		}
 
 		$weight = 1.0;
 		if ( $this->warmCacheRatio > 0 ) {
 			$res = $conn->query( 'SHOW STATUS', __METHOD__ );
-			$s = $res ? $conn->fetchObject( $res ) : false;
+			$s = $res ? $res->fetchObject() : false;
 			if ( $s === false ) {
 				$host = $this->lb->getServerName( $index );
 				$this->replLogger->error( __METHOD__ . ": could not get status for $host" );

@@ -97,10 +97,11 @@ final class GlobalScope extends Scope
     }
 
     /**
+     * @unused-param $scope
      * @return array<string|int,Variable> (keys are variable names, which are *almost* always strings)
      * A map from name to Variable in the global scope.
      */
-    public function getVariableMapExcludingScope(?Scope $_): array
+    public function getVariableMapExcludingScope(?Scope $scope): array
     {
         // Phan always generates a branch scope in front of the branch scope.
         // The global scope can have hundreds or thousands of variables in some projects, avoid merging variables from it.
@@ -166,7 +167,7 @@ final class GlobalScope extends Scope
     }
 
     /**
-     * @return Scope
+     * @return never
      * Get the parent scope of this scope
      */
     public function getParentScope(): Scope
@@ -174,11 +175,17 @@ final class GlobalScope extends Scope
         throw new AssertionError("Global scope has no parent scope");
     }
 
+    /**
+     * @return never
+     */
     public function getClassFQSEN(): FullyQualifiedClassName
     {
         throw new AssertionError("Cannot get class FQSEN on scope");
     }
 
+    /**
+     * @return never
+     */
     public function getPropertyFQSEN(): FullyQualifiedPropertyName
     {
         throw new AssertionError("Cannot get class FQSEN on scope");
@@ -193,13 +200,19 @@ final class GlobalScope extends Scope
         return null;
     }
 
+    /**
+     * @return never
+     */
     public function getFunctionLikeFQSEN()
     {
         throw new AssertionError("Cannot get method/function/closure FQSEN on scope");
     }
 
+    /**
+     * @unused-param $template_type_identifier
+     */
     public function hasTemplateType(
-        string $unused_template_type_identifier
+        string $template_type_identifier
     ): bool {
         return false;
     }

@@ -4,21 +4,27 @@ namespace MediaWiki\Tests\Revision;
 
 use CommentStoreComment;
 use Content;
-use Language;
 use LogicException;
-use MediaWiki\Revision\MutableRevisionRecord;
+use MediaWiki\Content\IContentHandlerFactory;
+use MediaWiki\Content\Renderer\ContentRenderer;
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\Page\PageIdentityValue;
+use MediaWiki\Page\PageReference;
 use MediaWiki\Revision\MainSlotRoleHandler;
+use MediaWiki\Revision\MutableRevisionRecord;
 use MediaWiki\Revision\RevisionRecord;
 use MediaWiki\Revision\RevisionRenderer;
 use MediaWiki\Revision\SlotRecord;
 use MediaWiki\Revision\SlotRoleRegistry;
 use MediaWiki\Storage\NameTableStore;
-use MediaWikiTestCase;
+use MediaWiki\Tests\Unit\Permissions\MockAuthorityTrait;
 use MediaWiki\User\UserIdentityValue;
+use MediaWikiIntegrationTestCase;
 use ParserOptions;
 use ParserOutput;
 use PHPUnit\Framework\MockObject\MockObject;
-use Title;
+use TitleFactory;
+use Wikimedia\Rdbms\DBConnRef;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\ILoadBalancer;
 use WikitextContent;
@@ -26,77 +32,30 @@ use WikitextContent;
 /**
  * @covers \MediaWiki\Revision\RevisionRenderer
  */
-class RevisionRendererTest extends MediaWikiTestCase {
+class RevisionRendererTest extends MediaWikiIntegrationTestCase {
+	use MockAuthorityTrait;
 
-	/**
-	 * @param int $articleId
-	 * @param int $revisionId
-	 * @return Title
-	 */
-	private function getMockTitle( $articleId, $revisionId ) {
-		/** @var Title|MockObject $mock */
-		$mock = $this->getMockBuilder( Title::class )
-			->disableOriginalConstructor()
-			->getMock();
-		$mock->expects( $this->any() )
-			->method( 'getNamespace' )
-			->will( $this->returnValue( NS_MAIN ) );
-		$mock->expects( $this->any() )
-			->method( 'getText' )
-			->will( $this->returnValue( __CLASS__ ) );
-		$mock->expects( $this->any() )
-			->method( 'getPrefixedText' )
-			->will( $this->returnValue( __CLASS__ ) );
-		$mock->expects( $this->any() )
-			->method( 'getDBkey' )
-			->will( $this->returnValue( __CLASS__ ) );
-		$mock->expects( $this->any() )
-			->method( 'getArticleID' )
-			->will( $this->returnValue( $articleId ) );
-		$mock->expects( $this->any() )
-			->method( 'getLatestRevId' )
-			->will( $this->returnValue( $revisionId ) );
-		$mock->expects( $this->any() )
-			->method( 'getContentModel' )
-			->will( $this->returnValue( CONTENT_MODEL_WIKITEXT ) );
-		$mock->expects( $this->any() )
-			->method( 'getPageLanguage' )
-			->will( $this->returnValue( Language::factory( 'en' ) ) );
-		$mock->expects( $this->any() )
-			->method( 'isContentPage' )
-			->will( $this->returnValue( true ) );
-		$mock->expects( $this->any() )
-			->method( 'equals' )
-			->willReturnCallback(
-				function ( Title $other ) use ( $mock ) {
-					return $mock->getArticleID() === $other->getArticleID();
-				}
-			);
-		$mock->expects( $this->any() )
-			->method( 'getRestrictions' )
-			->willReturn( [] );
+	private $fakePage;
 
-		return $mock;
+	protected function setUp(): void {
+		parent::setUp();
+		$this->fakePage = PageIdentityValue::localIdentity( 7, NS_MAIN, __CLASS__ );
 	}
 
 	/**
+	 * @param IDatabase&MockObject $db
 	 * @param int $maxRev
-	 * @param int $linkCount
-	 *
-	 * @return IDatabase
+	 * @return IDatabase&MockObject
 	 */
-	private function getMockDatabaseConnection( $maxRev = 100, $linkCount = 0 ) {
-		/** @var IDatabase|MockObject $db */
-		$db = $this->getMock( IDatabase::class );
+	private function mockDatabaseConnection( $db, $maxRev = 100 ) {
 		$db->method( 'selectField' )
 			->willReturnCallback(
-				function ( $table, $fields, $cond ) use ( $maxRev, $linkCount ) {
+				function ( $table, $fields, $cond ) use ( $maxRev ) {
 					return $this->selectFieldCallback(
 						$table,
 						$fields,
 						$cond,
-						$maxRev,
-						$linkCount
+						$maxRev
 					);
 				}
 			);
@@ -105,39 +64,45 @@ class RevisionRendererTest extends MediaWikiTestCase {
 	}
 
 	/**
+	 * @param int $maxRev
+	 * @param bool $usePrimary
+	 * @param ContentRenderer|null $contentRenderer
 	 * @return RevisionRenderer
 	 */
-	private function newRevisionRenderer( $maxRev = 100, $useMaster = false ) {
-		$dbIndex = $useMaster ? DB_MASTER : DB_REPLICA;
-
-		$db = $this->getMockDatabaseConnection( $maxRev );
+	private function newRevisionRenderer(
+		$maxRev = 100,
+		$usePrimary = false,
+		$contentRenderer = null
+	) {
+		$dbIndex = $usePrimary ? DB_PRIMARY : DB_REPLICA;
+		$cr = $contentRenderer ?? $this->getServiceContainer()->getContentRenderer();
 
 		/** @var ILoadBalancer|MockObject $lb */
-		$lb = $this->getMock( ILoadBalancer::class );
+		$lb = $this->createMock( ILoadBalancer::class );
 		$lb->method( 'getConnection' )
 			->with( $dbIndex )
-			->willReturn( $db );
+			->willReturn( $this->mockDatabaseConnection( $this->createMock( IDatabase::class ), $maxRev ) );
 		$lb->method( 'getConnectionRef' )
 			->with( $dbIndex )
-			->willReturn( $db );
-		$lb->method( 'getLazyConnectionRef' )
-			->with( $dbIndex )
-			->willReturn( $db );
+			->willReturn( $this->mockDatabaseConnection( $this->createMock( DBConnRef::class ), $maxRev ) );
 
 		/** @var NameTableStore|MockObject $slotRoles */
-		$slotRoles = $this->getMockBuilder( NameTableStore::class )
-			->disableOriginalConstructor()
-			->getMock();
+		$slotRoles = $this->createMock( NameTableStore::class );
 		$slotRoles->method( 'getMap' )
 			->willReturn( [] );
 
 		$roleReg = new SlotRoleRegistry( $slotRoles );
 		$roleReg->defineRole( 'main', function () {
-			return new MainSlotRoleHandler( [] );
+			return new MainSlotRoleHandler(
+				[],
+				$this->createMock( IContentHandlerFactory::class ),
+				$this->createMock( HookContainer::class ),
+				$this->createMock( TitleFactory::class )
+			);
 		} );
 		$roleReg->defineRoleWithModel( 'aux', CONTENT_MODEL_WIKITEXT );
 
-		return new RevisionRenderer( $lb, $roleReg );
+		return new RevisionRenderer( $lb, $roleReg, $cr );
 	}
 
 	private function selectFieldCallback( $table, $fields, $cond, $maxRev ) {
@@ -151,10 +116,9 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 	public function testGetRenderedRevision_new() {
 		$renderer = $this->newRevisionRenderer( 100 );
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev = new MutableRevisionRecord( $this->fakePage );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -167,7 +131,7 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision( $rev, $options );
 
 		$this->assertFalse( $rr->isContentDeleted(), 'isContentDeleted' );
@@ -177,21 +141,20 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$html = $rr->getRevisionParserOutput()->getText();
 
-		$this->assertContains( 'page:' . __CLASS__, $html );
-		$this->assertContains( 'rev:101', $html ); // from speculativeRevIdCallback
-		$this->assertContains( 'user:Frank', $html );
-		$this->assertContains( 'time:20180101000003', $html );
+		$this->assertStringContainsString( 'page:' . __CLASS__, $html );
+		$this->assertStringContainsString( 'rev:101', $html ); // from speculativeRevIdCallback
+		$this->assertStringContainsString( 'user:Frank', $html );
+		$this->assertStringContainsString( 'time:20180101000003', $html );
 
 		$this->assertSame( $html, $rr->getSlotParserOutput( SlotRecord::MAIN )->getText() );
 	}
 
 	public function testGetRenderedRevision_current() {
 		$renderer = $this->newRevisionRenderer( 100 );
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 21 ); // current!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -203,7 +166,7 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision( $rev, $options );
 
 		$this->assertFalse( $rr->isContentDeleted(), 'isContentDeleted' );
@@ -213,21 +176,20 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$html = $rr->getRevisionParserOutput()->getText();
 
-		$this->assertContains( 'page:' . __CLASS__, $html );
-		$this->assertContains( 'rev:21', $html );
-		$this->assertContains( 'user:Frank', $html );
-		$this->assertContains( 'time:20180101000003', $html );
+		$this->assertStringContainsString( 'page:' . __CLASS__, $html );
+		$this->assertStringContainsString( 'rev:21', $html );
+		$this->assertStringContainsString( 'user:Frank', $html );
+		$this->assertStringContainsString( 'time:20180101000003', $html );
 
 		$this->assertSame( $html, $rr->getSlotParserOutput( SlotRecord::MAIN )->getText() );
 	}
 
 	public function testGetRenderedRevision_master() {
 		$renderer = $this->newRevisionRenderer( 100, true ); // use master
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 21 ); // current!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -239,25 +201,24 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision( $rev, $options, null, [ 'use-master' => true ] );
 
 		$this->assertFalse( $rr->isContentDeleted(), 'isContentDeleted' );
 
 		$html = $rr->getRevisionParserOutput()->getText();
 
-		$this->assertContains( 'rev:21', $html );
+		$this->assertStringContainsString( 'rev:21', $html );
 
 		$this->assertSame( $html, $rr->getSlotParserOutput( SlotRecord::MAIN )->getText() );
 	}
 
 	public function testGetRenderedRevision_known() {
 		$renderer = $this->newRevisionRenderer( 100, true ); // use master
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 21 ); // current!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -266,7 +227,7 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$output = new ParserOutput( 'cached text' );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision(
 			$rev,
 			$options,
@@ -281,11 +242,10 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 	public function testGetRenderedRevision_old() {
 		$renderer = $this->newRevisionRenderer( 100 );
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 11 ); // old!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -297,7 +257,7 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision( $rev, $options );
 
 		$this->assertFalse( $rr->isContentDeleted(), 'isContentDeleted' );
@@ -307,22 +267,21 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$html = $rr->getRevisionParserOutput()->getText();
 
-		$this->assertContains( 'page:' . __CLASS__, $html );
-		$this->assertContains( 'rev:11', $html );
-		$this->assertContains( 'user:Frank', $html );
-		$this->assertContains( 'time:20180101000003', $html );
+		$this->assertStringContainsString( 'page:' . __CLASS__, $html );
+		$this->assertStringContainsString( 'rev:11', $html );
+		$this->assertStringContainsString( 'user:Frank', $html );
+		$this->assertStringContainsString( 'time:20180101000003', $html );
 
 		$this->assertSame( $html, $rr->getSlotParserOutput( 'main' )->getText() );
 	}
 
 	public function testGetRenderedRevision_suppressed() {
 		$renderer = $this->newRevisionRenderer( 100 );
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 11 ); // old!
 		$rev->setVisibility( RevisionRecord::DELETED_TEXT ); // suppressed!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -334,7 +293,7 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision( $rev, $options );
 
 		$this->assertNull( $rr, 'getRenderedRevision' );
@@ -342,12 +301,11 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 	public function testGetRenderedRevision_privileged() {
 		$renderer = $this->newRevisionRenderer( 100 );
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 11 ); // old!
 		$rev->setVisibility( RevisionRecord::DELETED_TEXT ); // suppressed!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -359,8 +317,8 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
-		$sysop = $this->getTestUser( [ 'sysop' ] )->getUser(); // privileged!
+		$options = ParserOptions::newFromAnon();
+		$sysop = $this->mockRegisteredUltimateAuthority();
 		$rr = $renderer->getRenderedRevision( $rev, $options, $sysop );
 
 		$this->assertNotNull( $rr, 'getRenderedRevision' );
@@ -372,22 +330,21 @@ class RevisionRendererTest extends MediaWikiTestCase {
 		$html = $rr->getRevisionParserOutput()->getText();
 
 		// Suppressed content should be visible for sysops
-		$this->assertContains( 'page:' . __CLASS__, $html );
-		$this->assertContains( 'rev:11', $html );
-		$this->assertContains( 'user:Frank', $html );
-		$this->assertContains( 'time:20180101000003', $html );
+		$this->assertStringContainsString( 'page:' . __CLASS__, $html );
+		$this->assertStringContainsString( 'rev:11', $html );
+		$this->assertStringContainsString( 'user:Frank', $html );
+		$this->assertStringContainsString( 'time:20180101000003', $html );
 
 		$this->assertSame( $html, $rr->getSlotParserOutput( 'main' )->getText() );
 	}
 
 	public function testGetRenderedRevision_raw() {
 		$renderer = $this->newRevisionRenderer( 100 );
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
+		$rev = new MutableRevisionRecord( $this->fakePage );
 		$rev->setId( 11 ); // old!
 		$rev->setVisibility( RevisionRecord::DELETED_TEXT ); // suppressed!
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -399,7 +356,7 @@ class RevisionRendererTest extends MediaWikiTestCase {
 
 		$rev->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
-		$options = ParserOptions::newCanonical( 'canonical' );
+		$options = ParserOptions::newFromAnon();
 		$rr = $renderer->getRenderedRevision(
 			$rev,
 			$options,
@@ -412,23 +369,27 @@ class RevisionRendererTest extends MediaWikiTestCase {
 		$this->assertSame( $rev, $rr->getRevision() );
 		$this->assertSame( $options, $rr->getOptions() );
 
-		$html = $rr->getRevisionParserOutput()->getText();
+		$parserOutput = $rr->getRevisionParserOutput();
+		// Assert parser output recorded timestamp and parsed rev_id
+		$this->assertSame( $rev->getId(), $parserOutput->getCacheRevisionId() );
+		$this->assertSame( $rev->getTimestamp(), $parserOutput->getTimestamp() );
+
+		$html = $parserOutput->getText();
 
 		// Suppressed content should be visible in raw mode
-		$this->assertContains( 'page:' . __CLASS__, $html );
-		$this->assertContains( 'rev:11', $html );
-		$this->assertContains( 'user:Frank', $html );
-		$this->assertContains( 'time:20180101000003', $html );
+		$this->assertStringContainsString( 'page:' . __CLASS__, $html );
+		$this->assertStringContainsString( 'rev:11', $html );
+		$this->assertStringContainsString( 'user:Frank', $html );
+		$this->assertStringContainsString( 'time:20180101000003', $html );
 
 		$this->assertSame( $html, $rr->getSlotParserOutput( 'main' )->getText() );
 	}
 
 	public function testGetRenderedRevision_multi() {
 		$renderer = $this->newRevisionRenderer();
-		$title = $this->getMockTitle( 7, 21 );
 
-		$rev = new MutableRevisionRecord( $title );
-		$rev->setUser( new UserIdentityValue( 9, 'Frank', 0 ) );
+		$rev = new MutableRevisionRecord( $this->fakePage );
+		$rev->setUser( new UserIdentityValue( 9, 'Frank' ) );
 		$rev->setTimestamp( '20180101000003' );
 		$rev->setComment( CommentStoreComment::newUnsavedComment( '' ) );
 
@@ -445,23 +406,27 @@ class RevisionRendererTest extends MediaWikiTestCase {
 		$mainHtml = $mainOutput->getText();
 		$auxHtml = $auxOutput->getText();
 
-		$this->assertContains( 'Kittens', $mainHtml );
-		$this->assertContains( 'Goats', $auxHtml );
-		$this->assertNotContains( 'Goats', $mainHtml );
-		$this->assertNotContains( 'Kittens', $auxHtml );
-		$this->assertContains( 'Kittens', $combinedHtml );
-		$this->assertContains( 'Goats', $combinedHtml );
-		$this->assertContains( '>aux<', $combinedHtml, 'slot header' );
-		$this->assertNotContains( '<mw:slotheader', $combinedHtml, 'slot header placeholder' );
+		$this->assertStringContainsString( 'Kittens', $mainHtml );
+		$this->assertStringContainsString( 'Goats', $auxHtml );
+		$this->assertStringNotContainsString( 'Goats', $mainHtml );
+		$this->assertStringNotContainsString( 'Kittens', $auxHtml );
+		$this->assertStringContainsString( 'Kittens', $combinedHtml );
+		$this->assertStringContainsString( 'Goats', $combinedHtml );
+		$this->assertStringContainsString( '>aux<', $combinedHtml, 'slot header' );
+		$this->assertStringNotContainsString(
+			'<mw:slotheader',
+			$combinedHtml,
+			'slot header placeholder'
+		);
 
 		// make sure output wrapping works right
-		$this->assertContains( 'class="mw-parser-output"', $mainHtml );
-		$this->assertContains( 'class="mw-parser-output"', $auxHtml );
-		$this->assertContains( 'class="mw-parser-output"', $combinedHtml );
+		$this->assertStringContainsString( 'class="mw-parser-output"', $mainHtml );
+		$this->assertStringContainsString( 'class="mw-parser-output"', $auxHtml );
+		$this->assertStringContainsString( 'class="mw-parser-output"', $combinedHtml );
 
 		// there should be only one wrapper div
 		$this->assertSame( 1, preg_match_all( '#class="mw-parser-output"#', $combinedHtml ) );
-		$this->assertNotContains( 'class="mw-parser-output"', $combinedOutput->getRawText() );
+		$this->assertStringNotContainsString( 'class="mw-parser-output"', $combinedOutput->getRawText() );
 
 		$combinedLinks = $combinedOutput->getLinks();
 		$mainLinks = $mainOutput->getLinks();
@@ -473,13 +438,15 @@ class RevisionRendererTest extends MediaWikiTestCase {
 	}
 
 	public function testGetRenderedRevision_noHtml() {
-		/** @var MockObject|Content $mockContent */
-		$mockContent = $this->getMockBuilder( WikitextContent::class )
-			->setMethods( [ 'getParserOutput' ] )
-			->setConstructorArgs( [ 'Whatever' ] )
+		$content = new WikitextContent( 'Whatever' );
+
+		/** @var MockObject|ContentRenderer $mockContentRenderer */
+		$mockContentRenderer = $this->getMockBuilder( ContentRenderer::class )
+			->onlyMethods( [ 'getParserOutput' ] )
+			->disableOriginalConstructor()
 			->getMock();
-		$mockContent->method( 'getParserOutput' )
-			->willReturnCallback( function ( Title $title, $revId = null,
+		$mockContentRenderer->method( 'getParserOutput' )
+			->willReturnCallback( function ( Content $content, PageReference $page, $revId = null,
 				ParserOptions $options = null, $generateHtml = true
 			) {
 				if ( !$generateHtml ) {
@@ -490,12 +457,11 @@ class RevisionRendererTest extends MediaWikiTestCase {
 				}
 			} );
 
-		$renderer = $this->newRevisionRenderer();
-		$title = $this->getMockTitle( 7, 21 );
+		$renderer = $this->newRevisionRenderer( 100, false, $mockContentRenderer );
 
-		$rev = new MutableRevisionRecord( $title );
-		$rev->setContent( SlotRecord::MAIN, $mockContent );
-		$rev->setContent( 'aux', $mockContent );
+		$rev = new MutableRevisionRecord( $this->fakePage );
+		$rev->setContent( SlotRecord::MAIN, $content );
+		$rev->setContent( 'aux', $content );
 
 		// NOTE: we are testing the private combineSlotOutput() callback here.
 		$rr = $renderer->getRenderedRevision( $rev );

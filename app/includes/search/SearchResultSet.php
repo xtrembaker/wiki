@@ -32,7 +32,7 @@ class SearchResultSet extends BaseSearchResultSet {
 	/**
 	 * Cache of titles.
 	 * Lists titles of the result set, in the same order as results.
-	 * @var Title[]
+	 * @var Title[]|null
 	 */
 	private $titles;
 
@@ -44,7 +44,7 @@ class SearchResultSet extends BaseSearchResultSet {
 	protected $results;
 
 	/**
-	 * @var boolean True when there are more pages of search results available.
+	 * @var bool True when there are more pages of search results available.
 	 */
 	private $hasMoreResults;
 
@@ -69,7 +69,7 @@ class SearchResultSet extends BaseSearchResultSet {
 		return $this->count();
 	}
 
-	final public function count() {
+	final public function count(): int {
 		return count( $this->extractResults() );
 	}
 
@@ -81,7 +81,7 @@ class SearchResultSet extends BaseSearchResultSet {
 	 *
 	 * Return null if no total hits number is supported.
 	 *
-	 * @return int
+	 * @return int|null
 	 */
 	public function getTotalHits() {
 		return null;
@@ -107,8 +107,9 @@ class SearchResultSet extends BaseSearchResultSet {
 	}
 
 	/**
-	 * @return string|null Same as self::getQueryAfterRewrite(), but in HTML
-	 *  and with changes highlighted. Null when the query was not rewritten.
+	 * @return HtmlArmor|string|null Same as self::getQueryAfterRewrite(), but
+	 *  with changes highlighted if HtmlArmor is returned. Null when the query
+	 *  was not rewritten.
 	 */
 	public function getQueryAfterRewriteSnippet() {
 		return null;
@@ -132,7 +133,7 @@ class SearchResultSet extends BaseSearchResultSet {
 	}
 
 	/**
-	 * @return string HTML highlighted suggested query, '' if none
+	 * @return HtmlArmor|string HTML highlighted suggested query, '' if none
 	 */
 	public function getSuggestionSnippet() {
 		return '';
@@ -142,7 +143,7 @@ class SearchResultSet extends BaseSearchResultSet {
 	 * Return a result set of hits on other (multiple) wikis associated with this one
 	 *
 	 * @param int $type
-	 * @return ISearchResultSet[]
+	 * @return ISearchResultSet[]|null
 	 */
 	public function getInterwikiResults( $type = self::SECONDARY_RESULTS ) {
 		return null;
@@ -188,6 +189,7 @@ class SearchResultSet extends BaseSearchResultSet {
 			// must override this as well.
 			if ( is_array( $this->results ) ) {
 				$this->results = array_slice( $this->results, 0, $limit );
+				$this->titles = null;
 			} else {
 				throw new \UnexpectedValueException(
 					"When overriding result store extending classes must "
@@ -201,14 +203,14 @@ class SearchResultSet extends BaseSearchResultSet {
 	 * @return SearchResult[]
 	 */
 	public function extractResults() {
-		if ( is_null( $this->results ) ) {
+		if ( $this->results === null ) {
 			$this->results = [];
 			if ( $this->numRows() == 0 ) {
 				// Don't bother if we've got empty result
 				return $this->results;
 			}
 			$this->rewind();
-			while ( ( $result = $this->next() ) != false ) {
+			while ( $result = $this->next() ) {
 				$this->results[] = $result;
 			}
 			$this->rewind();
@@ -221,13 +223,13 @@ class SearchResultSet extends BaseSearchResultSet {
 	 * @return Title[]
 	 */
 	public function extractTitles() {
-		if ( is_null( $this->titles ) ) {
+		if ( $this->titles === null ) {
 			if ( $this->numRows() == 0 ) {
 				// Don't bother if we've got empty result
 				$this->titles = [];
 			} else {
 				$this->titles = array_map(
-					function ( SearchResult $result ) {
+					static function ( SearchResult $result ) {
 						return $result->getTitle();
 					},
 					$this->extractResults() );

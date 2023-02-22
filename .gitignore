@@ -2,5 +2,5 @@
 .dotcloud
 /nbproject/private/
 /.idea*
-/docker/local/db/
+/docker/local/\*-db/
 /log

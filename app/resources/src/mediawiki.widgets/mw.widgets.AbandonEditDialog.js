@@ -8,6 +8,8 @@
 /**
  * Confirm dialog shown when the users is leaving an editor without saving
  *
+ * The `useeditwarning` user option should be checked before showing this dialog.
+ *
  * @class
  * @extends OO.ui.MessageDialog
  *
@@ -34,6 +36,6 @@ mw.widgets.AbandonEditDialog.static.message =
 	OO.ui.deferMsg( 'mw-widgets-abandonedit' );
 
 mw.widgets.AbandonEditDialog.static.actions = [
-	{ action: 'discard', label: OO.ui.deferMsg( 'mw-widgets-abandonedit-discard' ), flags: [ 'primary', 'destructive' ] },
-	{ action: 'keep', label: OO.ui.deferMsg( 'mw-widgets-abandonedit-keep' ), flags: 'safe' }
+	{ action: 'discard', label: OO.ui.deferMsg( 'mw-widgets-abandonedit-discard' ), flags: 'destructive' },
+	{ action: 'keep', label: OO.ui.deferMsg( 'mw-widgets-abandonedit-keep' ), flags: [ 'primary', 'safe' ] }
 ];

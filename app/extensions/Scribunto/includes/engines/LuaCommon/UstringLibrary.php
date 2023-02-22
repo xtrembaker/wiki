@@ -5,36 +5,33 @@ use UtfNormal\Validator;
 class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 	/**
 	 * Limit on pattern lengths, in bytes not characters
-	 * @var integer
+	 * @var int
 	 */
 	private $patternLengthLimit = 10000;
 
 	/**
 	 * Limit on string lengths, in bytes not characters
-	 * If null, $wgMaxArticleSize * 1024 will be used
-	 * @var integer|null
+	 * @var int
 	 */
-	private $stringLengthLimit = null;
+	private $stringLengthLimit;
 
 	/**
 	 * PHP until 5.6.9 are buggy when the regex in preg_replace an
 	 * preg_match_all matches the empty string.
-	 * @var boolean
+	 * @var bool
 	 */
-	private $phpBug53823 = false;
+	private $phpBug53823;
 
 	/**
 	 * A cache of patterns and the regexes they generate.
 	 * @var MapCacheLRU
 	 */
-	private $patternRegexCache = null;
+	private $patternRegexCache;
 
+	/** @inheritDoc */
 	public function __construct( $engine ) {
-		if ( $this->stringLengthLimit === null ) {
-			global $wgMaxArticleSize;
-			$this->stringLengthLimit = $wgMaxArticleSize * 1024;
-		}
-
+		global $wgMaxArticleSize;
+		$this->stringLengthLimit = $wgMaxArticleSize * 1024;
 		$this->phpBug53823 = preg_replace( '//us', 'x', "\xc3\xa1" ) === "x\xc3x\xa1x";
 		$this->patternRegexCache = new MapCacheLRU( 100 );
 
@@ -82,7 +79,13 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		] );
 	}
 
-	private function checkString( $name, $s, $checkEncoding = true ) {
+	/**
+	 * Check a string first parameter
+	 * @param string $name Function name, for errors
+	 * @param mixed &$s Value to check
+	 * @param bool $checkEncoding Whether to validate UTF-8 encoding.
+	 */
+	private function checkString( $name, &$s, $checkEncoding = true ) {
 		if ( $this->getLuaType( $s ) == 'number' ) {
 			$s = (string)$s;
 		} else {
@@ -307,8 +310,8 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		if ( $j < $i ) {
 			return [ '' ];
 		}
-		$i = max( 1, min( $i, $len + 1 ) );
-		$j = max( 1, min( $j, $len + 1 ) );
+		$i = max( 1, min( (int)$i, $len + 1 ) );
+		$j = max( 1, min( (int)$j, $len + 1 ) );
 		$s = mb_substr( $s, $i - 1, $j - $i + 1, 'UTF-8' );
 		return [ $s ];
 	}
@@ -335,6 +338,11 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		return [ mb_strtolower( $s, 'UTF-8' ) ];
 	}
 
+	/**
+	 * Check a pattern as the second argument
+	 * @param string $name Lua function name, for errors
+	 * @param mixed $pattern Lua pattern
+	 */
 	private function checkPattern( $name, $pattern ) {
 		if ( $this->getLuaType( $pattern ) == 'number' ) {
 			$pattern = (string)$pattern;
@@ -350,12 +358,23 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		}
 	}
 
-	/* Convert a Lua pattern into a PCRE regex */
+	/**
+	 * Convert a Lua pattern into a PCRE regex
+	 * @param string $pattern Lua pattern to convert
+	 * @param string|false $anchor Regex fragment (`^` or `\G`) to use
+	 *  when anchoring the start of the regex, or false to disable start-anchoring.
+	 * @param string $name Lua function name, for errors
+	 * @return array [ string $re, array $capt, bool $anypos ]
+	 *  - $re: The regular expression
+	 *  - $capt: Definition of capturing groups, see addCapturesFromMatch()
+	 *  - $anypos: Whether any positional captures were encountered in the pattern.
+	 * @return-taint none
+	 */
 	private function patternToRegex( $pattern, $anchor, $name ) {
 		$cacheKey = serialize( [ $pattern, $anchor ] );
 		if ( !$this->patternRegexCache->has( $cacheKey ) ) {
 			$this->checkPattern( $name, $pattern );
-			$pat = preg_split( '//us', $pattern, null, PREG_SPLIT_NO_EMPTY );
+			$pat = preg_split( '//us', $pattern, -1, PREG_SPLIT_NO_EMPTY );
 
 			static $charsets = null, $brcharsets = null;
 			if ( $charsets === null ) {
@@ -538,6 +557,15 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		return $this->patternRegexCache->get( $cacheKey );
 	}
 
+	/**
+	 * Convert a Lua pattern bracketed character set to a PCRE regex fragment
+	 * @param string[] $pat Pattern being processed, split into individual characters.
+	 * @param int $i Offset of the start of the bracketed character set in $pat.
+	 * @param int $len Length of $pat.
+	 * @param array $brcharsets Mapping from Lua pattern percent escapes to
+	 *  regex-style character ranges.
+	 * @return array [ int $new_i, string $re_fragment ]
+	 */
 	private function bracketedCharSetToRegex( $pat, $i, $len, $brcharsets ) {
 		$ii = $i + 1;
 		$re = '[';
@@ -582,12 +610,22 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 			// "(?!)" would be simpler and could be quantified if not for a bug in PCRE 8.13 to 8.33
 			$re = '(?:(*FAIL))';
 		} elseif ( $re === '[^]' ) {
-			$re = '.'; // 's' modifier is always used, so this works
+			// 's' modifier is always used, so this works
+			$re = '.';
 		}
 
 		return [ $i, $re ];
 	}
 
+	/**
+	 * Append captured groups to a result array
+	 * @param array $arr Result array to append to.
+	 * @param string $s String matched against.
+	 * @param array $m Matches, from preg_match with PREG_OFFSET_CAPTURE.
+	 * @param array $capt Capture groups (in $m) to process, see patternToRegex()
+	 * @param bool $m0_if_no_captures Whether to append "$0" if $capt is empty.
+	 * @return array
+	 */
 	private function addCapturesFromMatch( $arr, $s, $m, $capt, $m0_if_no_captures ) {
 		if ( count( $capt ) ) {
 			foreach ( $capt as $n => $pos ) {
@@ -777,11 +815,11 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		switch ( $this->getLuaType( $repl ) ) {
 		case 'string':
 		case 'number':
-			$cb = function ( $m ) use ( $repl, $anypos, &$captures ) {
+			$cb = static function ( $m ) use ( $repl, $anypos, &$captures ) {
 				if ( $anypos ) {
 					$m = array_shift( $captures );
 				}
-				return preg_replace_callback( '/%([%0-9])/', function ( $m2 ) use ( $m ) {
+				return preg_replace_callback( '/%([%0-9])/', static function ( $m2 ) use ( $m ) {
 					$x = $m2[1];
 					if ( $x === '%' ) {
 						return '%';
@@ -805,7 +843,7 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 					$m = array_shift( $captures );
 				}
 				$x = $m['m1'] ?? $m[0];
-				if ( !isset( $repl[$x] ) || $repl[$x] === null ) {
+				if ( !isset( $repl[$x] ) ) {
 					return $m[0];
 				}
 				$type = $this->getLuaType( $repl[$x] );
@@ -825,6 +863,7 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 				$args = [];
 				if ( count( $capt ) ) {
 					foreach ( $capt as $i => $pos ) {
+						// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
 						$args[] = $m["m$i"];
 					}
 				} else {
@@ -844,6 +883,7 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 
 		default:
 			$this->checkType( 'gsub', 3, $repl, 'function or table or string' );
+			throw new LogicException( 'checkType above should have failed' );
 		}
 
 		$skippedMatches = 0;
@@ -853,7 +893,7 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 			$maxMatches = $n < 0 ? INF : $n;
 			$n = -1;
 			$realCallback = $cb;
-			$cb = function ( $m ) use ( $realCallback, &$skippedMatches, &$maxMatches ) {
+			$cb = static function ( $m ) use ( $realCallback, &$skippedMatches, &$maxMatches ) {
 				$c = ord( $m['phpBug53823'] );
 				if ( $c >= 0x80 && $c <= 0xbf || $maxMatches <= 0 ) {
 					$skippedMatches++;
@@ -868,7 +908,7 @@ class Scribunto_LuaUstringLibrary extends Scribunto_LuaLibraryBase {
 		$count = 0;
 		$s2 = preg_replace_callback( $re, $cb, $s, $n, $count );
 		if ( $s2 === null ) {
-			self::handlePCREError( preg_last_error(), $pattern );
+			$this->handlePCREError( preg_last_error(), $pattern );
 		}
 		return [ $s2, $count - $skippedMatches ];
 	}

@@ -21,6 +21,10 @@
  * @ingroup Maintenance
  */
 
+// NO_AUTOLOAD -- file-scope define() used to modify behaviour
+
+use Wikimedia\AtEase\AtEase;
+
 require_once __DIR__ . '/Maintenance.php';
 
 define( 'MW_CONFIG_CALLBACK', 'Installer::overrideConfig' );
@@ -29,14 +33,14 @@ define( 'MEDIAWIKI_INSTALL', true );
 /**
  * Maintenance script to install and configure MediaWiki
  *
- * Default values for the options are defined in DefaultSettings.php
+ * Default values for the options are defined in MainConfigSchema.php
  * (see the mapping in CliInstaller.php)
  * Default for --dbpath (SQLite-specific) is defined in SqliteInstaller::getGlobalDefaults
  *
  * @ingroup Maintenance
  */
 class CommandLineInstaller extends Maintenance {
-	function __construct() {
+	public function __construct() {
 		parent::__construct();
 		global $IP;
 
@@ -88,7 +92,7 @@ class CommandLineInstaller extends Maintenance {
 		);
 		$this->addOption( 'confpath', "Path to write LocalSettings.php to ($IP)", false, true );
 		$this->addOption( 'dbschema', 'The schema for the MediaWiki DB in '
-			. 'PostgreSQL/Microsoft SQL Server (mediawiki)', false, true );
+			. 'PostgreSQL (mediawiki)', false, true );
 		/*
 		$this->addOption( 'namespace', 'The project namespace (same as the "name" argument)',
 			false, true );
@@ -109,7 +113,7 @@ class CommandLineInstaller extends Maintenance {
 		return parent::getDbType();
 	}
 
-	function execute() {
+	public function execute() {
 		global $IP;
 
 		$siteName = $this->getArg( 0, 'MediaWiki' ); // Will not be set if used with --env-checks
@@ -160,9 +164,9 @@ class CommandLineInstaller extends Maintenance {
 				$this->error( 'WARNING: You have provided the options "dbpass" and "dbpassfile". '
 					. 'The content of "dbpassfile" overrides "dbpass".' );
 			}
-			Wikimedia\suppressWarnings();
+			AtEase::suppressWarnings();
 			$dbpass = file_get_contents( $dbpassfile ); // returns false on failure
-			Wikimedia\restoreWarnings();
+			AtEase::restoreWarnings();
 			if ( $dbpass === false ) {
 				$this->fatalError( "Couldn't open $dbpassfile" );
 			}
@@ -177,9 +181,9 @@ class CommandLineInstaller extends Maintenance {
 				$this->error( 'WARNING: You have provided the options "pass" and "passfile". '
 					. 'The content of "passfile" overrides "pass".' );
 			}
-			Wikimedia\suppressWarnings();
+			AtEase::suppressWarnings();
 			$pass = file_get_contents( $passfile ); // returns false on failure
-			Wikimedia\restoreWarnings();
+			AtEase::restoreWarnings();
 			if ( $pass === false ) {
 				$this->fatalError( "Couldn't open $passfile" );
 			}
@@ -189,7 +193,7 @@ class CommandLineInstaller extends Maintenance {
 		}
 	}
 
-	function validateParamsAndArgs() {
+	public function validateParamsAndArgs() {
 		if ( !$this->hasOption( 'env-checks' ) ) {
 			parent::validateParamsAndArgs();
 		}

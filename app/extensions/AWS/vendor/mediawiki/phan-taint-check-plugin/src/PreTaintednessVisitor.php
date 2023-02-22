@@ -1,11 +1,11 @@
 <?php
 
+namespace SecurityCheckPlugin;
+
 use ast\Node;
-use Phan\CodeBase;
-use Phan\Language\Context;
+use Phan\Language\Element\Parameter;
 use Phan\Language\Element\PassByReferenceVariable;
-use Phan\Language\Element\Property;
-use Phan\PluginV2\PluginAwarePreAnalysisVisitor;
+use Phan\PluginV3\PluginAwarePreAnalysisVisitor;
 
 /**
  * Class for visiting any nodes we want to handle in pre-order.
@@ -34,73 +34,26 @@ class PreTaintednessVisitor extends PluginAwarePreAnalysisVisitor {
 	use TaintednessBaseVisitor;
 
 	/**
-	 * @inheritDoc
-	 */
-	public function __construct( CodeBase $code_base, Context $context ) {
-		parent::__construct( $code_base, $context );
-		$this->plugin = SecurityCheckPlugin::$pluginInstance;
-	}
-
-	/**
-	 * Visit a foreach loop
-	 *
-	 * This is done in pre-order so that we can handle
-	 * the loop condition prior to determine the taint
-	 * of the loop variable, prior to evaluating the
-	 * loop body.
-	 *
+	 * @see visitMethod
 	 * @param Node $node
 	 */
-	public function visitForeach( Node $node ) {
-		// TODO: Could we do something better here detecting the array
-		// type
-		$lhsTaintedness = $this->getTaintedness( $node->children['expr'] );
-
-		$value = $node->children['value'];
-		if ( $value->kind === \ast\AST_REF ) {
-			// FIXME, this doesn't fully handle the ref case.
-			// taint probably won't be propagated to outer scope.
-			$value = $value->children['var'];
-		}
-
-		if ( $value->kind !== \ast\AST_VAR ) {
-			$this->debug( __METHOD__, "FIXME foreach complex case not handled" );
-			// Debug::printNode( $node );
-			return;
-		}
-
-		try {
-			$variableObj = $this->getCtxN( $value )->getVariable();
-			$this->setTaintedness( $variableObj, $lhsTaintedness );
-
-			if ( isset( $node->children['key'] ) ) {
-				// This will probably have a lot of false positives with
-				// arrays containing only numeric keys.
-				assert( $node->children['key']->kind === \ast\AST_VAR );
-				$variableObj = $this->getCtxN( $node->children['key'] )->getVariable();
-				$this->setTaintedness( $variableObj, $lhsTaintedness );
-			}
-		} catch ( Exception $e ) {
-			$this->debug( __METHOD__, "Exception " . $this->getDebugInfo( $e ) );
-		}
+	public function visitFuncDecl( Node $node ): void {
+		$this->visitMethod( $node );
 	}
 
 	/**
 	 * @see visitMethod
 	 * @param Node $node
-	 * @return void Just has a return statement in case visitMethod changes
 	 */
-	public function visitFuncDecl( Node $node ) {
-		return $this->visitMethod( $node );
+	public function visitClosure( Node $node ): void {
+		$this->visitMethod( $node );
 	}
 
 	/**
-	 * @see visitMethod
 	 * @param Node $node
-	 * @return void Just has a return statement in case visitMethod changes
 	 */
-	public function visitClosure( Node $node ) {
-		return $this->visitMethod( $node );
+	public function visitArrowFunc( Node $node ): void {
+		$this->visitMethod( $node );
 	}
 
 	/**
@@ -116,39 +69,83 @@ class PreTaintednessVisitor extends PluginAwarePreAnalysisVisitor {
 	 * Also handles FuncDecl and Closure
 	 * @param Node $node
 	 */
-	public function visitMethod( Node $node ) {
+	public function visitMethod( Node $node ): void {
 		// var_dump( __METHOD__ ); Debug::printNode( $node );
 		$method = $this->context->getFunctionLikeInScope( $this->code_base );
+		// Initialize retObjs to avoid recursing on methods that don't return anything.
+		self::initRetObjs( $method );
+		$promotedProps = [];
+		if ( $node->kind === \ast\AST_METHOD && $node->children['name'] === '__construct' ) {
+			foreach ( $method->getParameterList() as $i => $param ) {
+				if ( $param->getFlags() & Parameter::PARAM_MODIFIER_VISIBILITY_FLAGS ) {
+					$promotedProps[$i] = $this->getPropInCurrentScopeByName( $param->getName() );
+				}
+			}
+		}
 
 		$params = $node->children['params']->children;
 		foreach ( $params as $i => $param ) {
+			$paramName = $param->children['name'];
 			$scope = $this->context->getScope();
-			if ( !$scope->hasVariableWithName( $param->children['name'] ) ) {
+			if ( !$scope->hasVariableWithName( $paramName ) ) {
 				// Well uh-oh.
-				$this->debug( __METHOD__, "Missing variable for param \$" . $param->children['name'] );
+				$this->debug( __METHOD__, "Missing variable for param \$" . $paramName );
 				continue;
 			}
-			$varObj = $scope->getVariableByName( $param->children['name'] );
+			$varObj = $scope->getVariableByName( $paramName );
 
-			if ( $varObj instanceof PassByReferenceVariable ) {
-				// PassByReferenceVariable objects are too ephemeral to store taintedness there.
-				$varObj = $varObj->getElement();
-				if ( $varObj instanceof Property ) {
-					// This may be a Property passed by ref. Don't reset its taintedness and don't link it
-					continue;
-				}
+			$paramTypeTaint = $this->getTaintByType( $varObj->getUnionType() );
+			// Initially, the variable starts off with no taint, but we set the PRESERVE flag so we can check
+			// whether the argument is passed through, at least in simple cases.
+			$startTaint = new Taintedness( SecurityCheckPlugin::PRESERVE_TAINT );
+			// No point in adding a caused-by line here.
+			self::setTaintednessRaw( $varObj, $startTaint );
+
+			if ( !$varObj instanceof PassByReferenceVariable && !$paramTypeTaint->isSafe() ) {
+				// If the param is not an integer or something, link it to the func
+				$this->linkParamAndFunc( $varObj, $method, $i );
 			}
-
-			$paramTypeTaint = $this->getTaintByReturnType( $varObj->getUnionType() );
-			if ( $paramTypeTaint === SecurityCheckPlugin::NO_TAINT ) {
-				// The param is an integer or something, so skip.
-				$this->setTaintedness( $varObj, $paramTypeTaint );
-				continue;
+			if ( isset( $promotedProps[$i] ) ) {
+				$this->doAssignmentSingleElement(
+					$promotedProps[$i],
+					$startTaint,
+					$startTaint,
+					[],
+					false
+				);
+				$this->setTaintDependenciesInAssignment(
+					new TaintednessWithError(
+						$startTaint,
+						[],
+						self::getMethodLinks( $varObj ) ?: MethodLinks::newEmpty()
+					),
+					$promotedProps[$i]
+				);
 			}
-
-			// Initially, the variable starts off with no taint.
-			$this->setTaintedness( $varObj, SecurityCheckPlugin::NO_TAINT );
-			$this->linkParamAndFunc( $varObj, $method, $i );
 		}
+	}
+
+	/**
+	 * Determine whether this operation is safe, based on the operand types. This needs to be done
+	 * in preorder because phan infers types from operators, e.g. from `$a += $b` phan will infer
+	 * that they're both numbers. We need to use the types of the operands *before* inferring
+	 * types from the operator.
+	 *
+	 * @param Node $node
+	 */
+	public function visitAssignOp( Node $node ): void {
+		$lhs = $node->children['var'];
+		$rhs = $node->children['expr'];
+		// @phan-suppress-next-line PhanUndeclaredProperty
+		$node->assignTaintMask = $this->getBinOpTaintMask( $node, $lhs, $rhs );
+	}
+
+	/**
+	 * When a class property is declared
+	 * @param Node $node
+	 */
+	public function visitPropElem( Node $node ): void {
+		$prop = $this->getPropInCurrentScopeByName( $node->children['name'] );
+		$this->setTaintednessOld( $prop, Taintedness::newSafe(), false );
 	}
 }

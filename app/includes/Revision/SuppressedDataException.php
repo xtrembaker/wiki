@@ -26,15 +26,10 @@ namespace MediaWiki\Revision;
  * Exception raised in response to an audience check when attempting to
  * access suppressed information without permission.
  *
+ * @newable
  * @since 1.31
  * @since 1.32 Renamed from MediaWiki\Storage\SuppressedDataException
  */
 class SuppressedDataException extends RevisionAccessException {
 
 }
-
-/**
- * Retain the old class name for backwards compatibility.
- * @deprecated since 1.32
- */
-class_alias( SuppressedDataException::class, 'MediaWiki\Storage\SuppressedDataException' );

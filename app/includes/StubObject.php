@@ -1,4 +1,8 @@
 <?php
+
+// phpcs:disable MediaWiki.Commenting.FunctionComment.ObjectTypeHintReturn
+// phpcs:disable MediaWiki.Commenting.FunctionComment.ObjectTypeHintParam
+
 /**
  * Delayed loading of global objects.
  *
@@ -19,7 +23,7 @@
  *
  * @file
  */
-use Wikimedia\ObjectFactory;
+use Wikimedia\ObjectFactory\ObjectFactory;
 
 /**
  * Class to implement stub globals, which are globals that delay loading the
@@ -41,6 +45,8 @@ use Wikimedia\ObjectFactory;
  * resort, you can use StubObject::isRealObject() to break the loop, but as a
  * general rule, the stub object mechanism should be transparent, and code
  * which refers to it should be kept to a minimum.
+ *
+ * @newable
  */
 class StubObject {
 	/** @var null|string */
@@ -56,6 +62,8 @@ class StubObject {
 	protected $params;
 
 	/**
+	 * @stable to call
+	 *
 	 * @param string|null $global Name of the global variable.
 	 * @param string|callable|null $class Name of the class of the real object
 	 *                               or a factory function to call
@@ -120,6 +128,9 @@ class StubObject {
 		$params = $this->factory
 			? [ 'factory' => $this->factory ]
 			: [ 'class' => $this->class ];
+
+		// ObjectFactory::getObjectFromSpec accepts an array, not just a callable (phan bug)
+		// @phan-suppress-next-line PhanTypeInvalidCallableArraySize
 		return ObjectFactory::getObjectFromSpec( $params + [
 			'args' => $this->params,
 			'closure_expansion' => false,
@@ -136,6 +147,50 @@ class StubObject {
 	 */
 	public function __call( $name, $args ) {
 		return $this->_call( $name, $args );
+	}
+
+	/**
+	 * Wrapper for __get(), similar to _call() above
+	 *
+	 * @param string $name Name of the property to get
+	 * @return mixed
+	 */
+	public function _get( $name ) {
+		$this->_unstub( "__get($name)", 5 );
+		return $GLOBALS[$this->global]->$name;
+	}
+
+	/**
+	 * Function called by PHP if no property with that name exists in this
+	 * object.
+	 *
+	 * @param string $name Name of the property to get
+	 * @return mixed
+	 */
+	public function __get( $name ) {
+		return $this->_get( $name );
+	}
+
+	/**
+	 * Wrapper for __set(), similar to _call() above
+	 *
+	 * @param string $name Name of the property to set
+	 * @param mixed $value New property value
+	 */
+	public function _set( $name, $value ) {
+		$this->_unstub( "__set($name)", 5 );
+		$GLOBALS[$this->global]->$name = $value;
+	}
+
+	/**
+	 * Function called by PHP if no property with that name exists in this
+	 * object.
+	 *
+	 * @param string $name Name of the property to set
+	 * @param mixed $value New property value
+	 */
+	public function __set( $name, $value ) {
+		$this->_set( $name, $value );
 	}
 
 	/**
@@ -164,7 +219,7 @@ class StubObject {
 					. "\${$this->global}->$name from $caller\n" );
 			}
 			wfDebug( "Unstubbing \${$this->global} on call of "
-				. "\${$this->global}::$name from $caller\n" );
+				. "\${$this->global}::$name from $caller" );
 			$GLOBALS[$this->global] = $this->_newObject();
 			--$recursionLevel;
 			return $GLOBALS[$this->global];

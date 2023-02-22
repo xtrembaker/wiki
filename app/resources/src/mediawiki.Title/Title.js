@@ -37,49 +37,49 @@ var toUpperMap,
 	/**
 	 * @private
 	 * @static
-	 * @property NS_MAIN
+	 * @property {number} NS_MAIN
 	 */
 	NS_MAIN = namespaceIds[ '' ],
 
 	/**
 	 * @private
 	 * @static
-	 * @property NS_TALK
+	 * @property {number} NS_TALK
 	 */
 	NS_TALK = namespaceIds.talk,
 
 	/**
 	 * @private
 	 * @static
-	 * @property NS_SPECIAL
+	 * @property {number} NS_SPECIAL
 	 */
 	NS_SPECIAL = namespaceIds.special,
 
 	/**
 	 * @private
 	 * @static
-	 * @property NS_MEDIA
+	 * @property {number} NS_MEDIA
 	 */
 	NS_MEDIA = namespaceIds.media,
 
 	/**
 	 * @private
 	 * @static
-	 * @property NS_FILE
+	 * @property {number} NS_FILE
 	 */
 	NS_FILE = namespaceIds.file,
 
 	/**
 	 * @private
 	 * @static
-	 * @property FILENAME_MAX_BYTES
+	 * @property {number} FILENAME_MAX_BYTES
 	 */
 	FILENAME_MAX_BYTES = 240,
 
 	/**
 	 * @private
 	 * @static
-	 * @property TITLE_MAX_BYTES
+	 * @property {number} TITLE_MAX_BYTES
 	 */
 	TITLE_MAX_BYTES = 255,
 
@@ -116,8 +116,19 @@ var toUpperMap,
 
 	/**
 	 * @private
+	 * @method isKnownNamespace
+	 * @param {number} namespace that may or may not exist
+	 * @return {boolean}
+	 */
+	isKnownNamespace = function ( namespace ) {
+		return namespace === NS_MAIN || mw.config.get( 'wgFormattedNamespaces' )[ namespace ] !== undefined;
+	},
+
+	/**
+	 * @private
 	 * @method getNamespacePrefix_
-	 * @param {number} namespace
+	 * @param {number} namespace that is valid and known. Callers should call
+	 *  `isKnownNamespace` before executing this method.
 	 * @return {string}
 	 */
 	getNamespacePrefix = function ( namespace ) {
@@ -137,9 +148,7 @@ var toUpperMap,
 		// to round-trip titles -- you can't link to them consistently.
 		'|%[\\dA-Fa-f]{2}' +
 		// XML/HTML character references produce similar issues.
-		'|&[\\dA-Za-z\u0080-\uFFFF]+;' +
-		'|&#\\d+;' +
-		'|&#x[\\dA-Fa-f]+;'
+		'|&[\\dA-Za-z\u0080-\uFFFF]+;'
 	),
 
 	// From MediaWikiTitleCodec::splitTitleString() in PHP
@@ -151,9 +160,10 @@ var toUpperMap,
 
 	/**
 	 * Slightly modified from Flinfo. Credit goes to Lupo and Flominator.
+	 *
 	 * @private
 	 * @static
-	 * @property sanitationRules
+	 * @property {Object[]} sanitationRules
 	 */
 	sanitationRules = [
 		// "signature"
@@ -237,6 +247,14 @@ var toUpperMap,
 			.replace( rWhitespace, '_' )
 			// Trim underscores
 			.replace( rUnderscoreTrim, '' );
+
+		if ( title.indexOf( '\uFFFD' ) !== -1 ) {
+			// Contained illegal UTF-8 sequences or forbidden Unicode chars.
+			// Commonly occurs when the text was obtained using the `URL` API, and the 'title' parameter
+			// was using a legacy 8-bit encoding, for example:
+			// new URL( 'https://en.wikipedia.org/w/index.php?title=Apollo%96Soyuz' ).searchParams.get( 'title' )
+			return false;
+		}
 
 		// Process initial colon
 		if ( title !== '' && title[ 0 ] === ':' ) {
@@ -470,7 +488,11 @@ Title.newFromText = function ( title, namespace ) {
  * @return {mw.Title|null} A valid Title object or null if the title is invalid
  */
 Title.makeTitle = function ( namespace, title ) {
-	return mw.Title.newFromText( getNamespacePrefix( namespace ) + title );
+	if ( !isKnownNamespace( namespace ) ) {
+		return null;
+	} else {
+		return mw.Title.newFromText( getNamespacePrefix( namespace ) + title );
+	}
 };
 
 /**
@@ -479,10 +501,8 @@ Title.makeTitle = function ( namespace, title ) {
  *
  * @static
  * @param {string} title
- * @param {number|Object} [defaultNamespaceOrOptions=NS_MAIN]
+ * @param {number} [defaultNamespace=NS_MAIN]
  *  If given, will used as default namespace for the given title.
- *  This method can also be called with two arguments, in which case
- *  this becomes options (see below).
  * @param {Object} [options] additional options
  * @param {boolean} [options.forUploading=true]
  *  Makes sure that a file is uploadable under the title returned.
@@ -490,23 +510,14 @@ Title.makeTitle = function ( namespace, title ) {
  *  Automatically assumed if the title is created in the Media namespace.
  * @return {mw.Title|null} A valid Title object or null if the input cannot be turned into a valid title
  */
-Title.newFromUserInput = function ( title, defaultNamespaceOrOptions, options ) {
-	var namespace, m, id, ext, lastDot,
-		defaultNamespace;
-
-	// defaultNamespace is optional; check whether options moves up
-	if ( arguments.length < 3 && typeof defaultNamespace === 'object' ) {
-		options = defaultNamespaceOrOptions;
-	} else {
-		defaultNamespace = defaultNamespaceOrOptions;
-	}
+Title.newFromUserInput = function ( title, defaultNamespace, options ) {
+	var m, id, ext, lastDot,
+		namespace = parseInt( defaultNamespace ) || NS_MAIN;
 
 	// merge options into defaults
 	options = $.extend( {
 		forUploading: true
 	}, options );
-
-	namespace = defaultNamespace === undefined ? NS_MAIN : defaultNamespace;
 
 	// Normalise additional whitespace
 	title = title.replace( /\s/g, ' ' ).trim();
@@ -517,7 +528,7 @@ Title.newFromUserInput = function ( title, defaultNamespaceOrOptions, options ) 
 		namespace = NS_MAIN;
 		title = title
 			// Strip colon
-			.substr( 1 )
+			.slice( 1 )
 			// Trim underscores
 			.replace( rUnderscoreTrim, '' );
 	}
@@ -584,9 +595,7 @@ Title.newFromUserInput = function ( title, defaultNamespaceOrOptions, options ) 
  * @return {mw.Title|null} A valid Title object or null if the title is invalid
  */
 Title.newFromFileName = function ( uncleanName ) {
-	return Title.newFromUserInput( 'File:' + uncleanName, {
-		forUploading: true
-	} );
+	return Title.newFromUserInput( 'File:' + uncleanName );
 };
 
 /**
@@ -599,50 +608,16 @@ Title.newFromFileName = function ( uncleanName ) {
  * @return {mw.Title|null} The file title or null if unsuccessful
  */
 Title.newFromImg = function ( img ) {
-	var matches, i, regex, src, decodedSrc,
+	var src = img.jquery ? img[ 0 ].src : img.src,
+		data = mw.util.parseImageUrl( src );
 
-		// thumb.php-generated thumbnails
-		thumbPhpRegex = /thumb\.php/,
-		regexes = [
-			// Thumbnails
-			/\/[\da-f]\/[\da-f]{2}\/([^\s/]+)\/[^\s/]+-[^\s/]*$/,
-
-			// Full size images
-			/\/[\da-f]\/[\da-f]{2}\/([^\s/]+)$/,
-
-			// Thumbnails in non-hashed upload directories
-			/\/([^\s/]+)\/[^\s/]+-(?:\1|thumbnail)[^\s/]*$/,
-
-			// Full-size images in non-hashed upload directories
-			/\/([^\s/]+)$/
-		],
-
-		recount = regexes.length;
-
-	src = img.jquery ? img[ 0 ].src : img.src;
-
-	if ( thumbPhpRegex.test( src ) ) {
-		return mw.Title.newFromText( 'File:' + mw.util.getParamValue( 'f', src ) );
-	}
-
-	decodedSrc = decodeURIComponent( src );
-
-	for ( i = 0; i < recount; i++ ) {
-		regex = regexes[ i ];
-		matches = decodedSrc.match( regex );
-
-		if ( matches && matches[ 1 ] ) {
-			return mw.Title.newFromText( 'File:' + matches[ 1 ] );
-		}
-	}
-
-	return null;
+	return data ? mw.Title.newFromText( 'File:' + data.name ) : null;
 };
 
 /**
  * Check if a given namespace is a talk namespace
  *
- * See MWNamespace::isTalk in PHP
+ * See NamespaceInfo::isTalk in PHP
  *
  * @param {number} namespaceId Namespace ID
  * @return {boolean} Namespace is a talk namespace
@@ -654,7 +629,7 @@ Title.isTalkNamespace = function ( namespaceId ) {
 /**
  * Check if signature buttons should be shown in a given namespace
  *
- * See MWNamespace::wantSignatures in PHP
+ * See NamespaceInfo::wantSignatures in PHP
  *
  * @param {number} namespaceId Namespace ID
  * @return {boolean} Namespace is a signature namespace
@@ -766,9 +741,9 @@ Title.phpCharToUpper = function ( chr ) {
 	if ( !toUpperMap ) {
 		toUpperMap = require( './phpCharToUpper.json' );
 	}
-	if ( toUpperMap[ chr ] === '' ) {
+	if ( toUpperMap[ chr ] === 0 ) {
 		// Optimisation: When the override is to keep the character unchanged,
-		// we use an empty string in JSON. This reduces the data by 50%.
+		// we use 0 in JSON. This reduces the data by 50%.
 		return chr;
 	}
 	return toUpperMap[ chr ] || chr.toUpperCase();
@@ -803,13 +778,13 @@ Title.prototype = {
 	},
 
 	/**
-	 * Get the page name without extension or namespace prefix
+	 * Get the page name as if it is a file name, without extension or namespace prefix. Warning,
+	 * this is usually not what you want! A title like "User:Dr._J._Fail" will be returned as
+	 * "Dr. J"! Use #getMain or #getMainText for the actual page name.
 	 *
-	 * Example: "Example_image" for "File:Example_image.svg".
-	 *
-	 * For the page title (full page name without namespace prefix), see #getMain.
-	 *
-	 * @return {string}
+	 * @return {string} File name without file extension, in the canonical form with underscores
+	 *  instead of spaces. For example, the title "File:Example_image.svg" will be returned as
+	 *  "Example_image".
 	 */
 	getName: function () {
 		var ext = this.getExtension();
@@ -820,13 +795,13 @@ Title.prototype = {
 	},
 
 	/**
-	 * Get the page name (transformed by #text)
+	 * Get the page name as if it is a file name, without extension or namespace prefix. Warning,
+	 * this is usually not what you want! A title like "User:Dr._J._Fail" will be returned as
+	 * "Dr. J"! Use #getMainText for the actual page name.
 	 *
-	 * Example: "Example image" for "File:Example_image.svg".
-	 *
-	 * For the page title (full page name without namespace prefix), see #getMainText.
-	 *
-	 * @return {string}
+	 * @return {string} File name without file extension, formatted with spaces instead of
+	 *  underscores. For example, the title "File:Example_image.svg" will be returned as
+	 *  "Example image".
 	 */
 	getNameText: function () {
 		return text( this.getName() );
@@ -846,18 +821,6 @@ Title.prototype = {
 	},
 
 	/**
-	 * Shortcut for appendable string to form the main page name.
-	 *
-	 * Returns a string like ".json", or "" if no extension.
-	 *
-	 * @return {string}
-	 */
-	getDotExtension: function () {
-		var ext = this.getExtension();
-		return ext === null ? '' : '.' + ext;
-	},
-
-	/**
 	 * Get the main page name
 	 *
 	 * Example: "Example_image.svg" for "File:Example_image.svg".
@@ -871,7 +834,8 @@ Title.prototype = {
 		) {
 			return this.title;
 		}
-		return mw.Title.phpCharToUpper( this.title[ 0 ] ) + this.title.slice( 1 );
+		var firstChar = mwString.charAt( this.title, 0 );
+		return mw.Title.phpCharToUpper( firstChar ) + this.title.slice( firstChar.length );
 	},
 
 	/**
@@ -994,7 +958,7 @@ Title.prototype = {
 	},
 
 	/**
-	 * Check the the title can have an associated talk page
+	 * Check the title can have an associated talk page
 	 *
 	 * @return {boolean} The title can have an associated talk page
 	 */
@@ -1014,13 +978,19 @@ Title.prototype = {
 };
 
 /**
- * @alias #getPrefixedDb
+ * Alias of mw.Title#getPrefixedDb
+ *
+ * TODO: Use @-alias when we switch to JSDoc
+ *
  * @method
  */
 Title.prototype.toString = Title.prototype.getPrefixedDb;
 
 /**
- * @alias #getPrefixedText
+ * Alias of mw.Title#getPrefixedText
+ *
+ * TODO: Use @-alias when we switch to JSDoc
+ *
  * @method
  */
 Title.prototype.toText = Title.prototype.getPrefixedText;

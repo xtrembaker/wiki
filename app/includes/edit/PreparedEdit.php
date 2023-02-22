@@ -22,24 +22,17 @@ namespace MediaWiki\Edit;
 
 use Content;
 use ParserOptions;
-use RuntimeException;
 use ParserOutput;
+use RuntimeException;
 
 /**
  * Represents information returned by WikiPage::prepareContentForEdit()
  *
- * @deprecated since 1.32, use DerivedPageDataUpdater instead.
+ * @deprecated since 1.32; Since 1.37, use PreparedUpdate instead.
  *
  * @since 1.30
  */
 class PreparedEdit {
-	/**
-	 * Time this prepared edit was made
-	 *
-	 * @var string
-	 */
-	public $timestamp;
-
 	/**
 	 * Revision ID
 	 *
@@ -114,9 +107,11 @@ class PreparedEdit {
 	 * @param string $name
 	 * @return mixed
 	 */
-	function __get( $name ) {
+	public function __get( $name ) {
 		if ( $name === 'output' ) {
 			return $this->getOutput();
+		} elseif ( $name === 'timestamp' ) {
+			return $this->getOutput()->getCacheTime();
 		}
 
 		throw new RuntimeException( "Undefined field $name." );

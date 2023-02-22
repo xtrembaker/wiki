@@ -3,16 +3,17 @@
 /**
  * @group Search
  */
-class SearchUpdateTest extends MediaWikiTestCase {
+class SearchUpdateTest extends MediaWikiIntegrationTestCase {
 
 	/**
 	 * @var SearchUpdate
 	 */
 	private $su;
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
-		$this->su = new SearchUpdate( 0, Title::newMainPage() );
+		$pageIdentity = Title::newMainPage()->toPageIdentity();
+		$this->su = new SearchUpdate( 0, $pageIdentity );
 	}
 
 	public function updateText( $text ) {
@@ -67,17 +68,5 @@ EOT
 			$processed != '',
 			'Link surrounded by unicode quotes should not fail UTF-8 validation'
 		);
-	}
-}
-
-class MockSearch extends SearchEngine {
-	public static $id;
-	public static $title;
-	public static $text;
-
-	public function update( $id, $title, $text ) {
-		self::$id = $id;
-		self::$title = $title;
-		self::$text = $text;
 	}
 }

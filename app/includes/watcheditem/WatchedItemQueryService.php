@@ -1,9 +1,12 @@
 <?php
 
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\HookContainer\HookRunner;
 use MediaWiki\Linker\LinkTarget;
-use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\Permissions\Authority;
 use MediaWiki\Revision\RevisionRecord;
 use MediaWiki\User\UserIdentity;
+use MediaWiki\User\UserOptionsLookup;
 use Wikimedia\Assert\Assert;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\ILoadBalancer;
@@ -20,39 +23,39 @@ use Wikimedia\Rdbms\ILoadBalancer;
  */
 class WatchedItemQueryService {
 
-	const DIR_OLDER = 'older';
-	const DIR_NEWER = 'newer';
+	public const DIR_OLDER = 'older';
+	public const DIR_NEWER = 'newer';
 
-	const INCLUDE_FLAGS = 'flags';
-	const INCLUDE_USER = 'user';
-	const INCLUDE_USER_ID = 'userid';
-	const INCLUDE_COMMENT = 'comment';
-	const INCLUDE_PATROL_INFO = 'patrol';
-	const INCLUDE_AUTOPATROL_INFO = 'autopatrol';
-	const INCLUDE_SIZES = 'sizes';
-	const INCLUDE_LOG_INFO = 'loginfo';
-	const INCLUDE_TAGS = 'tags';
+	public const INCLUDE_FLAGS = 'flags';
+	public const INCLUDE_USER = 'user';
+	public const INCLUDE_USER_ID = 'userid';
+	public const INCLUDE_COMMENT = 'comment';
+	public const INCLUDE_PATROL_INFO = 'patrol';
+	public const INCLUDE_AUTOPATROL_INFO = 'autopatrol';
+	public const INCLUDE_SIZES = 'sizes';
+	public const INCLUDE_LOG_INFO = 'loginfo';
+	public const INCLUDE_TAGS = 'tags';
 
 	// FILTER_* constants are part of public API (are used in ApiQueryWatchlist and
 	// ApiQueryWatchlistRaw classes) and should not be changed.
 	// Changing values of those constants will result in a breaking change in the API
-	const FILTER_MINOR = 'minor';
-	const FILTER_NOT_MINOR = '!minor';
-	const FILTER_BOT = 'bot';
-	const FILTER_NOT_BOT = '!bot';
-	const FILTER_ANON = 'anon';
-	const FILTER_NOT_ANON = '!anon';
-	const FILTER_PATROLLED = 'patrolled';
-	const FILTER_NOT_PATROLLED = '!patrolled';
-	const FILTER_AUTOPATROLLED = 'autopatrolled';
-	const FILTER_NOT_AUTOPATROLLED = '!autopatrolled';
-	const FILTER_UNREAD = 'unread';
-	const FILTER_NOT_UNREAD = '!unread';
-	const FILTER_CHANGED = 'changed';
-	const FILTER_NOT_CHANGED = '!changed';
+	public const FILTER_MINOR = 'minor';
+	public const FILTER_NOT_MINOR = '!minor';
+	public const FILTER_BOT = 'bot';
+	public const FILTER_NOT_BOT = '!bot';
+	public const FILTER_ANON = 'anon';
+	public const FILTER_NOT_ANON = '!anon';
+	public const FILTER_PATROLLED = 'patrolled';
+	public const FILTER_NOT_PATROLLED = '!patrolled';
+	public const FILTER_AUTOPATROLLED = 'autopatrolled';
+	public const FILTER_NOT_AUTOPATROLLED = '!autopatrolled';
+	public const FILTER_UNREAD = 'unread';
+	public const FILTER_NOT_UNREAD = '!unread';
+	public const FILTER_CHANGED = 'changed';
+	public const FILTER_NOT_CHANGED = '!changed';
 
-	const SORT_ASC = 'ASC';
-	const SORT_DESC = 'DESC';
+	public const SORT_ASC = 'ASC';
+	public const SORT_DESC = 'DESC';
 
 	/**
 	 * @var ILoadBalancer
@@ -65,27 +68,41 @@ class WatchedItemQueryService {
 	/** @var CommentStore */
 	private $commentStore;
 
-	/** @var ActorMigration */
-	private $actorMigration;
-
 	/** @var WatchedItemStoreInterface */
 	private $watchedItemStore;
 
-	/** @var PermissionManager */
-	private $permissionManager;
+	/** @var HookRunner */
+	private $hookRunner;
+
+	/** @var UserOptionsLookup */
+	private $userOptionsLookup;
+
+	/**
+	 * @var bool Correlates to $wgWatchlistExpiry feature flag.
+	 */
+	private $expiryEnabled;
+
+	/**
+	 * @var int Max query execution time
+	 */
+	private $maxQueryExecutionTime;
 
 	public function __construct(
 		ILoadBalancer $loadBalancer,
 		CommentStore $commentStore,
-		ActorMigration $actorMigration,
 		WatchedItemStoreInterface $watchedItemStore,
-		PermissionManager $permissionManager
+		HookContainer $hookContainer,
+		UserOptionsLookup $userOptionsLookup,
+		bool $expiryEnabled = false,
+		int $maxQueryExecutionTime = 0
 	) {
 		$this->loadBalancer = $loadBalancer;
 		$this->commentStore = $commentStore;
-		$this->actorMigration = $actorMigration;
 		$this->watchedItemStore = $watchedItemStore;
-		$this->permissionManager = $permissionManager;
+		$this->hookRunner = new HookRunner( $hookContainer );
+		$this->userOptionsLookup = $userOptionsLookup;
+		$this->expiryEnabled = $expiryEnabled;
+		$this->maxQueryExecutionTime = $maxQueryExecutionTime;
 	}
 
 	/**
@@ -94,7 +111,7 @@ class WatchedItemQueryService {
 	private function getExtensions() {
 		if ( $this->extensions === null ) {
 			$this->extensions = [];
-			Hooks::run( 'WatchedItemQueryServiceExtensions', [ &$this->extensions, $this ] );
+			$this->hookRunner->onWatchedItemQueryServiceExtensions( $this->extensions, $this );
 		}
 		return $this->extensions;
 	}
@@ -103,7 +120,7 @@ class WatchedItemQueryService {
 	 * @return IDatabase
 	 */
 	private function getConnection() {
-		return $this->loadBalancer->getConnectionRef( DB_REPLICA, [ 'watchlist' ] );
+		return $this->loadBalancer->getConnectionRef( DB_REPLICA );
 	}
 
 	/**
@@ -120,7 +137,7 @@ class WatchedItemQueryService {
 	 *                                 (defaults to all types), allowed values: RC_EDIT, RC_NEW,
 	 *                                 RC_LOG, RC_EXTERNAL, RC_CATEGORIZE
 	 *        'onlyByUser'          => string only list changes by a specified user
-	 *        'notByUser'           => string do not incluide changes by a specified user
+	 *        'notByUser'           => string do not include changes by a specified user
 	 *        'dir'                 => string in which direction to enumerate, accepted values:
 	 *                                 - DIR_OLDER list newest first
 	 *                                 - DIR_NEWER list oldest first
@@ -128,7 +145,7 @@ class WatchedItemQueryService {
 	 *                                 timestamp to start enumerating from
 	 *        'end'                 => string (format accepted by wfTimestamp) requires 'dir' option,
 	 *                                 timestamp to end enumerating
-	 *        'watchlistOwner'      => User user whose watchlist items should be listed if different
+	 *        'watchlistOwner'      => UserIdentity user whose watchlist items should be listed if different
 	 *                                 than the one specified with $user param, requires
 	 *                                 'watchlistOwnerToken' option
 	 *        'watchlistOwnerToken' => string a watchlist token used to access another user's
@@ -189,7 +206,7 @@ class WatchedItemQueryService {
 		);
 		if ( array_key_exists( 'watchlistOwner', $options ) ) {
 			Assert::parameterType(
-				User::class,
+				UserIdentity::class,
 				$options['watchlistOwner'],
 				'$options[\'watchlistOwner\']'
 			);
@@ -248,7 +265,8 @@ class WatchedItemQueryService {
 					$target,
 					$this->watchedItemStore->getLatestNotificationTimestamp(
 						$row->wl_notificationtimestamp, $user, $target
-					)
+					),
+					$row->we_expiry ?? null
 				),
 				$this->getRecentChangeFieldsFromRow( $row )
 			];
@@ -270,7 +288,7 @@ class WatchedItemQueryService {
 	 *                          one of the self::SORT_* constants
 	 *        'namespaceIds' => int[] optional namespace IDs to filter by (defaults to all namespaces)
 	 *        'limit'        => int maximum number of items to return
-	 *        'filter'       => string optional filter, one of the self::FILTER_* contants
+	 *        'filter'       => string optional filter, one of the self::FILTER_* constants
 	 *        'from'         => LinkTarget requires 'sort' key, only return items starting from
 	 *                          those related to the link target
 	 *        'until'        => LinkTarget requires 'sort' key, only return items until
@@ -313,12 +331,24 @@ class WatchedItemQueryService {
 		$conds = $this->getWatchedItemsForUserQueryConds( $db, $user, $options );
 		$dbOptions = $this->getWatchedItemsForUserQueryDbOptions( $options );
 
+		$tables = 'watchlist';
+		$joinConds = [];
+		if ( $this->expiryEnabled ) {
+			// If expiries are enabled, join with the watchlist_expiry table and exclude expired items.
+			$tables = [ 'watchlist', 'watchlist_expiry' ];
+			$conds[] = $db->makeList(
+				[ 'we_expiry' => null, 'we_expiry > ' . $db->addQuotes( $db->timestamp() ) ],
+				$db::LIST_OR
+			);
+			$joinConds['watchlist_expiry'] = [ 'LEFT JOIN', 'wl_id = we_item' ];
+		}
 		$res = $db->select(
-			'watchlist',
+			$tables,
 			[ 'wl_namespace', 'wl_title', 'wl_notificationtimestamp' ],
 			$conds,
 			__METHOD__,
-			$dbOptions
+			$dbOptions,
+			$joinConds
 		);
 
 		$watchedItems = [];
@@ -330,7 +360,8 @@ class WatchedItemQueryService {
 				$target,
 				$this->watchedItemStore->getLatestNotificationTimestamp(
 					$row->wl_notificationtimestamp, $user, $target
-				)
+				),
+				$row->we_expiry ?? null
 			);
 		}
 
@@ -338,20 +369,22 @@ class WatchedItemQueryService {
 	}
 
 	private function getRecentChangeFieldsFromRow( stdClass $row ) {
-		// FIXME: This can be simplified to single array_filter call filtering by key value,
-		// now we have stopped supporting PHP 5.5
-		$allFields = get_object_vars( $row );
-		$rcKeys = array_filter(
-			array_keys( $allFields ),
-			function ( $key ) {
+		return array_filter(
+			get_object_vars( $row ),
+			static function ( $key ) {
 				return substr( $key, 0, 3 ) === 'rc_';
-			}
+			},
+			ARRAY_FILTER_USE_KEY
 		);
-		return array_intersect_key( $allFields, array_flip( $rcKeys ) );
 	}
 
 	private function getWatchedItemsWithRCInfoQueryTables( array $options ) {
 		$tables = [ 'recentchanges', 'watchlist' ];
+
+		if ( $this->expiryEnabled ) {
+			$tables[] = 'watchlist_expiry';
+		}
+
 		if ( !$options['allRevisions'] ) {
 			$tables[] = 'page';
 		}
@@ -364,7 +397,7 @@ class WatchedItemQueryService {
 			in_array( self::FILTER_NOT_ANON, $options['filters'] ) ||
 			array_key_exists( 'onlyByUser', $options ) || array_key_exists( 'notByUser', $options )
 		) {
-			$tables += $this->actorMigration->getJoin( 'rc_user' )['tables'];
+			$tables['watchlist_actor'] = 'actor';
 		}
 		return $tables;
 	}
@@ -379,6 +412,10 @@ class WatchedItemQueryService {
 			'rc_deleted',
 			'wl_notificationtimestamp'
 		];
+
+		if ( $this->expiryEnabled ) {
+			$fields[] = 'we_expiry';
+		}
 
 		$rcIdFields = [
 			'rc_cur_id',
@@ -398,10 +435,10 @@ class WatchedItemQueryService {
 			$fields = array_merge( $fields, [ 'rc_type', 'rc_minor', 'rc_bot' ] );
 		}
 		if ( in_array( self::INCLUDE_USER, $options['includeFields'] ) ) {
-			$fields['rc_user_text'] = $this->actorMigration->getJoin( 'rc_user' )['fields']['rc_user_text'];
+			$fields['rc_user_text'] = 'watchlist_actor.actor_name';
 		}
 		if ( in_array( self::INCLUDE_USER_ID, $options['includeFields'] ) ) {
-			$fields['rc_user'] = $this->actorMigration->getJoin( 'rc_user' )['fields']['rc_user'];
+			$fields['rc_user'] = 'watchlist_actor.actor_user';
 		}
 		if ( in_array( self::INCLUDE_COMMENT, $options['includeFields'] ) ) {
 			$fields += $this->commentStore->getJoin( 'rc_comment' )['fields'];
@@ -430,6 +467,10 @@ class WatchedItemQueryService {
 	) {
 		$watchlistOwnerId = $this->getWatchlistOwnerId( $user, $options );
 		$conds = [ 'wl_user' => $watchlistOwnerId ];
+
+		if ( $this->expiryEnabled ) {
+			$conds[] = 'we_expiry IS NULL OR we_expiry > ' . $db->addQuotes( $db->timestamp() );
+		}
 
 		if ( !$options['allRevisions'] ) {
 			$conds[] = $db->makeList(
@@ -470,10 +511,10 @@ class WatchedItemQueryService {
 
 	private function getWatchlistOwnerId( UserIdentity $user, array $options ) {
 		if ( array_key_exists( 'watchlistOwner', $options ) ) {
-			/** @var User $watchlistOwner */
+			/** @var UserIdentity $watchlistOwner */
 			$watchlistOwner = $options['watchlistOwner'];
 			$ownersToken =
-				$watchlistOwner->getOption( 'watchlisttoken' );
+				$this->userOptionsLookup->getOption( $watchlistOwner, 'watchlisttoken' );
 			$token = $options['watchlistOwnerToken'];
 			if ( $ownersToken == '' || !hash_equals( $ownersToken, $token ) ) {
 				throw ApiUsageException::newWithMessage( null, 'apierror-bad-watchlist-token', 'bad_wltoken' );
@@ -499,13 +540,9 @@ class WatchedItemQueryService {
 		}
 
 		if ( in_array( self::FILTER_ANON, $options['filters'] ) ) {
-			$conds[] = $this->actorMigration->isAnon(
-				$this->actorMigration->getJoin( 'rc_user' )['fields']['rc_user']
-			);
+			$conds[] = 'watchlist_actor.actor_user IS NULL';
 		} elseif ( in_array( self::FILTER_NOT_ANON, $options['filters'] ) ) {
-			$conds[] = $this->actorMigration->isNotAnon(
-				$this->actorMigration->getJoin( 'rc_user' )['fields']['rc_user']
-			);
+			$conds[] = 'watchlist_actor.actor_user IS NOT NULL';
 		}
 
 		if ( $user->useRCPatrol() || $user->useNPPatrol() ) {
@@ -555,7 +592,7 @@ class WatchedItemQueryService {
 		return $conds;
 	}
 
-	private function getUserRelatedConds( IDatabase $db, UserIdentity $user, array $options ) {
+	private function getUserRelatedConds( IDatabase $db, Authority $user, array $options ) {
 		if ( !array_key_exists( 'onlyByUser', $options ) && !array_key_exists( 'notByUser', $options ) ) {
 			return [];
 		}
@@ -563,20 +600,16 @@ class WatchedItemQueryService {
 		$conds = [];
 
 		if ( array_key_exists( 'onlyByUser', $options ) ) {
-			$byUser = User::newFromName( $options['onlyByUser'], false );
-			$conds[] = $this->actorMigration->getWhere( $db, 'rc_user', $byUser )['conds'];
+			$conds['watchlist_actor.actor_name'] = $options['onlyByUser'];
 		} elseif ( array_key_exists( 'notByUser', $options ) ) {
-			$byUser = User::newFromName( $options['notByUser'], false );
-			$conds[] = 'NOT(' . $this->actorMigration->getWhere( $db, 'rc_user', $byUser )['conds'] . ')';
+			$conds[] = 'watchlist_actor.actor_name<>' . $db->addQuotes( $options['notByUser'] );
 		}
 
 		// Avoid brute force searches (T19342)
 		$bitmask = 0;
-		if ( !$this->permissionManager->userHasRight( $user, 'deletedhistory' ) ) {
+		if ( !$user->isAllowed( 'deletedhistory' ) ) {
 			$bitmask = RevisionRecord::DELETED_USER;
-		} elseif ( !$this->permissionManager
-			->userHasAnyRight( $user, 'suppressrevision', 'viewsuppressed' )
-		) {
+		} elseif ( !$user->isAllowedAny( 'suppressrevision', 'viewsuppressed' ) ) {
 			$bitmask = RevisionRecord::DELETED_USER | RevisionRecord::DELETED_RESTRICTED;
 		}
 		if ( $bitmask ) {
@@ -586,15 +619,13 @@ class WatchedItemQueryService {
 		return $conds;
 	}
 
-	private function getExtraDeletedPageLogEntryRelatedCond( IDatabase $db, UserIdentity $user ) {
+	private function getExtraDeletedPageLogEntryRelatedCond( IDatabase $db, Authority $user ) {
 		// LogPage::DELETED_ACTION hides the affected page, too. So hide those
 		// entirely from the watchlist, or someone could guess the title.
 		$bitmask = 0;
-		if ( !$this->permissionManager->userHasRight( $user, 'deletedhistory' ) ) {
+		if ( !$user->isAllowed( 'deletedhistory' ) ) {
 			$bitmask = LogPage::DELETED_ACTION;
-		} elseif ( !$this->permissionManager
-			->userHasAnyRight( $user, 'suppressrevision', 'viewsuppressed' )
-		) {
+		} elseif ( !$user->isAllowedAny( 'suppressrevision', 'viewsuppressed' ) ) {
 			$bitmask = LogPage::DELETED_ACTION | LogPage::DELETED_RESTRICTED;
 		}
 		if ( $bitmask ) {
@@ -694,7 +725,9 @@ class WatchedItemQueryService {
 		if ( array_key_exists( 'limit', $options ) ) {
 			$dbOptions['LIMIT'] = (int)$options['limit'] + 1;
 		}
-
+		if ( $this->maxQueryExecutionTime ) {
+			$dbOptions['MAX_EXECUTION_TIME'] = $this->maxQueryExecutionTime;
+		}
 		return $dbOptions;
 	}
 
@@ -712,6 +745,9 @@ class WatchedItemQueryService {
 		if ( array_key_exists( 'limit', $options ) ) {
 			$dbOptions['LIMIT'] = (int)$options['limit'];
 		}
+		if ( $this->maxQueryExecutionTime ) {
+			$dbOptions['MAX_EXECUTION_TIME'] = $this->maxQueryExecutionTime;
+		}
 		return $dbOptions;
 	}
 
@@ -724,6 +760,11 @@ class WatchedItemQueryService {
 				]
 			]
 		];
+
+		if ( $this->expiryEnabled ) {
+			$joinConds['watchlist_expiry'] = [ 'LEFT JOIN', 'wl_id = we_item' ];
+		}
+
 		if ( !$options['allRevisions'] ) {
 			$joinConds['page'] = [ 'LEFT JOIN', 'rc_cur_id=page_id' ];
 		}
@@ -736,7 +777,7 @@ class WatchedItemQueryService {
 			in_array( self::FILTER_NOT_ANON, $options['filters'] ) ||
 			array_key_exists( 'onlyByUser', $options ) || array_key_exists( 'notByUser', $options )
 		) {
-			$joinConds += $this->actorMigration->getJoin( 'rc_user' )['joins'];
+			$joinConds['watchlist_actor'] = [ 'JOIN', 'actor_id=rc_actor' ];
 		}
 		return $joinConds;
 	}

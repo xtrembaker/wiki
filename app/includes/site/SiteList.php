@@ -32,7 +32,7 @@ class SiteList extends GenericArrayObject {
 	 *
 	 * @since 1.21
 	 *
-	 * @var array Array of integer
+	 * @var array Maps int identifiers to local ArrayObject keys
 	 */
 	protected $byInternalId = [];
 
@@ -41,7 +41,7 @@ class SiteList extends GenericArrayObject {
 	 *
 	 * @since 1.21
 	 *
-	 * @var array Array of string
+	 * @var array Maps string identifiers to local ArrayObject keys
 	 */
 	protected $byGlobalId = [];
 
@@ -51,7 +51,7 @@ class SiteList extends GenericArrayObject {
 	 *
 	 * @since 1.23
 	 *
-	 * @var array Array of string
+	 * @var array Maps string identifiers to local ArrayObject keys
 	 */
 	protected $byNavigationId = [];
 
@@ -99,7 +99,7 @@ class SiteList extends GenericArrayObject {
 	 *
 	 * @param mixed $index
 	 */
-	public function offsetUnset( $index ) {
+	public function offsetUnset( $index ): void {
 		if ( $this->offsetExists( $index ) ) {
 			/**
 			 * @var Site $site
@@ -296,7 +296,7 @@ class SiteList extends GenericArrayObject {
 	 * @var string A string uniquely identifying the version of the serialization structure,
 	 *             not including any sub-structures.
 	 */
-	const SERIAL_VERSION_ID = '2014-03-17';
+	private const SERIAL_VERSION_ID = '2014-03-17';
 
 	/**
 	 * Returns the version ID that identifies the serialization structure used by
@@ -332,21 +332,17 @@ class SiteList extends GenericArrayObject {
 	}
 
 	/**
-	 * @see GenericArrayObject::unserialize
+	 * @see GenericArrayObject::__unserialize
 	 *
-	 * @since 1.21
+	 * @since 1.38
 	 *
-	 * @param string $serialization
-	 *
-	 * @return array
+	 * @param array $serializationData
 	 */
-	public function unserialize( $serialization ) {
-		$serializationData = parent::unserialize( $serialization );
+	public function __unserialize( $serializationData ): void {
+		parent::__unserialize( $serializationData );
 
 		$this->byInternalId = $serializationData['internalIds'];
 		$this->byGlobalId = $serializationData['globalIds'];
 		$this->byNavigationId = $serializationData['navigationIds'];
-
-		return $serializationData;
 	}
 }

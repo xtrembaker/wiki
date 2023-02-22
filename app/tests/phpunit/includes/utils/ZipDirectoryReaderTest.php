@@ -8,25 +8,25 @@ class ZipDirectoryReaderTest extends MediaWikiIntegrationTestCase {
 	protected $zipDir;
 	protected $entries;
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 		$this->zipDir = __DIR__ . '/../../data/zip';
 	}
 
-	function zipCallback( $entry ) {
+	public function zipCallback( $entry ) {
 		$this->entries[] = $entry;
 	}
 
-	function readZipAssertError( $file, $error, $assertMessage ) {
+	public function readZipAssertError( $file, $error, $assertMessage ) {
 		$this->entries = [];
 		$status = ZipDirectoryReader::read( "{$this->zipDir}/$file", [ $this, 'zipCallback' ] );
-		$this->assertTrue( $status->hasMessage( $error ), $assertMessage );
+		$this->assertStatusError( $error, $status, $assertMessage );
 	}
 
-	function readZipAssertSuccess( $file, $assertMessage ) {
+	public function readZipAssertSuccess( $file, $assertMessage ) {
 		$this->entries = [];
 		$status = ZipDirectoryReader::read( "{$this->zipDir}/$file", [ $this, 'zipCallback' ] );
-		$this->assertTrue( $status->isOK(), $assertMessage );
+		$this->assertStatusOK( $status, $assertMessage );
 	}
 
 	public function testEmpty() {

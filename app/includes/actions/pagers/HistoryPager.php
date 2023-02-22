@@ -21,20 +21,23 @@
  * @ingroup Actions
  */
 
+use MediaWiki\Cache\LinkBatchFactory;
+use MediaWiki\CommentFormatter\CommentFormatter;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\RevisionStore;
+use MediaWiki\Watchlist\WatchlistManager;
 
 /**
  * @ingroup Pager
  * @ingroup Actions
  */
 class HistoryPager extends ReverseChronologicalPager {
-	/**
-	 * @var bool|stdClass
-	 */
-	public $lastRow = false;
 
-	public $counter, $historyPage, $buttons, $conds;
+	public $mGroupByDate = true;
+
+	public $historyPage, $buttons, $conds;
 
 	protected $oldIdChecked;
 
@@ -50,36 +53,70 @@ class HistoryPager extends ReverseChronologicalPager {
 	/** @var string */
 	private $tagFilter;
 
+	/** @var RevisionStore */
+	private $revisionStore;
+
+	/** @var WatchlistManager */
+	private $watchlistManager;
+
+	/** @var LinkBatchFactory */
+	private $linkBatchFactory;
+
+	/** @var CommentFormatter */
+	private $commentFormatter;
+
+	/**
+	 * @var RevisionRecord[] Revisions, with the key being their result offset
+	 */
+	private $revisions = [];
+
+	/**
+	 * @var string[] Formatted comments, with the key being their result offset as for $revisions
+	 */
+	private $formattedComments = [];
+
 	/**
 	 * @param HistoryAction $historyPage
-	 * @param string $year
-	 * @param string $month
+	 * @param int $year
+	 * @param int $month
 	 * @param string $tagFilter
 	 * @param array $conds
-	 * @param string $day
+	 * @param int $day
+	 * @param LinkBatchFactory|null $linkBatchFactory
+	 * @param WatchlistManager|null $watchlistManager
+	 * @param CommentFormatter|null $commentFormatter
 	 */
 	public function __construct(
 		HistoryAction $historyPage,
-		$year = '',
-		$month = '',
+		$year = 0,
+		$month = 0,
 		$tagFilter = '',
 		array $conds = [],
-		$day = ''
+		$day = 0,
+		LinkBatchFactory $linkBatchFactory = null,
+		WatchlistManager $watchlistManager = null,
+		CommentFormatter $commentFormatter = null
 	) {
 		parent::__construct( $historyPage->getContext() );
 		$this->historyPage = $historyPage;
 		$this->tagFilter = $tagFilter;
 		$this->getDateCond( $year, $month, $day );
 		$this->conds = $conds;
-		$this->showTagEditUI = ChangeTags::showTagEditingUI( $this->getUser() );
+		$this->showTagEditUI = ChangeTags::showTagEditingUI( $this->getAuthority() );
+		$services = MediaWikiServices::getInstance();
+		$this->revisionStore = $services->getRevisionStore();
+		$this->linkBatchFactory = $linkBatchFactory ?? $services->getLinkBatchFactory();
+		$this->watchlistManager = $watchlistManager
+			?? $services->getWatchlistManager();
+		$this->commentFormatter = $commentFormatter ?? $services->getCommentFormatter();
 	}
 
 	// For hook compatibility...
-	function getArticle() {
+	public function getArticle() {
 		return $this->historyPage->getArticle();
 	}
 
-	function getSqlComment() {
+	protected function getSqlComment() {
 		if ( $this->conds ) {
 			return 'history page filtered'; // potentially slow, see CR r58153
 		} else {
@@ -87,15 +124,16 @@ class HistoryPager extends ReverseChronologicalPager {
 		}
 	}
 
-	function getQueryInfo() {
-		$revQuery = Revision::getQueryInfo( [ 'user' ] );
+	public function getQueryInfo() {
+		$revQuery = $this->revisionStore->getQueryInfo( [ 'user' ] );
+
 		$queryInfo = [
 			'tables' => $revQuery['tables'],
 			'fields' => $revQuery['fields'],
 			'conds' => array_merge(
 				[ 'rev_page' => $this->getWikiPage()->getId() ],
 				$this->conds ),
-			'options' => [ 'USE INDEX' => [ 'revision' => 'page_timestamp' ] ],
+			'options' => [ 'USE INDEX' => [ 'revision' => 'rev_page_timestamp' ] ],
 			'join_conds' => $revQuery['joins'],
 		];
 		ChangeTags::modifyDisplayQuery(
@@ -107,51 +145,40 @@ class HistoryPager extends ReverseChronologicalPager {
 			$this->tagFilter
 		);
 
-		// Avoid PHP 7.1 warning of passing $this by reference
-		$historyPager = $this;
-		Hooks::run( 'PageHistoryPager::getQueryInfo', [ &$historyPager, &$queryInfo ] );
+		$this->getHookRunner()->onPageHistoryPager__getQueryInfo( $this, $queryInfo );
 
 		return $queryInfo;
 	}
 
-	function getIndexField() {
-		return 'rev_timestamp';
+	public function getIndexField() {
+		return [ [ 'rev_timestamp', 'rev_id' ] ];
 	}
 
 	/**
 	 * @param stdClass $row
 	 * @return string
 	 */
-	function formatRow( $row ) {
-		if ( $this->lastRow ) {
-			$firstInList = $this->counter == 1;
-			$this->counter++;
+	public function formatRow( $row ) {
+		$notifTimestamp = $this->getConfig()->get( MainConfigNames::ShowUpdatedMarker )
+			? $this->watchlistManager
+				->getTitleNotificationTimestamp( $this->getUser(), $this->getTitle() )
+			: false;
 
-			$notifTimestamp = $this->getConfig()->get( 'ShowUpdatedMarker' )
-				? $this->getTitle()->getNotificationTimestamp( $this->getUser() )
-				: false;
-
-			$s = $this->historyLine( $this->lastRow, $row, $notifTimestamp, false, $firstInList );
-		} else {
-			$s = '';
-		}
-		$this->lastRow = $row;
-
-		return $s;
+		return $this->historyLine( $row, $notifTimestamp, $this->getResultOffset() );
 	}
 
 	protected function doBatchLookups() {
-		if ( !Hooks::run( 'PageHistoryPager::doBatchLookups', [ $this, $this->mResult ] ) ) {
+		if ( !$this->getHookRunner()->onPageHistoryPager__doBatchLookups( $this, $this->mResult ) ) {
 			return;
 		}
 
 		# Do a link batch query
-		$this->mResult->seek( 0 );
-		$batch = new LinkBatch();
+		$batch = $this->linkBatchFactory->newLinkBatch();
 		$revIds = [];
+		$title = $this->getTitle();
 		foreach ( $this->mResult as $row ) {
 			if ( $row->rev_parent_id ) {
-				$revIds[] = $row->rev_parent_id;
+				$revIds[] = (int)$row->rev_parent_id;
 			}
 			if ( $row->user_name !== null ) {
 				$batch->add( NS_USER, $row->user_name );
@@ -160,10 +187,33 @@ class HistoryPager extends ReverseChronologicalPager {
 				$batch->add( NS_USER, $row->rev_user_text );
 				$batch->add( NS_USER_TALK, $row->rev_user_text );
 			}
+			$this->revisions[] = $this->revisionStore->newRevisionFromRow(
+				$row,
+				RevisionStore::READ_NORMAL,
+				$title
+			);
 		}
-		$this->parentLens = Revision::getParentLengths( $this->mDb, $revIds );
+		$this->parentLens = $this->revisionStore->getRevisionSizes( $revIds );
 		$batch->execute();
+
+		# The keys of $this->formattedComments will be the same as the keys of $this->revisions
+		$this->formattedComments = $this->commentFormatter->createRevisionBatch()
+			->revisions( $this->revisions )
+			->authority( $this->getAuthority() )
+			->samePage( false )
+			->hideIfDeleted( true )
+			->useParentheses( false )
+			->execute();
+
 		$this->mResult->seek( 0 );
+	}
+
+	/**
+	 * Returns message when query returns no revisions
+	 * @return string escaped message
+	 */
+	protected function getEmptyBody() {
+		return $this->msg( 'history-empty' )->escaped();
 	}
 
 	/**
@@ -172,33 +222,31 @@ class HistoryPager extends ReverseChronologicalPager {
 	 * @return string HTML output
 	 */
 	protected function getStartBody() {
-		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
-		$this->lastRow = false;
-		$this->counter = 1;
 		$this->oldIdChecked = 0;
-
-		$this->getOutput()->wrapWikiMsg( "<div class='mw-history-legend'>\n$1\n</div>", 'histlegend' );
-		$s = Html::openElement( 'form', [ 'action' => wfScript(),
-			'id' => 'mw-history-compare' ] ) . "\n";
-		$s .= Html::hidden( 'title', $this->getTitle()->getPrefixedDBkey() ) . "\n";
-		$s .= Html::hidden( 'action', 'historysubmit' ) . "\n";
-		$s .= Html::hidden( 'type', 'revision' ) . "\n";
-
+		$s = '';
 		// Button container stored in $this->buttons for re-use in getEndBody()
 		$this->buttons = '';
 		if ( $this->getNumRows() > 0 ) {
+			$this->getOutput()->wrapWikiMsg( "<div class='mw-history-legend'>\n$1\n</div>", 'histlegend' );
+			$s = Html::openElement( 'form', [
+				'action' => wfScript(),
+				'id' => 'mw-history-compare'
+			] ) . "\n";
+			$s .= Html::hidden( 'title', $this->getTitle()->getPrefixedDBkey() ) . "\n";
+			$s .= Html::hidden( 'action', 'historysubmit' ) . "\n";
+			$s .= Html::hidden( 'type', 'revision' ) . "\n";
+
 			$this->buttons .= Html::openElement(
 				'div', [ 'class' => 'mw-history-compareselectedversions' ] );
-			$className = 'historysubmit mw-history-compareselectedversions-button';
+			$className = 'historysubmit mw-history-compareselectedversions-button mw-ui-button';
 			$attrs = [ 'class' => $className ]
 				+ Linker::tooltipAndAccesskeyAttribs( 'compareselectedversions' );
 			$this->buttons .= $this->submitButton( $this->msg( 'compareselectedversions' )->text(),
 				$attrs
 			) . "\n";
 
-			$user = $this->getUser();
 			$actionButtons = '';
-			if ( $permissionManager->userHasRight( $user, 'deleterevision' ) ) {
+			if ( $this->getAuthority()->isAllowed( 'deleterevision' ) ) {
 				$actionButtons .= $this->getRevisionButton(
 					'revisiondelete', 'showhideselectedversions' );
 			}
@@ -211,7 +259,7 @@ class HistoryPager extends ReverseChronologicalPager {
 					'mw-history-revisionactions' ], $actionButtons );
 			}
 
-			if ( $permissionManager->userHasRight( $user, 'deleterevision' ) || $this->showTagEditUI ) {
+			if ( $this->getAuthority()->isAllowed( 'deleterevision' ) || $this->showTagEditUI ) {
 				$this->buttons .= ( new ListToggle( $this->getOutput() ) )->getHTML();
 			}
 
@@ -219,21 +267,21 @@ class HistoryPager extends ReverseChronologicalPager {
 
 			$s .= $this->buttons;
 		}
-		$s .= '<ul id="pagehistory">' . "\n";
+
+		$s .= '<section id="pagehistory" class="mw-pager-body">';
 
 		return $s;
 	}
 
 	private function getRevisionButton( $name, $msg ) {
-		$this->preventClickjacking();
-		# Note T22966, <button> is non-standard in IE<8
+		$this->setPreventClickjacking( true );
 		$element = Html::element(
 			'button',
 			[
 				'type' => 'submit',
 				'name' => $name,
 				'value' => '1',
-				'class' => "historysubmit mw-history-$name-button",
+				'class' => "historysubmit mw-history-$name-button mw-ui-button",
 			],
 			$this->msg( $msg )->text()
 		) . "\n";
@@ -241,36 +289,16 @@ class HistoryPager extends ReverseChronologicalPager {
 	}
 
 	protected function getEndBody() {
-		if ( $this->lastRow ) {
-			$firstInList = $this->counter == 1;
-			if ( $this->mIsBackwards ) {
-				# Next row is unknown, but for UI reasons, probably exists if an offset has been specified
-				if ( $this->mOffset == '' ) {
-					$next = null;
-				} else {
-					$next = 'unknown';
-				}
-			} else {
-				# The next row is the past-the-end row
-				$next = $this->mPastTheEndRow;
-			}
-			$this->counter++;
-
-			$notifTimestamp = $this->getConfig()->get( 'ShowUpdatedMarker' )
-				? $this->getTitle()->getNotificationTimestamp( $this->getUser() )
-				: false;
-
-			$s = $this->historyLine( $this->lastRow, $next, $notifTimestamp, false, $firstInList );
-		} else {
-			$s = '';
+		if ( $this->getNumRows() == 0 ) {
+			return '';
 		}
-		$s .= "</ul>\n";
+		$s = '';
 		# Add second buttons only if there is more than one rev
 		if ( $this->getNumRows() > 2 ) {
 			$s .= $this->buttons;
 		}
+		$s .= '</section>'; // closes section#pagehistory
 		$s .= '</form>';
-
 		return $s;
 	}
 
@@ -281,7 +309,7 @@ class HistoryPager extends ReverseChronologicalPager {
 	 * @param array $attributes
 	 * @return string HTML output for the submit button
 	 */
-	function submitButton( $message, $attributes = [] ) {
+	private function submitButton( $message, $attributes = [] ) {
 		# Disable submit button if history has 1 revision only
 		if ( $this->getNumRows() > 1 ) {
 			return Html::submitButton( $message, $attributes );
@@ -296,28 +324,37 @@ class HistoryPager extends ReverseChronologicalPager {
 	 * @todo document some more, and maybe clean up the code (some params redundant?)
 	 *
 	 * @param stdClass $row The database row corresponding to the previous line.
-	 * @param mixed $next The database row corresponding to the next line
-	 *   (chronologically previous)
 	 * @param bool|string $notificationtimestamp
-	 * @param bool $dummy Unused.
-	 * @param bool $firstInList Whether this row corresponds to the first
-	 *   displayed on this history page.
+	 * @param int $resultOffset The offset into the current result set
 	 * @return string HTML output for the row
 	 */
-	function historyLine( $row, $next, $notificationtimestamp = false,
-		$dummy = false, $firstInList = false ) {
-		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
-		$rev = new Revision( $row, 0, $this->getTitle() );
+	private function historyLine( $row, $notificationtimestamp, $resultOffset ) {
+		$numRows = min( $this->mResult->numRows(), $this->mLimit );
 
-		if ( is_object( $next ) ) {
-			$prevRev = new Revision( $next, 0, $this->getTitle() );
+		$firstInList = $resultOffset === ( $this->mIsBackwards ? $numRows - 1 : 0 );
+		// Next in the list, previous in chronological order.
+		$nextResultOffset = $resultOffset + ( $this->mIsBackwards ? -1 : 1 );
+
+		$revRecord = $this->revisions[$resultOffset];
+		// This may only be null if the current line is the last one in the list.
+		$previousRevRecord = $this->revisions[$nextResultOffset] ?? null;
+
+		$latest = $revRecord->getId() === $this->getWikiPage()->getLatest();
+		$curlink = $this->curLink( $revRecord );
+		if ( $previousRevRecord ) {
+			// Display a link to compare to the previous revision
+			$lastlink = $this->lastLink( $revRecord, $previousRevRecord );
+		} elseif ( $this->mIsBackwards && $this->mOffset !== '' ) {
+			// When paging "backwards", we don't have the extra result for the next revision that would
+			// appear in the list, and we don't know whether this is the oldest revision or not.
+			// However, if an offset has been specified, then the user probably reached this page by
+			// navigating from the "next" page, therefore the next revision probably exists.
+			// Display a link using &oldid=prev (this skips some checks but that's fine).
+			$lastlink = $this->lastLink( $revRecord, null );
 		} else {
-			$prevRev = null;
+			// Do not display a link, because this is the oldest revision of the page
+			$lastlink = $this->historyPage->message['last'];
 		}
-
-		$latest = $rev->getId() === $this->getWikiPage()->getLatest();
-		$curlink = $this->curLink( $rev );
-		$lastlink = $this->lastLink( $rev, $next );
 		$curLastlinks = Html::rawElement( 'span', [], $curlink ) .
 			Html::rawElement( 'span', [], $lastlink );
 		$histLinks = Html::rawElement(
@@ -326,42 +363,47 @@ class HistoryPager extends ReverseChronologicalPager {
 			$curLastlinks
 		);
 
-		$diffButtons = $this->diffButtons( $rev, $firstInList );
+		$diffButtons = $this->diffButtons( $revRecord, $firstInList );
 		$s = $histLinks . $diffButtons;
 
-		$link = $this->revLink( $rev );
+		$link = $this->revLink( $revRecord );
 		$classes = [];
 
 		$del = '';
 		$user = $this->getUser();
-		$canRevDelete = $permissionManager->userHasRight( $user, 'deleterevision' );
+		$canRevDelete = $this->getAuthority()->isAllowed( 'deleterevision' );
 		// Show checkboxes for each revision, to allow for revision deletion and
 		// change tags
 		if ( $canRevDelete || $this->showTagEditUI ) {
-			$this->preventClickjacking();
+			$this->setPreventClickjacking( true );
 			// If revision was hidden from sysops and we don't need the checkbox
 			// for anything else, disable it
 			if ( !$this->showTagEditUI
-				&& !$rev->userCan( RevisionRecord::DELETED_RESTRICTED, $user )
+				&& !$revRecord->userCan( RevisionRecord::DELETED_RESTRICTED, $this->getAuthority() )
 			) {
 				$del = Xml::check( 'deleterevisions', false, [ 'disabled' => 'disabled' ] );
 			// Otherwise, enable the checkbox...
 			} else {
 				$del = Xml::check( 'showhiderevisions', false,
-					[ 'name' => 'ids[' . $rev->getId() . ']' ] );
+					[ 'name' => 'ids[' . $revRecord->getId() . ']' ] );
 			}
 		// User can only view deleted revisions...
-		} elseif ( $rev->getVisibility() &&
-				   $permissionManager->userHasRight( $user, 'deletedhistory' ) ) {
+		} elseif ( $revRecord->getVisibility() && $this->getAuthority()->isAllowed( 'deletedhistory' ) ) {
 			// If revision was hidden from sysops, disable the link
-			if ( !$rev->userCan( RevisionRecord::DELETED_RESTRICTED, $user ) ) {
+			if ( !$revRecord->userCan( RevisionRecord::DELETED_RESTRICTED, $this->getAuthority() ) ) {
 				$del = Linker::revDeleteLinkDisabled( false );
 			// Otherwise, show the link...
 			} else {
-				$query = [ 'type' => 'revision',
-					'target' => $this->getTitle()->getPrefixedDBkey(), 'ids' => $rev->getId() ];
-				$del .= Linker::revDeleteLink( $query,
-					$rev->isDeleted( RevisionRecord::DELETED_RESTRICTED ), false );
+				$query = [
+					'type' => 'revision',
+					'target' => $this->getTitle()->getPrefixedDBkey(),
+					'ids' => $revRecord->getId()
+				];
+				$del .= Linker::revDeleteLink(
+					$query,
+					$revRecord->isDeleted( RevisionRecord::DELETED_RESTRICTED ),
+					false
+				);
 			}
 		}
 		if ( $del ) {
@@ -374,24 +416,29 @@ class HistoryPager extends ReverseChronologicalPager {
 		$s .= " $link";
 		$s .= $dirmark;
 		$s .= " <span class='history-user'>" .
-			Linker::revUserTools( $rev, true, false ) . "</span>";
+			Linker::revUserTools( $revRecord, true, false ) . "</span>";
 		$s .= $dirmark;
 
-		if ( $rev->isMinor() ) {
+		if ( $revRecord->isMinor() ) {
 			$s .= ' ' . ChangesList::flag( 'minor', $this->getContext() );
 		}
 
 		# Sometimes rev_len isn't populated
-		if ( $rev->getSize() !== null ) {
+		if ( $revRecord->getSize() !== null ) {
 			# Size is always public data
 			$prevSize = $this->parentLens[$row->rev_parent_id] ?? 0;
-			$sDiff = ChangesList::showCharacterDifference( $prevSize, $rev->getSize() );
-			$fSize = Linker::formatRevisionSize( $rev->getSize(), false );
+			$sDiff = ChangesList::showCharacterDifference( $prevSize, $revRecord->getSize() );
+			$fSize = Linker::formatRevisionSize( $revRecord->getSize() );
 			$s .= ' <span class="mw-changeslist-separator"></span> ' . "$fSize $sDiff";
 		}
 
 		# Text following the character difference is added just before running hooks
-		$s2 = Linker::revComment( $rev, false, true, false );
+		$s2 = $this->formattedComments[$resultOffset];
+
+		if ( $s2 === '' ) {
+			$defaultComment = $this->msg( 'changeslist-nocomment' )->escaped();
+			$s2 = "<span class=\"comment mw-comment-none\">$defaultComment</span>";
+		}
 
 		if ( $notificationtimestamp && ( $row->rev_timestamp >= $notificationtimestamp ) ) {
 			$s2 .= ' <span class="updatedmarker">' . $this->msg( 'updatedmarker' )->escaped() . '</span>';
@@ -402,24 +449,23 @@ class HistoryPager extends ReverseChronologicalPager {
 
 		# Rollback and undo links
 
-		if ( $prevRev && $permissionManager->quickUserCan( 'edit', $user, $this->getTitle() ) ) {
-			if ( $latest && $permissionManager->quickUserCan( 'rollback',
-					$user, $this->getTitle() )
+		if ( $previousRevRecord && $this->getAuthority()->probablyCan( 'edit', $this->getTitle() ) ) {
+			if ( $latest && $this->getAuthority()->probablyCan( 'rollback', $this->getTitle() )
 			) {
 				// Get a rollback link without the brackets
 				$rollbackLink = Linker::generateRollback(
-					$rev,
+					$revRecord,
 					$this->getContext(),
 					[ 'verify', 'noBrackets' ]
 				);
 				if ( $rollbackLink ) {
-					$this->preventClickjacking();
+					$this->setPreventClickjacking( true );
 					$tools[] = $rollbackLink;
 				}
 			}
 
-			if ( !$rev->isDeleted( RevisionRecord::DELETED_TEXT )
-				&& !$prevRev->isDeleted( RevisionRecord::DELETED_TEXT )
+			if ( !$revRecord->isDeleted( RevisionRecord::DELETED_TEXT )
+				&& !$previousRevRecord->isDeleted( RevisionRecord::DELETED_TEXT )
 			) {
 				# Create undo tooltip for the first (=latest) line only
 				$undoTooltip = $latest
@@ -431,15 +477,20 @@ class HistoryPager extends ReverseChronologicalPager {
 					$undoTooltip,
 					[
 						'action' => 'edit',
-						'undoafter' => $prevRev->getId(),
-						'undo' => $rev->getId()
+						'undoafter' => $previousRevRecord->getId(),
+						'undo' => $revRecord->getId()
 					]
 				);
 				$tools[] = "<span class=\"mw-history-undo\">{$undolink}</span>";
 			}
 		}
 		// Allow extension to add their own links here
-		Hooks::run( 'HistoryRevisionTools', [ $rev, &$tools, $prevRev, $user ] );
+		$this->getHookRunner()->onHistoryTools(
+			$revRecord,
+			$tools,
+			$previousRevRecord,
+			$user
+		);
 
 		if ( $tools ) {
 			$s2 .= ' ' . Html::openElement( 'span', [ 'class' => 'mw-changeslist-links' ] );
@@ -461,13 +512,11 @@ class HistoryPager extends ReverseChronologicalPager {
 		}
 
 		# Include separator between character difference and following text
-		if ( $s2 !== '' ) {
-			$s .= ' <span class="mw-changeslist-separator"></span> ' . $s2;
-		}
+		$s .= ' <span class="mw-changeslist-separator"></span> ' . $s2;
 
-		$attribs = [ 'data-mw-revid' => $rev->getId() ];
+		$attribs = [ 'data-mw-revid' => $revRecord->getId() ];
 
-		Hooks::run( 'PageHistoryLineEnding', [ $this, &$row, &$s, &$classes, &$attribs ] );
+		$this->getHookRunner()->onPageHistoryLineEnding( $this, $row, $s, $classes, $attribs );
 		$attribs = array_filter( $attribs,
 			[ Sanitizer::class, 'isReservedDataAttribute' ],
 			ARRAY_FILTER_USE_KEY
@@ -483,32 +532,34 @@ class HistoryPager extends ReverseChronologicalPager {
 	/**
 	 * Create a link to view this revision of the page
 	 *
-	 * @param Revision $rev
+	 * @param RevisionRecord $rev
 	 * @return string
 	 */
-	function revLink( $rev ) {
-		return ChangesList::revDateLink( $rev, $this->getUser(), $this->getLanguage(),
+	private function revLink( RevisionRecord $rev ) {
+		return ChangesList::revDateLink( $rev, $this->getAuthority(), $this->getLanguage(),
 			$this->getTitle() );
 	}
 
 	/**
 	 * Create a diff-to-current link for this revision for this page
 	 *
-	 * @param Revision $rev
+	 * @param RevisionRecord $rev
 	 * @return string
 	 */
-	function curLink( $rev ) {
+	private function curLink( RevisionRecord $rev ) {
 		$cur = $this->historyPage->message['cur'];
 		$latest = $this->getWikiPage()->getLatest();
 		if ( $latest === $rev->getId()
-			|| !$rev->userCan( RevisionRecord::DELETED_TEXT, $this->getUser() )
+			|| !$rev->userCan( RevisionRecord::DELETED_TEXT, $this->getAuthority() )
 		) {
 			return $cur;
 		} else {
 			return $this->getLinkRenderer()->makeKnownLink(
 				$this->getTitle(),
 				new HtmlArmor( $cur ),
-				[],
+				[
+					'title' => $this->historyPage->message['tooltip-cur']
+				],
 				[
 					'diff' => $latest,
 					'oldid' => $rev->getId()
@@ -520,49 +571,29 @@ class HistoryPager extends ReverseChronologicalPager {
 	/**
 	 * Create a diff-to-previous link for this revision for this page.
 	 *
-	 * @param Revision $prevRev The revision being displayed
-	 * @param stdClass|string|null $next The next revision in list (that is
-	 *        the previous one in chronological order).
-	 *        May either be a row, "unknown" or null.
+	 * @param RevisionRecord $prevRev The revision being displayed
+	 * @param RevisionRecord|null $nextRev The next revision in list (that is the previous one in
+	 *        chronological order) or null if it is unknown, but a link should be created anyway.
 	 * @return string
 	 */
-	function lastLink( $prevRev, $next ) {
+	private function lastLink( RevisionRecord $prevRev, ?RevisionRecord $nextRev ) {
 		$last = $this->historyPage->message['last'];
 
-		if ( $next === null ) {
-			# Probably no next row
-			return $last;
-		}
-
-		$linkRenderer = $this->getLinkRenderer();
-		if ( $next === 'unknown' ) {
-			# Next row probably exists but is unknown, use an oldid=prev link
-			return $linkRenderer->makeKnownLink(
-				$this->getTitle(),
-				new HtmlArmor( $last ),
-				[],
-				[
-					'diff' => $prevRev->getId(),
-					'oldid' => 'prev'
-				]
-			);
-		}
-
-		$nextRev = new Revision( $next, 0, $this->getTitle() );
-
-		if ( !$prevRev->userCan( RevisionRecord::DELETED_TEXT, $this->getUser() )
-			|| !$nextRev->userCan( RevisionRecord::DELETED_TEXT, $this->getUser() )
+		if ( !$prevRev->userCan( RevisionRecord::DELETED_TEXT, $this->getAuthority() ) ||
+			( $nextRev && !$nextRev->userCan( RevisionRecord::DELETED_TEXT, $this->getAuthority() ) )
 		) {
 			return $last;
 		}
 
-		return $linkRenderer->makeKnownLink(
+		return $this->getLinkRenderer()->makeKnownLink(
 			$this->getTitle(),
 			new HtmlArmor( $last ),
-			[],
+			[
+				'title' => $this->historyPage->message['tooltip-last']
+			],
 			[
 				'diff' => $prevRev->getId(),
-				'oldid' => $next->rev_id
+				'oldid' => $nextRev ? $nextRev->getId() : 'prev'
 			]
 		);
 	}
@@ -570,12 +601,12 @@ class HistoryPager extends ReverseChronologicalPager {
 	/**
 	 * Create radio buttons for page history
 	 *
-	 * @param Revision $rev
+	 * @param RevisionRecord $rev
 	 * @param bool $firstInList Is this version the first one?
 	 *
 	 * @return string HTML output for the radio buttons
 	 */
-	function diffButtons( $rev, $firstInList ) {
+	private function diffButtons( RevisionRecord $rev, $firstInList ) {
 		if ( $this->getNumRows() > 1 ) {
 			$id = $rev->getId();
 			$radio = [ 'type' => 'radio', 'value' => $id ];
@@ -583,14 +614,16 @@ class HistoryPager extends ReverseChronologicalPager {
 			if ( $firstInList ) {
 				$first = Xml::element( 'input',
 					array_merge( $radio, [
-						'style' => 'visibility:hidden',
+						// Disable the hidden radio because it can still
+						// be selected with arrow keys on Firefox
+						'disabled' => '',
 						'name' => 'oldid',
 						'id' => 'mw-oldid-null' ] )
 				);
 				$checkmark = [ 'checked' => 'checked' ];
 			} else {
 				# Check visibility of old revisions
-				if ( !$rev->userCan( RevisionRecord::DELETED_TEXT, $this->getUser() ) ) {
+				if ( !$rev->userCan( RevisionRecord::DELETED_TEXT, $this->getAuthority() ) ) {
 					$radio['disabled'] = 'disabled';
 					$checkmark = []; // We will check the next possible one
 				} elseif ( !$this->oldIdChecked ) {
@@ -617,27 +650,40 @@ class HistoryPager extends ReverseChronologicalPager {
 	}
 
 	/**
+	 * Returns whether to show the "navigation bar"
+	 *
+	 * @return bool
+	 */
+	protected function isNavigationBarShown() {
+		if ( $this->getNumRows() == 0 ) {
+			return false;
+		}
+		return parent::isNavigationBarShown();
+	}
+
+	/**
 	 * @inheritDoc
 	 */
-	function getDefaultQuery() {
+	public function getDefaultQuery() {
 		parent::getDefaultQuery();
 		unset( $this->mDefaultQuery['date-range-to'] );
 		return $this->mDefaultQuery;
 	}
 
 	/**
-	 * This is called if a write operation is possible from the generated HTML
-	 * @param bool $enable
+	 * Set the "prevent clickjacking" flag; for example if a write operation
+	 * if possible from the generated HTML.
+	 * @param bool $flag
 	 */
-	function preventClickjacking( $enable = true ) {
-		$this->preventClickjacking = $enable;
+	private function setPreventClickjacking( bool $flag ) {
+		$this->preventClickjacking = $flag;
 	}
 
 	/**
 	 * Get the "prevent clickjacking" flag
 	 * @return bool
 	 */
-	function getPreventClickjacking() {
+	public function getPreventClickjacking() {
 		return $this->preventClickjacking;
 	}
 

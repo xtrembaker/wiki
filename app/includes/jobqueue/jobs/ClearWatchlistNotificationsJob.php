@@ -19,6 +19,7 @@
  * @ingroup JobQueue
  */
 
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 
 /**
@@ -34,7 +35,7 @@ use MediaWiki\MediaWikiServices;
  * @since 1.31
  */
 class ClearWatchlistNotificationsJob extends Job implements GenericParameterJob {
-	function __construct( array $params ) {
+	public function __construct( array $params ) {
 		parent::__construct( 'clearWatchlistNotifications', $params );
 
 		static $required = [ 'userId', 'casTime' ];
@@ -49,9 +50,9 @@ class ClearWatchlistNotificationsJob extends Job implements GenericParameterJob 
 	public function run() {
 		$services = MediaWikiServices::getInstance();
 		$lbFactory = $services->getDBLoadBalancerFactory();
-		$rowsPerQuery = $services->getMainConfig()->get( 'UpdateRowsPerQuery' );
+		$rowsPerQuery = $services->getMainConfig()->get( MainConfigNames::UpdateRowsPerQuery );
 
-		$dbw = $lbFactory->getMainLB()->getConnectionRef( DB_MASTER );
+		$dbw = $lbFactory->getMainLB()->getConnectionRef( DB_PRIMARY );
 		$ticket = $lbFactory->getEmptyTransactionTicket( __METHOD__ );
 		$timestamp = $this->params['timestamp'] ?? null;
 		if ( $timestamp === null ) {

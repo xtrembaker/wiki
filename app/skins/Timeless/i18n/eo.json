@@ -1,8 +1,8 @@
 {
 	"@metadata": {
 		"authors": [
-			1490493253,
-			"Mirin"
+			"Mirin",
+			1490493253
 		]
 	},
 	"timeless-desc": "Pretertempa etoso, dezajnita laŭ la prototipo Winter far Brandon Harris kaj aliaj etosoj far Vikimedia Fondaĵo",
@@ -21,5 +21,7 @@
 	"timeless-pagetools": "Agoj pri paĝo",
 	"timeless-languages": "Lingvoj",
 	"timeless-projects": "Aliaj projektoj",
-	"timeless.js": "/* Ajna JavaScript ĉi tie ŝargiĝos por tiuj kiuj uzas la etoson Timeless */"
+	"timeless.js": "/* Ajna JavaScript ĉi tie ŝargiĝos por tiuj kiuj uzas la etoson Timeless */",
+	"timeless-view-history": "Historio",
+	"timeless-action-undelete": "Malforigi {{PLURAL:$1|redakton|$1 redaktojn}}"
 }

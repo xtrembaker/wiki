@@ -28,6 +28,8 @@ if ( getenv( 'MW_INSTALL_PATH' ) ) {
 
 require_once "$IP/maintenance/Maintenance.php";
 
+use MediaWiki\Extension\ConfirmEdit\Hooks;
+
 /**
  * Maintenance script that deletes old fancy captchas from storage
  *
@@ -47,9 +49,9 @@ class DeleteOldFancyCaptchas extends Maintenance {
 	}
 
 	public function execute() {
-		$instance = ConfirmEditHooks::getInstance();
+		$instance = Hooks::getInstance();
 		if ( !( $instance instanceof FancyCaptcha ) ) {
-			$this->error( "\$wgCaptchaClass is not FancyCaptcha.\n", 1 );
+			$this->fatalError( "\$wgCaptchaClass is not FancyCaptcha.\n", 1 );
 		}
 
 		$countAct = $instance->getCaptchaCount();
@@ -61,7 +63,7 @@ class DeleteOldFancyCaptchas extends Maintenance {
 		$filesToDelete = [];
 		$deleteDate = $this->getOption( 'date' );
 		foreach (
-			$backend->getFileList( [ 'dir' => $dir ] ) as $file
+			$backend->getFileList( [ 'dir' => $dir, 'adviseStat' => true ] ) as $file
 		) {
 			$fullPath = $dir . '/' . $file;
 			$timestamp = $backend->getFileTimestamp( [ 'src' => $fullPath ] );
@@ -77,15 +79,24 @@ class DeleteOldFancyCaptchas extends Maintenance {
 			return;
 		}
 
-		$ret = $backend->doQuickOperations( $filesToDelete );
+		$this->output( "$count old fancy captchas to be deleted.\n" );
 
-		if ( $ret->isOK() ) {
-			$this->output( "$count old fancy captchas deleted.\n" );
-		} else {
-			$status = Status::wrap( $ret );
-			$this->output( "Deleting old captchas errored.\n" );
-			$this->output( $status->getWikiText( false, false, 'en' ) );
+		$deletedCount = 0;
+		foreach ( array_chunk( $filesToDelete, 1000 ) as $chunk ) {
+			$ret = $backend->doQuickOperations( $chunk );
+
+			if ( $ret->isOK() ) {
+				$chunkCount = count( $chunk );
+				$this->output( "$chunkCount...\n" );
+				$deletedCount += $chunkCount;
+			} else {
+				$status = Status::wrap( $ret );
+				$this->output( "Deleting old captchas errored.\n" );
+				$this->output( $status->getWikiText( false, false, 'en' ) );
+			}
 		}
+
+		$this->output( "$deletedCount old fancy captchas deleted.\n" );
 	}
 }
 

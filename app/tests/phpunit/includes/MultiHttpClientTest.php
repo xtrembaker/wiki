@@ -1,43 +1,55 @@
 <?php
 
+use PHPUnit\Framework\Constraint\IsType;
+use PHPUnit\Framework\MockObject\MockObject;
+use Wikimedia\TestingAccessWrapper;
+
 /**
  * The urls herein are not actually called, because we mock the return results.
  *
  * @covers MultiHttpClient
  */
-class MultiHttpClientTest extends MediaWikiTestCase {
+class MultiHttpClientTest extends MediaWikiIntegrationTestCase {
+	/** @var MultiHttpClient|MockObject */
 	protected $client;
 
-	protected function setUp() {
-		parent::setUp();
+	/**
+	 * @param array $options
+	 * @return MultiHttpClient|MockObject
+	 */
+	private function createClient( $options = [] ) {
 		$client = $this->getMockBuilder( MultiHttpClient::class )
-			->setConstructorArgs( [ [] ] )
-			->setMethods( [ 'isCurlEnabled' ] )->getMock();
+			->setConstructorArgs( [ $options ] )
+			->onlyMethods( [ 'isCurlEnabled' ] )->getMock();
 		$client->method( 'isCurlEnabled' )->willReturn( false );
-		$this->client = $client;
+		return $client;
+	}
+
+	protected function setUp(): void {
+		parent::setUp();
+		$this->client = $this->createClient( [] );
 	}
 
 	private function getHttpRequest( $statusValue, $statusCode, $headers = [] ) {
-		$httpRequest = $this->getMockBuilder( PhpHttpRequest::class )
-			->setConstructorArgs( [ '', [] ] )
+		$options = [
+			'timeout' => 1,
+			'connectTimeout' => 1
+		];
+		$httpRequest = $this->getMockBuilder( MWHttpRequest::class )
+			->setConstructorArgs( [ '', $options ] )
 			->getMock();
-		$httpRequest->expects( $this->any() )
-			->method( 'execute' )
+		$httpRequest->method( 'execute' )
 			->willReturn( Status::wrap( $statusValue ) );
-		$httpRequest->expects( $this->any() )
-			->method( 'getResponseHeaders' )
+		$httpRequest->method( 'getResponseHeaders' )
 			->willReturn( $headers );
-		$httpRequest->expects( $this->any() )
-				->method( 'getStatus' )
-				->willReturn( $statusCode );
+		$httpRequest->method( 'getStatus' )
+			->willReturn( $statusCode );
 		return $httpRequest;
 	}
 
 	private function mockHttpRequestFactory( $httpRequest ) {
-		$factory = $this->getMockBuilder( MediaWiki\Http\HttpRequestFactory::class )
-			->getMock();
-		$factory->expects( $this->any() )
-			->method( 'create' )
+		$factory = $this->createMock( MediaWiki\Http\HttpRequestFactory::class );
+		$factory->method( 'create' )
 			->willReturn( $httpRequest );
 		return $factory;
 	}
@@ -55,7 +67,7 @@ class MultiHttpClientTest extends MediaWikiTestCase {
 			'url' => "http://example.test",
 		] );
 
-		$this->assertEquals( 200, $rcode );
+		$this->assertSame( 200, $rcode );
 	}
 
 	/**
@@ -72,8 +84,7 @@ class MultiHttpClientTest extends MediaWikiTestCase {
 			'url' => "http://www.example.test",
 		] );
 
-		$failure = $rcode < 200 || $rcode >= 400;
-		$this->assertTrue( $failure );
+		$this->assertSame( 0, $rcode );
 	}
 
 	/**
@@ -97,7 +108,7 @@ class MultiHttpClientTest extends MediaWikiTestCase {
 		$responses = $this->client->runMulti( $reqs );
 		foreach ( $responses as $response ) {
 			list( $rcode, $rdesc, /* $rhdrs */, $rbody, $rerr ) = $response['response'];
-			$this->assertEquals( 200, $rcode );
+			$this->assertSame( 200, $rcode );
 		}
 	}
 
@@ -123,8 +134,7 @@ class MultiHttpClientTest extends MediaWikiTestCase {
 		$responses = $this->client->runMulti( $reqs );
 		foreach ( $responses as $response ) {
 			list( $rcode, $rdesc, /* $rhdrs */, $rbody, $rerr ) = $response['response'];
-			$failure = $rcode < 200 || $rcode >= 400;
-			$this->assertTrue( $failure );
+			$this->assertSame( 404, $rcode );
 		}
 	}
 
@@ -155,12 +165,160 @@ class MultiHttpClientTest extends MediaWikiTestCase {
 			'url' => 'http://example.test',
 		] );
 
-		$this->assertEquals( 200, $rcode );
-		$this->assertEquals( count( $headers ), count( $rhdrs ) );
+		$this->assertSame( 200, $rcode );
+		$this->assertSame( count( $headers ), count( $rhdrs ) );
 		foreach ( $headers as $name => $values ) {
 			$value = implode( ', ', $values );
 			$this->assertArrayHasKey( $name, $rhdrs );
 			$this->assertEquals( $value, $rhdrs[$name] );
 		}
+	}
+
+	public static function provideMultiHttpTimeout() {
+		return [
+			'default 10/30' => [
+				[],
+				[],
+				10,
+				30
+			],
+			'constructor override' => [
+				[ 'connTimeout' => 2, 'reqTimeout' => 3 ],
+				[],
+				2,
+				3
+			],
+			'run override' => [
+				[],
+				[ 'connTimeout' => 2, 'reqTimeout' => 3 ],
+				2,
+				3
+			],
+			'constructor max option limits default' => [
+				[ 'maxConnTimeout' => 2, 'maxReqTimeout' => 3 ],
+				[],
+				2,
+				3
+			],
+			'constructor max option limits regular constructor option' => [
+				[
+					'maxConnTimeout' => 2,
+					'maxReqTimeout' => 3,
+					'connTimeout' => 100,
+					'reqTimeout' => 100
+				],
+				[],
+				2,
+				3
+			],
+			'constructor max option greater than regular constructor option' => [
+				[
+					'maxConnTimeout' => 2,
+					'maxReqTimeout' => 3,
+					'connTimeout' => 1,
+					'reqTimeout' => 1
+				],
+				[],
+				1,
+				1
+			],
+			'constructor max option limits run option' => [
+				[
+					'maxConnTimeout' => 2,
+					'maxReqTimeout' => 3,
+				],
+				[
+					'connTimeout' => 100,
+					'reqTimeout' => 100
+				],
+				2,
+				3
+			],
+		];
+	}
+
+	/**
+	 * Test of timeout parameter handling
+	 * @dataProvider provideMultiHttpTimeout
+	 */
+	public function testMultiHttpTimeout( $createOptions, $runOptions,
+		$expectedConnTimeout, $expectedReqTimeout
+	) {
+		$url = 'http://www.example.test';
+		$httpRequest = $this->getHttpRequest( StatusValue::newGood( 200 ), 200 );
+		$factory = $this->createMock( MediaWiki\Http\HttpRequestFactory::class );
+		$factory->method( 'create' )
+			->with(
+				$url,
+				$this->callback(
+					static function ( $options ) use ( $expectedReqTimeout, $expectedConnTimeout ) {
+						return $options['timeout'] === $expectedReqTimeout
+							&& $options['connectTimeout'] === $expectedConnTimeout;
+					}
+				)
+			)
+			->willReturn( $httpRequest );
+		$this->setService( 'HttpRequestFactory', $factory );
+
+		$client = $this->createClient( $createOptions );
+
+		$client->run(
+			[ 'method' => 'GET', 'url' => $url ],
+			$runOptions
+		);
+
+		$this->addToAssertionCount( 1 );
+	}
+
+	public function testUseReverseProxy() {
+		// TODO: Cannot use TestingAccessWrapper here because it doesn't
+		// support pass-by-reference (T287318)
+		$class = new ReflectionClass( MultiHttpClient::class );
+		$func = $class->getMethod( 'useReverseProxy' );
+		$func->setAccessible( true );
+		$req = [
+			'url' => 'https://example.org/path?query=string',
+		];
+		$func->invokeArgs( new MultiHttpClient( [] ), [ &$req, 'http://localhost:1234' ] );
+		$this->assertSame( 'http://localhost:1234/path?query=string', $req['url'] );
+		$this->assertSame( 'example.org', $req['headers']['Host'] );
+	}
+
+	public function testNormalizeRequests() {
+		// TODO: Cannot use TestingAccessWrapper here because it doesn't
+		// support pass-by-reference (T287318)
+		$class = new ReflectionClass( MultiHttpClient::class );
+		$func = $class->getMethod( 'normalizeRequests' );
+		$func->setAccessible( true );
+		$reqs = [
+			[ 'GET', 'https://example.org/path?query=string' ],
+			[
+				'method' => 'GET',
+				'url' => 'https://example.com/path?query=another%20string'
+			],
+		];
+		$client = new MultiHttpClient( [
+			'localVirtualHosts' => [ 'example.org' ],
+			'localProxy' => 'http://localhost:1234',
+		] );
+		$func->invokeArgs( $client, [ &$reqs ] );
+		// Req #0 transformed to use reverse proxy
+		$this->assertSame( 'http://localhost:1234/path?query=string', $reqs[0]['url'] );
+		$this->assertSame( 'example.org', $reqs[0]['headers']['host'] );
+		$this->assertFalse( $reqs[0]['proxy'] );
+		// Req #1 left alone, domain doesn't match
+		$this->assertSame( 'https://example.com/path?query=another%20string', $reqs[1]['url'] );
+	}
+
+	public function testGetCurlMulti() {
+		$cm = TestingAccessWrapper::newFromObject( new MultiHttpClient( [] ) );
+		$resource = $cm->getCurlMulti( [ 'usePipelining' => true ] );
+		$this->assertThat(
+			$resource,
+			$this->logicalOr(
+				$this->isType( IsType::TYPE_RESOURCE ),
+				$this->isInstanceOf( 'CurlMultiHandle' )
+			)
+		);
 	}
 }

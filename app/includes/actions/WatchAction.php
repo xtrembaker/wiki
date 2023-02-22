@@ -20,7 +20,9 @@
  * @ingroup Actions
  */
 
-use MediaWiki\MediaWikiServices;
+use MediaWiki\MainConfigNames;
+use MediaWiki\Watchlist\WatchlistManager;
+use Wikimedia\ParamValidator\TypeDef\ExpiryDef;
 
 /**
  * Page addition to a user's watchlist
@@ -28,6 +30,44 @@ use MediaWiki\MediaWikiServices;
  * @ingroup Actions
  */
 class WatchAction extends FormAction {
+
+	/** @var bool The value of the $wgWatchlistExpiry configuration variable. */
+	protected $watchlistExpiry;
+
+	/** @var string */
+	protected $expiryFormFieldName = 'expiry';
+
+	/** @var false|WatchedItem */
+	protected $watchedItem = false;
+
+	/** @var WatchlistManager */
+	private $watchlistManager;
+
+	/**
+	 * Only public since 1.21
+	 *
+	 * @param Page $page
+	 * @param IContextSource $context
+	 * @param WatchlistManager $watchlistManager
+	 * @param WatchedItemStore $watchedItemStore
+	 */
+	public function __construct(
+		Page $page,
+		IContextSource $context,
+		WatchlistManager $watchlistManager,
+		WatchedItemStore $watchedItemStore
+	) {
+		parent::__construct( $page, $context );
+		$this->watchlistExpiry = $this->getContext()->getConfig()->get( MainConfigNames::WatchlistExpiry );
+		if ( $this->watchlistExpiry ) {
+			// The watchedItem is only used in this action's form if $wgWatchlistExpiry is enabled.
+			$this->watchedItem = $watchedItemStore->getWatchedItem(
+				$this->getUser(),
+				$this->getTitle()
+			);
+		}
+		$this->watchlistManager = $watchlistManager;
+	}
 
 	public function getName() {
 		return 'watch';
@@ -42,12 +82,20 @@ class WatchAction extends FormAction {
 	}
 
 	public function onSubmit( $data ) {
-		return self::doWatch( $this->getTitle(), $this->getUser() );
+		// Even though we're never unwatching here, use WatchlistManager::setWatch()
+		// because it also checks for changed expiry.
+		$result = $this->watchlistManager->setWatch(
+			true,
+			$this->getAuthority(),
+			$this->getTitle(),
+			$this->getRequest()->getVal( 'wp' . $this->expiryFormFieldName )
+		);
+
+		return Status::wrap( $result );
 	}
 
 	protected function checkCanExecute( User $user ) {
-		// Must be logged in
-		if ( $user->isAnon() ) {
+		if ( !$user->isNamed() ) {
 			throw new UserNotLoggedIn( 'watchlistanontext', 'watchnologin' );
 		}
 
@@ -59,123 +107,141 @@ class WatchAction extends FormAction {
 	}
 
 	protected function getFormFields() {
+		// If watchlist expiry is not enabled, return a simple confirmation message.
+		if ( !$this->watchlistExpiry ) {
+			return [
+				'intro' => [
+					'type' => 'info',
+					'raw' => true,
+					'default' => $this->msg( 'confirm-watch-top' )->parse(),
+				],
+			];
+		}
+
+		// Otherwise, use a select-list of expiries.
+		$expiryOptions = static::getExpiryOptions( $this->getContext(), $this->watchedItem );
 		return [
-			'intro' => [
-				'type' => 'info',
-				'vertical-label' => true,
-				'raw' => true,
-				'default' => $this->msg( 'confirm-watch-top' )->parse()
+			$this->expiryFormFieldName => [
+				'type' => 'select',
+				'label-message' => 'confirm-watch-label',
+				'options' => $expiryOptions['options'],
+				'default' => $expiryOptions['default'],
 			]
 		];
 	}
 
-	protected function alterForm( HTMLForm $form ) {
-		$form->setWrapperLegendMsg( 'addwatch' );
-		$form->setSubmitTextMsg( 'confirm-watch-button' );
-		$form->setTokenSalt( 'watch' );
-	}
-
-	public function onSuccess() {
-		$msgKey = $this->getTitle()->isTalkPage() ? 'addedwatchtext-talk' : 'addedwatchtext';
-		$this->getOutput()->addWikiMsg( $msgKey, $this->getTitle()->getPrefixedText() );
+	/**
+	 * Get options and default for a watchlist expiry select list. If an expiry time is provided, it
+	 * will be added to the top of the list as 'x days left'.
+	 *
+	 * @since 1.35
+	 * @todo Move this somewhere better when it's being used in more than just this action.
+	 *
+	 * @param MessageLocalizer $msgLocalizer
+	 * @param WatchedItem|bool $watchedItem
+	 *
+	 * @return mixed[] With keys `options` (string[]) and `default` (string).
+	 */
+	public static function getExpiryOptions( MessageLocalizer $msgLocalizer, $watchedItem ) {
+		$expiryOptions = self::getExpiryOptionsFromMessage( $msgLocalizer );
+		$default = in_array( 'infinite', $expiryOptions )
+			? 'infinite'
+			: current( $expiryOptions );
+		if ( $watchedItem instanceof WatchedItem && $watchedItem->getExpiry() ) {
+			// If it's already being temporarily watched,
+			// add the existing expiry as the default option in the dropdown.
+			$default = $watchedItem->getExpiry( TS_ISO_8601 );
+			$daysLeft = $watchedItem->getExpiryInDaysText( $msgLocalizer, true );
+			$expiryOptions = array_merge( [ $daysLeft => $default ], $expiryOptions );
+		}
+		return [
+			'options' => $expiryOptions,
+			'default' => $default,
+		];
 	}
 
 	/**
-	 * Watch or unwatch a page
-	 * @since 1.22
-	 * @param bool $watch Whether to watch or unwatch the page
-	 * @param Title $title Page to watch/unwatch
-	 * @param User $user User who is watching/unwatching
-	 * @return Status
+	 * Parse expiry options message. Fallback to english options
+	 * if translated options are invalid or broken
+	 *
+	 * @param MessageLocalizer $msgLocalizer
+	 * @param string|null $lang
+	 * @return string[]
 	 */
-	public static function doWatchOrUnwatch( $watch, Title $title, User $user ) {
-		if ( $user->isLoggedIn() &&
-			$user->isWatched( $title, User::IGNORE_USER_RIGHTS ) != $watch
-		) {
-			// If the user doesn't have 'editmywatchlist', we still want to
-			// allow them to add but not remove items via edits and such.
-			if ( $watch ) {
-				return self::doWatch( $title, $user, User::IGNORE_USER_RIGHTS );
-			} else {
-				return self::doUnwatch( $title, $user );
+	private static function getExpiryOptionsFromMessage(
+		MessageLocalizer $msgLocalizer, ?string $lang = null
+	): array {
+		$expiryOptionsMsg = $msgLocalizer->msg( 'watchlist-expiry-options' );
+		$optionsText = !$lang ? $expiryOptionsMsg->text() : $expiryOptionsMsg->inLanguage( $lang )->text();
+		$options = XmlSelect::parseOptionsMessage(
+			$optionsText
+		);
+
+		$expiryOptions = [];
+		foreach ( $options as $label => $value ) {
+			if ( strtotime( $value ) || wfIsInfinity( $value ) ) {
+				$expiryOptions[$label] = $value;
 			}
 		}
 
-		return Status::newGood();
+		// If message options is invalid try to recover by returning
+		// english options (T267611)
+		if ( !$expiryOptions && $expiryOptionsMsg->getLanguage()->getCode() !== 'en' ) {
+			return self::getExpiryOptionsFromMessage( $msgLocalizer, 'en' );
+		}
+
+		return $expiryOptions;
+	}
+
+	protected function alterForm( HTMLForm $form ) {
+		$msg = $this->watchlistExpiry && $this->watchedItem ? 'updatewatchlist' : 'addwatch';
+		$form->setWrapperLegendMsg( $msg );
+		$submitMsg = $this->watchlistExpiry ? 'confirm-watch-button-expiry' : 'confirm-watch-button';
+		$form->setSubmitTextMsg( $submitMsg );
+		$form->setTokenSalt( 'watch' );
 	}
 
 	/**
-	 * Watch a page
-	 * @since 1.22 Returns Status, $checkRights parameter added
-	 * @param Title $title Page to watch/unwatch
-	 * @param User $user User who is watching/unwatching
-	 * @param bool $checkRights Passed through to $user->addWatch()
-	 *     Pass User::CHECK_USER_RIGHTS or User::IGNORE_USER_RIGHTS.
-	 * @return Status
+	 * Show one of 8 possible success messages.
+	 * The messages are:
+	 * 1. addedwatchtext
+	 * 2. addedwatchtext-talk
+	 * 3. addedwatchindefinitelytext
+	 * 4. addedwatchindefinitelytext-talk
+	 * 5. addedwatchexpirytext
+	 * 6. addedwatchexpirytext-talk
+	 * 7. addedwatchexpiryhours
+	 * 8. addedwatchexpiryhours-talk
 	 */
-	public static function doWatch(
-		Title $title,
-		User $user,
-		$checkRights = User::CHECK_USER_RIGHTS
-	) {
-		$permissionManager = MediaWikiServices::getInstance()->getPermissionManager();
-		if ( $checkRights && !$permissionManager->userHasRight( $user, 'editmywatchlist' ) ) {
-			return User::newFatalPermissionDeniedStatus( 'editmywatchlist' );
+	public function onSuccess() {
+		$msgKey = $this->getTitle()->isTalkPage() ? 'addedwatchtext-talk' : 'addedwatchtext';
+		$expiryLabel = null;
+		$submittedExpiry = $this->getContext()->getRequest()->getText( 'wp' . $this->expiryFormFieldName );
+		if ( $submittedExpiry ) {
+			// We can't use $this->watcheditem to get the expiry because it's not been saved at this
+			// point in the request and so its values are those from before saving.
+			$expiry = ExpiryDef::normalizeExpiry( $submittedExpiry, TS_ISO_8601 );
+
+			// If the expiry label isn't one of the predefined ones in the dropdown, calculate 'x days'.
+			$expiryDays = WatchedItem::calculateExpiryInDays( $expiry );
+			$defaultLabels = static::getExpiryOptions( $this->getContext(), false )['options'];
+			$localizedExpiry = array_search( $submittedExpiry, $defaultLabels );
+			$expiryLabel = $expiryDays && $localizedExpiry === false
+				? $this->getContext()->msg( 'days', $expiryDays )->text()
+				: $localizedExpiry;
+
+			// Determine which message to use, depending on whether this is a talk page or not
+			// and whether an expiry was selected.
+			$isTalk = $this->getTitle()->isTalkPage();
+			if ( wfIsInfinity( $expiry ) ) {
+				$msgKey = $isTalk ? 'addedwatchindefinitelytext-talk' : 'addedwatchindefinitelytext';
+			} elseif ( $expiryDays > 0 ) {
+				$msgKey = $isTalk ? 'addedwatchexpirytext-talk' : 'addedwatchexpirytext';
+			} elseif ( $expiryDays < 1 ) {
+				$msgKey = $isTalk ? 'addedwatchexpiryhours-talk' : 'addedwatchexpiryhours';
+			}
 		}
-
-		$page = WikiPage::factory( $title );
-
-		$status = Status::newFatal( 'hookaborted' );
-		if ( Hooks::run( 'WatchArticle', [ &$user, &$page, &$status ] ) ) {
-			$status = Status::newGood();
-			$user->addWatch( $title, $checkRights );
-			Hooks::run( 'WatchArticleComplete', [ &$user, &$page ] );
-		}
-
-		return $status;
-	}
-
-	/**
-	 * Unwatch a page
-	 * @since 1.22 Returns Status
-	 * @param Title $title Page to watch/unwatch
-	 * @param User $user User who is watching/unwatching
-	 * @return Status
-	 */
-	public static function doUnwatch( Title $title, User $user ) {
-		if ( !MediaWikiServices::getInstance()
-			->getPermissionManager()
-			->userHasRight( $user, 'editmywatchlist' ) ) {
-			return User::newFatalPermissionDeniedStatus( 'editmywatchlist' );
-		}
-
-		$page = WikiPage::factory( $title );
-
-		$status = Status::newFatal( 'hookaborted' );
-		if ( Hooks::run( 'UnwatchArticle', [ &$user, &$page, &$status ] ) ) {
-			$status = Status::newGood();
-			$user->removeWatch( $title );
-			Hooks::run( 'UnwatchArticleComplete', [ &$user, &$page ] );
-		}
-
-		return $status;
-	}
-
-	/**
-	 * Get token to watch (or unwatch) a page for a user
-	 *
-	 * @param Title $title Title object of page to watch
-	 * @param User $user User for whom the action is going to be performed
-	 * @param string $action Optionally override the action to 'unwatch'
-	 * @return string Token
-	 * @since 1.18
-	 */
-	public static function getWatchToken( Title $title, User $user, $action = 'watch' ) {
-		if ( $action != 'unwatch' ) {
-			$action = 'watch';
-		}
-		// Match ApiWatch and ResourceLoaderUserTokensModule
-		return $user->getEditToken( $action );
+		$this->getOutput()->addWikiMsg( $msgKey, $this->getTitle()->getPrefixedText(), $expiryLabel );
 	}
 
 	public function doesWrites() {

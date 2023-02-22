@@ -1,21 +1,42 @@
 <?php
 /**
- * @defgroup ExternalStorage ExternalStorage
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc.,
+ * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
+ * http://www.gnu.org/copyleft/gpl.html
+ *
+ * @file
  */
 
-use \Psr\Log\LoggerAwareInterface;
-use \Psr\Log\LoggerInterface;
-use \Psr\Log\NullLogger;
+use Psr\Log\LoggerAwareInterface;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Wikimedia\RequestTimeout\TimeoutException;
 
 /**
- * Key/value blob storage for a collection of storage medium types (e.g. RDBMs, files)
+ * @defgroup ExternalStorage ExternalStorage
  *
- * Multiple medium types can be active and each one can have multiple "locations" available.
- * Blobs are stored under URLs of the form "<protocol>://<location>/<path>". Each type of storage
- * medium has an associated protocol. Insertions will randomly pick mediums and locations from
- * the provided list of writable medium-qualified locations. Insertions will also fail-over to
- * other writable locations or mediums if one or more are not available.
+ * Object storage outside the main database, see also [ExternalStore Architecture](@ref externalstorearch).
+ */
+
+/**
+ * This is the main interface for fetching or inserting objects with [ExternalStore](@ref externalstorearch).
  *
+ * This interface is meant to mimic the ExternalStoreMedium base class (which
+ * represents a single external store protocol), and transparently uses the
+ * right instance of that class when fetching by URL.
+ *
+ * @see [ExternalStore Architecture](@ref externalstorearch).
  * @ingroup ExternalStorage
  * @since 1.34
  */
@@ -99,12 +120,13 @@ class ExternalStoreAccess implements LoggerAwareInterface {
 			throw new ExternalStoreException( "List of external stores provided is empty." );
 		}
 
-		$error = false;
+		$error = false;      // track the last exception thrown
+		$readOnlyCount = 0;  // track if a store was read-only
 		while ( count( $tryStores ) > 0 ) {
 			$index = mt_rand( 0, count( $tryStores ) - 1 );
 			$storeUrl = $tryStores[$index];
 
-			$this->logger->debug( __METHOD__ . ": trying $storeUrl\n" );
+			$this->logger->debug( __METHOD__ . ": trying $storeUrl" );
 
 			$store = $this->storeFactory->getStoreForUrl( $storeUrl, $params );
 			if ( $store === false ) {
@@ -114,15 +136,22 @@ class ExternalStoreAccess implements LoggerAwareInterface {
 			$location = $this->storeFactory->getStoreLocationFromUrl( $storeUrl );
 			try {
 				if ( $store->isReadOnly( $location ) ) {
+					$readOnlyCount++;
 					$msg = 'read only';
 				} else {
 					$url = $store->store( $location, $data );
 					if ( strlen( $url ) ) {
-						return $url; // a store accepted the write; done!
+						// A store accepted the write; done!
+						return $url;
 					}
-					$msg = 'operation failed';
+					throw new ExternalStoreException(
+						"No URL returned by storage medium ($storeUrl)"
+					);
 				}
-			} catch ( Exception $error ) {
+			} catch ( TimeoutException $e ) {
+				throw $e;
+			} catch ( Exception $ex ) {
+				$error = $ex;
 				$msg = 'caught ' . get_class( $error ) . ' exception: ' . $error->getMessage();
 			}
 
@@ -133,11 +162,19 @@ class ExternalStoreAccess implements LoggerAwareInterface {
 				[ 'store_path' => $storeUrl, 'failure' => $msg ]
 			);
 		}
-		// All stores failed
+
+		// We only get here when all stores failed.
 		if ( $error ) {
-			throw $error; // rethrow the last error
+			// At least one store threw an exception. Re-throw the most recent one.
+			throw $error;
+		} elseif ( $readOnlyCount ) {
+			// If no exceptions where thrown and we get here,
+			// this should mean that all stores were in read-only mode.
+			throw new ReadOnlyError();
 		} else {
-			throw new ExternalStoreException( "Unable to store text to external storage" );
+			// We shouldn't get here. If there were no failures, this method should have returned
+			// from inside the body of the loop.
+			throw new LogicException( "Unexpected failure to store text to external store" );
 		}
 	}
 

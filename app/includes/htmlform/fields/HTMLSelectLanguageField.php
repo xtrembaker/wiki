@@ -1,21 +1,33 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+
 /**
  * Language select field.
+ *
+ * @stable to extend
  */
 class HTMLSelectLanguageField extends HTMLSelectField {
+
+	/**
+	 * @stable to call
+	 * @inheritDoc
+	 */
 	public function __construct( $params ) {
 		parent::__construct( $params );
 
 		if ( $this->mParent instanceof HTMLForm ) {
 			$config = $this->mParent->getConfig();
-			$languageCode = $config->get( 'LanguageCode' );
+			$languageCode = $config->get( MainConfigNames::LanguageCode );
 		} else {
-			global $wgLanguageCode;
-			$languageCode = $wgLanguageCode;
+			$languageCode = MediaWikiServices::getInstance()->getMainConfig()->get(
+				MainConfigNames::LanguageCode );
 		}
 
-		$languages = Language::fetchLanguageNames( null, 'mw' );
+		$languages = MediaWikiServices::getInstance()
+			->getLanguageNameUtils()
+			->getLanguageNames();
 
 		// Make sure the site language is in the list;
 		// a custom language code might not have a defined name…

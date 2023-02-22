@@ -16,12 +16,11 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
-
 namespace Wikimedia\Rdbms;
 
 /**
+ * @newable
  * @ingroup Database
  */
 class DBTransactionSizeError extends DBTransactionError {

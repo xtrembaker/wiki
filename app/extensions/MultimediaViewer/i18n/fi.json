@@ -1,15 +1,15 @@
 {
 	"@metadata": {
 		"authors": [
-			"Elseweyr",
-			"Nike",
-			"Stryn",
 			"ElmA",
-			"Pxos",
-			"MrTapsa",
+			"Elseweyr",
 			"McSalama",
+			"MrTapsa",
+			"Nike",
+			"Pahkiqaz",
+			"Pxos",
 			"Pyscowicz",
-			"Pahkiqaz"
+			"Stryn"
 		]
 	},
 	"multimediaviewer-desc": "Näytä pienoiskuvat suuremmassa koossa kokoruututilassa",
@@ -19,6 +19,7 @@
 	"multimediaviewer-datetime-created": "Luotu: $1",
 	"multimediaviewer-datetime-uploaded": "Tallennettu: $1",
 	"multimediaviewer-credit-fallback": "Näytä tekijätiedot",
+	"multimediaviewer-multiple-authors": "{{PLURAL:$1|yksi muu tekijä|$1 muuta tekijää}}",
 	"multimediaviewer-multiple-authors-combine": "$1 ja $2",
 	"multimediaviewer-metadata-error": "Kuvan tietoja ei voitu ladata (virhe: $1)",
 	"multimediaviewer-thumbnail-error": "Pahoittelut, tiedostoa ei voi näyttää",
@@ -33,8 +34,6 @@
 	"multimediaviewer-restriction-insignia": "Tämä kuva sisältää virallisia tunnuksia, joihin saattaa kohdistua oikeudellisia rajoituksia.",
 	"multimediaviewer-restriction-nazi": "Tämä kuva sisältää natsi- tai muita fasistisia tunnuksia, jotka saattavat olla kiellettyjä joissakin maissa.",
 	"multimediaviewer-about-mmv": "Tietoja tästä käyttöliittymästä",
-	"multimediaviewer-discuss-mmv": "Keskustelu",
-	"multimediaviewer-help-mmv": "Ohje",
 	"multimediaviewer-optout-mmv": "Ota Mediakatselin pois käytöstä",
 	"multimediaviewer-optin-mmv": "Ota Mediakatselin käyttöön",
 	"multimediaviewer-optout-pending-mmv": "Otetaan Mediakatselin pois käytöstä",

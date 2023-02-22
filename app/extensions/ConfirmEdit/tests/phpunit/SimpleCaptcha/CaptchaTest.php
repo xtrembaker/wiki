@@ -1,17 +1,18 @@
 <?php
 
+use MediaWiki\Extension\ConfirmEdit\CaptchaTriggers;
+use MediaWiki\Extension\ConfirmEdit\SimpleCaptcha\SimpleCaptcha;
 use Wikimedia\ScopedCallback;
-use Wikimedia\TestingAccessWrapper;
 
 /**
- * @covers SimpleCaptcha
+ * @covers \MediaWiki\Extension\ConfirmEdit\SimpleCaptcha\SimpleCaptcha
  */
-class CaptchaTest extends MediaWikiTestCase {
+class CaptchaTest extends MediaWikiIntegrationTestCase {
 
 	/** @var ScopedCallback[] */
 	private $hold = [];
 
-	public function tearDown() {
+	public function tearDown(): void {
 		// Destroy any ScopedCallbacks being held
 		$this->hold = [];
 		parent::tearDown();
@@ -68,30 +69,9 @@ class CaptchaTest extends MediaWikiTestCase {
 	}
 
 	private function setCaptchaTriggersAttribute( $trigger, $value ) {
-		// XXX This is really hacky, but is needed to stop extensions from
-		// being clobbered in subsequent tests. This should be fixed properly
-		// by making extension registration happen in services instead of
-		// globals.
-		$keys =
-			TestingAccessWrapper::newFromClass( ExtensionProcessor::class )->globalSettings;
-		$globalsToStash = [];
-		foreach ( $keys as $key ) {
-			$globalsToStash["wg$key"] = $GLOBALS["wg$key"];
-		}
-		$this->setMwGlobals( $globalsToStash );
+		// Avoid clobbering captcha triggers registered by other extensions
+		$this->setMwGlobals( 'wgCaptchaTriggers', $GLOBALS['wgCaptchaTriggers'] );
 
-		$info = [
-			'globals' => [],
-			'callbacks' => [],
-			'defines' => [],
-			'credits' => [],
-			'attributes' => [
-				'CaptchaTriggers' => [
-					$trigger => $value
-				]
-			],
-			'autoloaderPaths' => []
-		];
 		$this->hold[] = ExtensionRegistry::getInstance()->setAttributeForTest(
 			'CaptchaTriggers', [ $trigger => $value ]
 		);
@@ -117,11 +97,7 @@ class CaptchaTest extends MediaWikiTestCase {
 	 * @dataProvider provideAttributeOverwritten
 	 */
 	public function testCaptchaTriggersAttributeGetsOverwritten( $trigger, $expected ) {
-		$this->setMwGlobals( [
-			'wgCaptchaTriggers' => [
-				$trigger => $expected
-			]
-		] );
+		$this->setMwGlobals( 'wgCaptchaTriggers', [ $trigger => $expected ] );
 		$this->setCaptchaTriggersAttribute( $trigger, !$expected );
 		$captcha = new SimpleCaptcha();
 		$this->assertEquals( $expected, $captcha->triggersCaptcha( $trigger ) );
@@ -139,7 +115,7 @@ class CaptchaTest extends MediaWikiTestCase {
 	 */
 	public function testCanSkipCaptchaUserright( $userIsAllowed, $expected ) {
 		$testObject = new SimpleCaptcha();
-		$user = $this->getMock( User::class );
+		$user = $this->createMock( User::class );
 		$user->method( 'isAllowed' )->willReturn( $userIsAllowed );
 
 		$actual = $testObject->canSkipCaptcha( $user, RequestContext::getMain()->getConfig() );
@@ -155,18 +131,14 @@ class CaptchaTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @param $allowUserConfirmEmail
-	 * @param $userIsMailConfirmed
-	 * @param $expected
-	 * @throws ConfigException
 	 * @dataProvider provideCanSkipCaptchaMailconfirmed
 	 */
 	public function testCanSkipCaptchaMailconfirmed( $allowUserConfirmEmail,
 		$userIsMailConfirmed, $expected ) {
 		$testObject = new SimpleCaptcha();
-		$user = $this->getMock( User::class );
+		$user = $this->createMock( User::class );
 		$user->method( 'isEmailConfirmed' )->willReturn( $userIsMailConfirmed );
-		$config = $this->getMock( Config::class );
+		$config = $this->createMock( Config::class );
 		$config->method( 'get' )->willReturn( $allowUserConfirmEmail );
 
 		$actual = $testObject->canSkipCaptcha( $user, $config );
@@ -184,16 +156,12 @@ class CaptchaTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @param $requestIP
-	 * @param $IPWhitelist
-	 * @param $expected
-	 * @throws ConfigException
 	 * @dataProvider provideCanSkipCaptchaIPWhitelisted
 	 */
 	public function testCanSkipCaptchaIPWhitelisted( $requestIP, $IPWhitelist, $expected ) {
 		$testObject = new SimpleCaptcha();
-		$config = $this->getMock( Config::class );
-		$request = $this->getMock( WebRequest::class );
+		$config = $this->createMock( Config::class );
+		$request = $this->createMock( WebRequest::class );
 		$request->method( 'getIP' )->willReturn( $requestIP );
 
 		$this->setMwGlobals( [

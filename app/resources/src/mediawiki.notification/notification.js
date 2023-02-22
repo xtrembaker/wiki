@@ -31,6 +31,7 @@
 
 		$notification = $( '<div>' )
 			.data( 'mw-notification', this )
+			.attr( 'role', 'status' )
 			.addClass( [
 				'mw-notification',
 				options.autoHide ? 'mw-notification-autohide' : 'mw-notification-noautohide'
@@ -40,6 +41,7 @@
 			// Sanitize options.tag before it is used by any code. (Including Notification class methods)
 			options.tag = options.tag.replace( /[ _-]+/g, '-' ).replace( /[^-a-z0-9]+/ig, '' );
 			if ( options.tag ) {
+				// eslint-disable-next-line mediawiki/class-doc
 				$notification.addClass( 'mw-notification-tag-' + options.tag );
 			} else {
 				delete options.tag;
@@ -49,6 +51,9 @@
 		if ( options.type ) {
 			// Sanitize options.type
 			options.type = options.type.replace( /[ _-]+/g, '-' ).replace( /[^-a-z0-9]+/ig, '' );
+			// The following classes are used here:
+			// * mw-notification-type-error
+			// * mw-notification-type-warn
 			$notification.addClass( 'mw-notification-type-' + options.type );
 		}
 
@@ -57,6 +62,15 @@
 				.addClass( 'mw-notification-title' )
 				.text( options.title )
 				.appendTo( $notification );
+		}
+
+		if ( options.id ) {
+			$notification.attr( 'id', options.id );
+		}
+
+		if ( options.classes ) {
+			// eslint-disable-next-line mediawiki/class-doc
+			$notification.addClass( options.classes );
 		}
 
 		$notificationContent = $( '<div>' ).addClass( 'mw-notification-content' );
@@ -282,7 +296,7 @@
 	 * @ignore
 	 */
 	function init() {
-		var offset, notif,
+		var offset, $overlay, skinHasArea,
 			isFloating = false;
 
 		function updateAreaMode() {
@@ -299,10 +313,14 @@
 		// Look for a preset notification area in the skin.
 		// 'data-mw*' attributes are banned from user content in Sanitizer.
 		$area = $( '.mw-notification-area[data-mw="interface"]' ).first();
-		if ( !$area.length ) {
+		skinHasArea = $area.length > 0;
+		if ( !skinHasArea ) {
 			$area = $( '<div>' ).addClass( 'mw-notification-area' );
-			// Prepend the notification area to the content area
-			mw.util.$content.prepend( $area );
+			// Create overlay div for the notification area
+			$overlay = $( '<div>' ).addClass( 'mw-notification-area-overlay' );
+			// Append the notification area to the overlay wrapper area
+			$overlay.append( $area );
+			$( document.body ).append( $overlay );
 		}
 		$area
 			.addClass( 'mw-notification-area-layout' )
@@ -320,9 +338,10 @@
 					notif.close();
 				}
 			} )
-			// Stop click events from <a> tags from propogating to prevent clicking.
-			// on links from hiding a notification.
-			.on( 'click', 'a', function ( e ) {
+			// Stop click events from <a> and <select> tags from propagating to prevent clicks
+			// from hiding a notification. stopPropagation() bubbles up, not down,
+			// hence this should not conflict with OOUI's own click handlers.
+			.on( 'click', 'a, select, .oo-ui-dropdownInputWidget', function ( e ) {
 				e.stopPropagation();
 			} );
 
@@ -330,7 +349,12 @@
 		// Must be in the next frame to avoid synchronous layout
 		// computation from offset()/getBoundingClientRect().
 		rAF( function () {
-			offset = $area.offset();
+			var notif;
+
+			// If a skin provides its own notification area, use its offset. Otherwise, use the
+			// offset of the content area in order to maintain approximate backwards compatibility
+			// (because $area used to be prepended to $content).
+			offset = skinHasArea ? $area.offset() : mw.util.$content.offset();
 
 			// Initial mode (reads, and then maybe writes)
 			updateAreaMode();
@@ -387,7 +411,7 @@
 		 * Display a notification message to the user.
 		 *
 		 * @param {HTMLElement|HTMLElement[]|jQuery|mw.Message|string} message
-		 * @param {Object} options The options to use for the notification.
+		 * @param {Object} [options] The options to use for the notification.
 		 *  See #defaults for details.
 		 * @return {mw.Notification} Notification object
 		 */
@@ -411,7 +435,7 @@
 		 * The defaults for #notify options parameter.
 		 *
 		 * - autoHide:
-		 *   A boolean indicating whether the notifification should automatically
+		 *   A boolean indicating whether the notification should automatically
 		 *   be hidden after shown. Or if it should persist.
 		 *
 		 * - autoHideSeconds:
@@ -431,11 +455,18 @@
 		 *
 		 * - type:
 		 *   An optional string for the type of the message used for styling:
-		 *   Examples: 'info', 'warn', 'error'.
+		 *   Examples: 'info', 'warn', 'error', 'success'.
 		 *
 		 * - visibleTimeout:
 		 *   A boolean indicating if the autoHide timeout should be based on
 		 *   time the page was visible to user. Or if it should use wall clock time.
+		 *
+		 * - id:
+		 *   HTML ID to set on the notification element.
+		 *
+		 * - classes:
+		 *   CSS class names in the form of a single string or
+		 *   array of strings, to be set on the notification element.
 		 */
 		defaults: {
 			autoHide: true,
@@ -443,7 +474,9 @@
 			tag: null,
 			title: null,
 			type: null,
-			visibleTimeout: true
+			visibleTimeout: true,
+			id: false,
+			classes: false
 		},
 
 		/**
@@ -468,7 +501,13 @@
 		autoHideLimit: 3
 	};
 
-	$( init );
+	if ( window.QUnit ) {
+		$area = $( document.body );
+	} else {
+		// Don't run UI logic while under test.
+		// Let the test control this instead.
+		$( init );
+	}
 
 	mw.notification = notification;
 

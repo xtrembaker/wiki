@@ -27,6 +27,7 @@ use RuntimeException;
 /**
  * Exception representing a failure to look up a row from a name table.
  *
+ * @newable
  * @since 1.31
  */
 class NameTableAccessException extends RuntimeException {
@@ -38,7 +39,7 @@ class NameTableAccessException extends RuntimeException {
 	 * @return NameTableAccessException
 	 */
 	public static function newFromDetails( $tableName, $accessType, $accessValue ) {
-		$message = "Failed to access name from ${tableName} using ${accessType} = ${accessValue}";
+		$message = "Failed to access name from {$tableName} using {$accessType} = {$accessValue}";
 		return new self( $message );
 	}
 

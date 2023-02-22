@@ -26,6 +26,8 @@
  * @ingroup Media
  */
 
+use Wikimedia\AtEase\AtEase;
+
 /**
  * GIF frame counter.
  *
@@ -41,19 +43,19 @@ class GIFMetadataExtractor {
 	/** @var string */
 	private static $gifTerm;
 
-	const VERSION = 1;
+	public const VERSION = 1;
 
 	// Each sub-block is less than or equal to 255 bytes.
 	// Most of the time its 255 bytes, except for in XMP
 	// blocks, where it's usually between 32-127 bytes each.
-	const MAX_SUBBLOCKS = 262144; // 5mb divided by 20.
+	private const MAX_SUBBLOCKS = 262144; // 5 MiB divided by 20.
 
 	/**
 	 * @throws Exception
 	 * @param string $filename
 	 * @return array
 	 */
-	static function getMetadata( $filename ) {
+	public static function getMetadata( $filename ) {
 		self::$gifFrameSep = pack( "C", ord( "," ) ); // 2C
 		self::$gifExtensionSep = pack( "C", ord( "!" ) ); // 21
 		self::$gifTerm = pack( "C", ord( ";" ) ); // 3B
@@ -90,13 +92,16 @@ class GIFMetadataExtractor {
 
 		// Read BPP
 		$buf = fread( $fh, 1 );
-		$bpp = self::decodeBPP( $buf );
+		list( $bpp, $have_map ) = self::decodeBPP( $buf );
 
 		// Skip over background and aspect ratio
+		// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 		fread( $fh, 2 );
 
 		// Skip over the GCT
-		self::readGCT( $fh, $bpp );
+		if ( $have_map ) {
+			self::readGCT( $fh, $bpp );
+		}
 
 		while ( !feof( $fh ) ) {
 			$buf = fread( $fh, 1 );
@@ -106,14 +111,18 @@ class GIFMetadataExtractor {
 				$frameCount++;
 
 				# # Skip bounding box
+				// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 				fread( $fh, 8 );
 
 				# # Read BPP
 				$buf = fread( $fh, 1 );
-				$bpp = self::decodeBPP( $buf );
+				list( $bpp, $have_map ) = self::decodeBPP( $buf );
 
 				# # Read GCT
-				self::readGCT( $fh, $bpp );
+				if ( $have_map ) {
+					self::readGCT( $fh, $bpp );
+				}
+				// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 				fread( $fh, 1 );
 				self::skipBlock( $fh );
 			} elseif ( $buf == self::$gifExtensionSep ) {
@@ -125,8 +134,11 @@ class GIFMetadataExtractor {
 
 				if ( $extension_code == 0xF9 ) {
 					// Graphics Control Extension.
+					// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 					fread( $fh, 1 ); // Block size
 
+					// @phan-suppress-next-next-line PhanPluginUseReturnValueInternalKnown
+					// @phan-suppress-next-line PhanPluginDuplicateAdjacentStatement
 					fread( $fh, 1 ); // Transparency, disposal method, user input
 
 					$buf = fread( $fh, 2 ); // Delay, in hundredths of seconds.
@@ -136,6 +148,7 @@ class GIFMetadataExtractor {
 					$delay = unpack( 'v', $buf )[1];
 					$duration += $delay * 0.01;
 
+					// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 					fread( $fh, 1 ); // Transparent colour index
 
 					$term = fread( $fh, 1 ); // Should be a terminator
@@ -161,13 +174,14 @@ class GIFMetadataExtractor {
 					UtfNormal\Validator::quickIsNFCVerify( $dataCopy );
 
 					if ( $dataCopy !== $data ) {
-						Wikimedia\suppressWarnings();
+						AtEase::suppressWarnings();
 						$data = iconv( 'windows-1252', 'UTF-8', $data );
-						Wikimedia\restoreWarnings();
+						AtEase::restoreWarnings();
 					}
 
 					$commentCount = count( $comment );
 					if ( $commentCount === 0
+						// @phan-suppress-next-line PhanTypeInvalidDimOffset
 						|| $comment[$commentCount - 1] !== $data
 					) {
 						// Some applications repeat the same comment on each
@@ -186,7 +200,7 @@ class GIFMetadataExtractor {
 					$data = fread( $fh, $blockLength );
 
 					if ( $blockLength != 11 ) {
-						wfDebug( __METHOD__ . " GIF application block with wrong length\n" );
+						wfDebug( __METHOD__ . " GIF application block with wrong length" );
 						fseek( $fh, -( $blockLength + 1 ), SEEK_CUR );
 						self::skipBlock( $fh );
 						continue;
@@ -212,6 +226,7 @@ class GIFMetadataExtractor {
 						}
 
 						// Read out terminator byte
+						// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 						fread( $fh, 1 );
 					} elseif ( $data == 'XMP DataXMP' ) {
 						// application name for XMP data.
@@ -222,7 +237,6 @@ class GIFMetadataExtractor {
 						if ( substr( $xmp, -257, 3 ) !== "\x01\xFF\xFE"
 							|| substr( $xmp, -4 ) !== "\x03\x02\x01\x00"
 						) {
-							// this is just a sanity check.
 							throw new Exception( "XMP does not have magic trailer!" );
 						}
 
@@ -232,7 +246,6 @@ class GIFMetadataExtractor {
 						// unrecognized extension block
 						fseek( $fh, -( $blockLength + 1 ), SEEK_CUR );
 						self::skipBlock( $fh );
-						continue;
 					}
 				} else {
 					self::skipBlock( $fh );
@@ -254,6 +267,9 @@ class GIFMetadataExtractor {
 			'duration' => $duration,
 			'xmp' => $xmp,
 			'comment' => $comment,
+			'width' => $width,
+			'height' => $height,
+			'bits' => $bpp,
 		];
 	}
 
@@ -262,39 +278,37 @@ class GIFMetadataExtractor {
 	 * @param int $bpp
 	 * @return void
 	 */
-	static function readGCT( $fh, $bpp ) {
-		if ( $bpp > 0 ) {
-			$max = 2 ** $bpp;
-			for ( $i = 1; $i <= $max; ++$i ) {
-				fread( $fh, 3 );
-			}
+	private static function readGCT( $fh, $bpp ) {
+		$max = 2 ** $bpp;
+		for ( $i = 1; $i <= $max; ++$i ) {
+			// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
+			fread( $fh, 3 );
 		}
 	}
 
 	/**
 	 * @param string $data
 	 * @throws Exception
-	 * @return int
+	 * @return array [ int bits per channel, bool have GCT ]
 	 */
-	static function decodeBPP( $data ) {
+	private static function decodeBPP( $data ) {
 		if ( strlen( $data ) < 1 ) {
 			throw new Exception( "Ran out of input" );
 		}
 		$buf = unpack( 'C', $data )[1];
 		$bpp = ( $buf & 7 ) + 1;
-		// @phan-suppress-next-line PhanTypeInvalidLeftOperandOfIntegerOp
 		$buf >>= 7;
 
 		$have_map = $buf & 1;
 
-		return $have_map ? $bpp : 0;
+		return [ $bpp, $have_map ];
 	}
 
 	/**
 	 * @param resource $fh
 	 * @throws Exception
 	 */
-	static function skipBlock( $fh ) {
+	private static function skipBlock( $fh ) {
 		while ( !feof( $fh ) ) {
 			$buf = fread( $fh, 1 );
 			if ( strlen( $buf ) < 1 ) {
@@ -304,6 +318,7 @@ class GIFMetadataExtractor {
 			if ( $block_len == 0 ) {
 				return;
 			}
+			// @phan-suppress-next-line PhanPluginUseReturnValueInternalKnown
 			fread( $fh, $block_len );
 		}
 	}
@@ -322,7 +337,7 @@ class GIFMetadataExtractor {
 	 * @throws Exception
 	 * @return string The data.
 	 */
-	static function readBlock( $fh, $includeLengths = false ) {
+	private static function readBlock( $fh, $includeLengths = false ) {
 		$data = '';
 		$subLength = fread( $fh, 1 );
 		$blocks = 0;

@@ -4,22 +4,23 @@
 
 namespace Composer\Autoload;
 
-class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
+class ComposerStaticInit2dcbfe74b2b59423814ddcdee0f983a0
 {
     public static $files = array (
         '0e6d7bf4a5811bfa5cf40c5ccd6fae6a' => __DIR__ . '/..' . '/symfony/polyfill-mbstring/bootstrap.php',
         'a4a119a56e50fbb293281d9a48007e0e' => __DIR__ . '/..' . '/symfony/polyfill-php80/bootstrap.php',
+        '6e3fae29631ef280660b3cdad06f25a8' => __DIR__ . '/..' . '/symfony/deprecation-contracts/function.php',
         '320cde22f66dd4f5d3fd621d3e88b98f' => __DIR__ . '/..' . '/symfony/polyfill-ctype/bootstrap.php',
         '8825ede83f2f289127722d4e842cf7e8' => __DIR__ . '/..' . '/symfony/polyfill-intl-grapheme/bootstrap.php',
         'e69f7f6ee287b969198c3c9d6777bd38' => __DIR__ . '/..' . '/symfony/polyfill-intl-normalizer/bootstrap.php',
         '0d59ee240a4cd96ddbb4ff164fccea4d' => __DIR__ . '/..' . '/symfony/polyfill-php73/bootstrap.php',
         'b6b991a57620e2fb6b2f66f03fe9ddc2' => __DIR__ . '/..' . '/symfony/string/Resources/functions.php',
+        '7b11c4dc42b3b3023073cb14e519683c' => __DIR__ . '/..' . '/ralouphie/getallheaders/src/getallheaders.php',
         '2b9d0f43f9552984cfa82fee95491826' => __DIR__ . '/..' . '/sabre/event/lib/coroutine.php',
         'd81bab31d3feb45bfe2f283ea3c8fdf7' => __DIR__ . '/..' . '/sabre/event/lib/Loop/functions.php',
         'a1cce3d26cc15c00fcd0b3354bd72c88' => __DIR__ . '/..' . '/sabre/event/lib/Promise/functions.php',
-        '7b11c4dc42b3b3023073cb14e519683c' => __DIR__ . '/..' . '/ralouphie/getallheaders/src/getallheaders.php',
+        '6714be961f4a45ae8b9a99d5d55c5d07' => __DIR__ . '/..' . '/tysonandre/var_representation_polyfill/src/var_representation.php',
         'c964ee0ededf28c96ebd9db5099ef910' => __DIR__ . '/..' . '/guzzlehttp/promises/src/functions_include.php',
-        'a0edc8309cc5e1d60e3047b5df6b7052' => __DIR__ . '/..' . '/guzzlehttp/psr7/src/functions_include.php',
         '37a3dc5111fe8f707ab4c132ef1dbc62' => __DIR__ . '/..' . '/guzzlehttp/guzzle/src/functions_include.php',
         'b067bc7112e384b61c701452d53a14a8' => __DIR__ . '/..' . '/mtdowling/jmespath.php/src/JmesPath.php',
         '8a9dc1de0ca7e01f3e08231539562f61' => __DIR__ . '/..' . '/aws/aws-sdk-php/src/functions.php',
@@ -34,6 +35,10 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
         array (
             'Webmozart\\Assert\\' => 17,
         ),
+        'V' => 
+        array (
+            'VarRepresentation\\' => 18,
+        ),
         'S' => 
         array (
             'Symfony\\Polyfill\\Php80\\' => 23,
@@ -45,20 +50,24 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
             'Symfony\\Contracts\\Service\\' => 26,
             'Symfony\\Component\\String\\' => 25,
             'Symfony\\Component\\Console\\' => 26,
+            'SecurityCheckPlugin\\' => 20,
             'Sabre\\Event\\' => 12,
         ),
         'P' => 
         array (
             'Psr\\Log\\' => 8,
             'Psr\\Http\\Message\\' => 17,
+            'Psr\\Http\\Client\\' => 16,
             'Psr\\Container\\' => 14,
             'Phan\\' => 5,
         ),
         'M' => 
         array (
             'Microsoft\\PhpParser\\' => 20,
+            'MediaWiki\\Sniffs\\Tests\\' => 23,
+            'MediaWiki\\Sniffs\\' => 17,
             'MediaWiki\\MinusX\\' => 17,
-            'MediaWiki\\' => 10,
+            'MediaWikiPhanConfig\\' => 20,
         ),
         'J' => 
         array (
@@ -77,6 +86,7 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
             'Composer\\XdebugHandler\\' => 23,
             'Composer\\Spdx\\' => 14,
             'Composer\\Semver\\' => 16,
+            'Composer\\Pcre\\' => 14,
             'Composer\\Installers\\' => 20,
         ),
         'A' => 
@@ -90,12 +100,16 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
         'phpDocumentor\\Reflection\\' => 
         array (
             0 => __DIR__ . '/..' . '/phpdocumentor/reflection-common/src',
-            1 => __DIR__ . '/..' . '/phpdocumentor/reflection-docblock/src',
-            2 => __DIR__ . '/..' . '/phpdocumentor/type-resolver/src',
+            1 => __DIR__ . '/..' . '/phpdocumentor/type-resolver/src',
+            2 => __DIR__ . '/..' . '/phpdocumentor/reflection-docblock/src',
         ),
         'Webmozart\\Assert\\' => 
         array (
             0 => __DIR__ . '/..' . '/webmozart/assert/src',
+        ),
+        'VarRepresentation\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/tysonandre/var_representation_polyfill/src/VarRepresentation',
         ),
         'Symfony\\Polyfill\\Php80\\' => 
         array (
@@ -133,17 +147,26 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
         array (
             0 => __DIR__ . '/..' . '/symfony/console',
         ),
+        'SecurityCheckPlugin\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/mediawiki/phan-taint-check-plugin/src',
+        ),
         'Sabre\\Event\\' => 
         array (
             0 => __DIR__ . '/..' . '/sabre/event/lib',
         ),
         'Psr\\Log\\' => 
         array (
-            0 => __DIR__ . '/..' . '/psr/log/Psr/Log',
+            0 => __DIR__ . '/..' . '/psr/log/src',
         ),
         'Psr\\Http\\Message\\' => 
         array (
             0 => __DIR__ . '/..' . '/psr/http-message/src',
+            1 => __DIR__ . '/..' . '/psr/http-factory/src',
+        ),
+        'Psr\\Http\\Client\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/psr/http-client/src',
         ),
         'Psr\\Container\\' => 
         array (
@@ -157,13 +180,21 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
         array (
             0 => __DIR__ . '/..' . '/microsoft/tolerant-php-parser/src',
         ),
+        'MediaWiki\\Sniffs\\Tests\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/mediawiki/mediawiki-codesniffer/MediaWiki/Tests',
+        ),
+        'MediaWiki\\Sniffs\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/mediawiki/mediawiki-codesniffer/MediaWiki/Sniffs',
+        ),
         'MediaWiki\\MinusX\\' => 
         array (
             0 => __DIR__ . '/..' . '/mediawiki/minus-x/src',
         ),
-        'MediaWiki\\' => 
+        'MediaWikiPhanConfig\\' => 
         array (
-            0 => __DIR__ . '/..' . '/mediawiki/mediawiki-codesniffer/MediaWiki',
+            0 => __DIR__ . '/..' . '/mediawiki/mediawiki-phan-config/src',
         ),
         'JmesPath\\' => 
         array (
@@ -201,6 +232,10 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
         array (
             0 => __DIR__ . '/..' . '/composer/semver/src',
         ),
+        'Composer\\Pcre\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/composer/pcre/src',
+        ),
         'Composer\\Installers\\' => 
         array (
             0 => __DIR__ . '/..' . '/composer/installers/src/Composer/Installers',
@@ -226,6 +261,31 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
     );
 
     public static $classMap = array (
+        'AWS\\CRT\\Auth\\AwsCredentials' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/AwsCredentials.php',
+        'AWS\\CRT\\Auth\\CredentialsProvider' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/CredentialsProvider.php',
+        'AWS\\CRT\\Auth\\Signable' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/Signable.php',
+        'AWS\\CRT\\Auth\\SignatureType' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/SignatureType.php',
+        'AWS\\CRT\\Auth\\SignedBodyHeaderType' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/SignedBodyHeaderType.php',
+        'AWS\\CRT\\Auth\\Signing' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/Signing.php',
+        'AWS\\CRT\\Auth\\SigningAlgorithm' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/SigningAlgorithm.php',
+        'AWS\\CRT\\Auth\\SigningConfigAWS' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/SigningConfigAWS.php',
+        'AWS\\CRT\\Auth\\SigningResult' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/SigningResult.php',
+        'AWS\\CRT\\Auth\\StaticCredentialsProvider' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Auth/StaticCredentialsProvider.php',
+        'AWS\\CRT\\CRT' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/CRT.php',
+        'AWS\\CRT\\HTTP\\Headers' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/HTTP/Headers.php',
+        'AWS\\CRT\\HTTP\\Message' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/HTTP/Message.php',
+        'AWS\\CRT\\HTTP\\Request' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/HTTP/Request.php',
+        'AWS\\CRT\\HTTP\\Response' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/HTTP/Response.php',
+        'AWS\\CRT\\IO\\EventLoopGroup' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/IO/EventLoopGroup.php',
+        'AWS\\CRT\\IO\\InputStream' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/IO/InputStream.php',
+        'AWS\\CRT\\Internal\\Encoding' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Internal/Encoding.php',
+        'AWS\\CRT\\Internal\\Extension' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Internal/Extension.php',
+        'AWS\\CRT\\Log' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Log.php',
+        'AWS\\CRT\\NativeResource' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/NativeResource.php',
+        'AWS\\CRT\\OptionValue' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Options.php',
+        'AWS\\CRT\\Options' => __DIR__ . '/..' . '/aws/aws-crt-php/src/AWS/CRT/Options.php',
+        'Attribute' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/Attribute.php',
+        'Composer\\InstalledVersions' => __DIR__ . '/..' . '/composer/InstalledVersions.php',
         'JakubOnderka\\PhpParallelLint\\Application' => __DIR__ . '/..' . '/php-parallel-lint/php-parallel-lint/src/Application.php',
         'JakubOnderka\\PhpParallelLint\\ArrayIterator' => __DIR__ . '/..' . '/php-parallel-lint/php-parallel-lint/src/Settings.php',
         'JakubOnderka\\PhpParallelLint\\Blame' => __DIR__ . '/..' . '/php-parallel-lint/php-parallel-lint/src/Error.php',
@@ -259,17 +319,19 @@ class ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854
         'JakubOnderka\\PhpParallelLint\\TextOutputColored' => __DIR__ . '/..' . '/php-parallel-lint/php-parallel-lint/src/Output.php',
         'JsonException' => __DIR__ . '/..' . '/symfony/polyfill-php73/Resources/stubs/JsonException.php',
         'Normalizer' => __DIR__ . '/..' . '/symfony/polyfill-intl-normalizer/Resources/stubs/Normalizer.php',
+        'PhpToken' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/PhpToken.php',
         'Stringable' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/Stringable.php',
+        'UnhandledMatchError' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/UnhandledMatchError.php',
         'ValueError' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/ValueError.php',
     );
 
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
-            $loader->prefixLengthsPsr4 = ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854::$prefixLengthsPsr4;
-            $loader->prefixDirsPsr4 = ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854::$prefixDirsPsr4;
-            $loader->prefixesPsr0 = ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854::$prefixesPsr0;
-            $loader->classMap = ComposerStaticInit4f4c92c335867ea588ea4f4c075ca854::$classMap;
+            $loader->prefixLengthsPsr4 = ComposerStaticInit2dcbfe74b2b59423814ddcdee0f983a0::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInit2dcbfe74b2b59423814ddcdee0f983a0::$prefixDirsPsr4;
+            $loader->prefixesPsr0 = ComposerStaticInit2dcbfe74b2b59423814ddcdee0f983a0::$prefixesPsr0;
+            $loader->classMap = ComposerStaticInit2dcbfe74b2b59423814ddcdee0f983a0::$classMap;
 
         }, null, ClassLoader::class);
     }

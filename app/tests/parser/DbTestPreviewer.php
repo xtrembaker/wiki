@@ -19,20 +19,26 @@
  * @ingroup Testing
  */
 
+use Wikimedia\Rdbms\IMaintainableDatabase;
+
 class DbTestPreviewer extends TestRecorder {
-	protected $filter; // /< Test name filter callback
-	protected $lb; // /< Database load balancer
-	protected $db; // /< Database connection to the main DB
-	protected $curRun; // /< run ID number for the current run
-	protected $prevRun; // /< run ID number for the previous run, if any
-	protected $results; // /< Result array
+	/** @var callable|false Test name filter callback */
+	protected $filter;
+	/** @var IMaintainableDatabase Database connection to the main DB */
+	protected $db;
+	/** @var int run ID number for the current run */
+	protected $curRun;
+	/** @var int|false run ID number for the previous run, if any */
+	protected $prevRun;
+	/** @var array Result array */
+	protected $results;
 
 	/**
 	 * This should be called before the table prefix is changed
-	 * @param IDatabase $db
-	 * @param bool|string $filter
+	 * @param IMaintainableDatabase $db
+	 * @param callable|false $filter
 	 */
-	function __construct( $db, $filter = false ) {
+	public function __construct( $db, $filter = false ) {
 		$this->db = $db;
 		$this->filter = $filter;
 	}
@@ -41,7 +47,7 @@ class DbTestPreviewer extends TestRecorder {
 	 * Set up result recording; insert a record for the run with the date
 	 * and all that fun stuff
 	 */
-	function start() {
+	public function start() {
 		if ( !$this->db->tableExists( 'testrun', __METHOD__ )
 			|| !$this->db->tableExists( 'testitem', __METHOD__ )
 		) {
@@ -55,11 +61,12 @@ class DbTestPreviewer extends TestRecorder {
 		$this->results = [];
 	}
 
-	function record( $test, ParserTestResult $result ) {
-		$this->results[$test['desc']] = $result->isSuccess() ? 1 : 0;
+	public function record( ParserTestResult $result ) {
+		$desc = $result->getDescription();
+		$this->results[$desc] = $result->isSuccess() ? 1 : 0;
 	}
 
-	function report() {
+	public function report() {
 		if ( $this->prevRun ) {
 			// f = fail, p = pass, n = nonexistent
 			// codes show before then after
@@ -121,6 +128,7 @@ class DbTestPreviewer extends TestRecorder {
 					printf( "\n%4d %s\n", $count, $label );
 
 					foreach ( $breakdown[$code] as $differing_test_name => $statusInfo ) {
+						// @phan-suppress-next-line SecurityCheck-XSS CLI tool
 						print "      * $differing_test_name  [$statusInfo]\n";
 					}
 				}
@@ -170,7 +178,7 @@ class DbTestPreviewer extends TestRecorder {
 		$changedRun = $this->db->selectField( 'testitem', 'MAX(ti_run)', $conds, __METHOD__ );
 
 		// If no record of ever having had a different result.
-		if ( is_null( $changedRun ) ) {
+		if ( $changedRun === null ) {
 			if ( $after == "f" ) {
 				return "Has never passed";
 			} else {

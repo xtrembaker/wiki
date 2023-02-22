@@ -21,6 +21,9 @@
  * @since 1.21
  */
 
+use Wikimedia\ParamValidator\ParamValidator;
+use Wikimedia\ParamValidator\TypeDef\IntegerDef;
+
 /**
  * A query module to enumerate pages that use a particular prop
  *
@@ -29,6 +32,10 @@
  */
 class ApiQueryPagesWithProp extends ApiQueryGeneratorBase {
 
+	/**
+	 * @param ApiQuery $query
+	 * @param string $moduleName
+	 */
 	public function __construct( ApiQuery $query, $moduleName ) {
 		parent::__construct( $query, $moduleName, 'pwp' );
 	}
@@ -46,13 +53,13 @@ class ApiQueryPagesWithProp extends ApiQueryGeneratorBase {
 	}
 
 	/**
-	 * @param ApiPageSet $resultPageSet
+	 * @param ApiPageSet|null $resultPageSet
 	 * @return void
 	 */
 	private function run( $resultPageSet = null ) {
 		$params = $this->extractRequestParams();
 
-		$prop = array_flip( $params['prop'] );
+		$prop = array_fill_keys( $params['prop'], true );
 		$fld_ids = isset( $prop['ids'] );
 		$fld_title = isset( $prop['title'] );
 		$fld_value = isset( $prop['value'] );
@@ -87,7 +94,13 @@ class ApiQueryPagesWithProp extends ApiQueryGeneratorBase {
 
 		$result = $this->getResult();
 		$count = 0;
-		foreach ( $this->select( __METHOD__ ) as $row ) {
+		$res = $this->select( __METHOD__ );
+
+		if ( $fld_title && $resultPageSet === null ) {
+			$this->executeGenderCacheFromResultWrapper( $res, __METHOD__ );
+		}
+
+		foreach ( $res as $row ) {
 			if ( ++$count > $limit ) {
 				// We've reached the one extra which shows that there are
 				// additional pages to be had. Stop here...
@@ -127,13 +140,13 @@ class ApiQueryPagesWithProp extends ApiQueryGeneratorBase {
 	public function getAllowedParams() {
 		return [
 			'propname' => [
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true,
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_REQUIRED => true,
 			],
 			'prop' => [
-				ApiBase::PARAM_DFLT => 'ids|title',
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_DEFAULT => 'ids|title',
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_TYPE => [
 					'ids',
 					'title',
 					'value',
@@ -144,15 +157,15 @@ class ApiQueryPagesWithProp extends ApiQueryGeneratorBase {
 				ApiBase::PARAM_HELP_MSG => 'api-help-param-continue',
 			],
 			'limit' => [
-				ApiBase::PARAM_TYPE => 'limit',
-				ApiBase::PARAM_DFLT => 10,
-				ApiBase::PARAM_MIN => 1,
-				ApiBase::PARAM_MAX => ApiBase::LIMIT_BIG1,
-				ApiBase::PARAM_MAX2 => ApiBase::LIMIT_BIG2
+				ParamValidator::PARAM_TYPE => 'limit',
+				ParamValidator::PARAM_DEFAULT => 10,
+				IntegerDef::PARAM_MIN => 1,
+				IntegerDef::PARAM_MAX => ApiBase::LIMIT_BIG1,
+				IntegerDef::PARAM_MAX2 => ApiBase::LIMIT_BIG2
 			],
 			'dir' => [
-				ApiBase::PARAM_DFLT => 'ascending',
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_DEFAULT => 'ascending',
+				ParamValidator::PARAM_TYPE => [
 					'ascending',
 					'descending',
 				]

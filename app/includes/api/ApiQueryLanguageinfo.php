@@ -18,6 +18,13 @@
  * @file
  */
 
+use MediaWiki\Languages\LanguageConverterFactory;
+use MediaWiki\Languages\LanguageFactory;
+use MediaWiki\Languages\LanguageFallback;
+use MediaWiki\Languages\LanguageNameUtils;
+use Wikimedia\ParamValidator\ParamValidator;
+use Wikimedia\Timestamp\ConvertibleTimestamp;
+
 /**
  * API module to enumerate language information.
  *
@@ -33,42 +40,49 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 	 * exceeded; on the other hand, if it is not used, a typical request will
 	 * not yield more than a handful of languages before the time is exceeded
 	 * and continuation is applied, if one of the expensive props is requested.
-	 *
-	 * @var float
 	 */
-	const MAX_EXECUTE_SECONDS = 2.0;
+	private const MAX_EXECUTE_SECONDS = 2;
 
-	/** @var callable|null */
-	private $microtimeFunction;
+	/** @var LanguageFactory */
+	private $languageFactory;
+
+	/** @var LanguageNameUtils */
+	private $languageNameUtils;
+
+	/** @var LanguageFallback */
+	private $languageFallback;
+
+	/** @var LanguageConverterFactory */
+	private $languageConverterFactory;
 
 	/**
 	 * @param ApiQuery $queryModule
 	 * @param string $moduleName
-	 * @param callable|null $microtimeFunction Function to use instead of microtime(), for testing.
-	 * Should accept no arguments and return float seconds. (null means real microtime().)
+	 * @param LanguageFactory $languageFactory
+	 * @param LanguageNameUtils $languageNameUtils
+	 * @param LanguageFallback $languageFallback
+	 * @param LanguageConverterFactory $languageConverterFactory
 	 */
 	public function __construct(
 		ApiQuery $queryModule,
 		$moduleName,
-		$microtimeFunction = null
+		LanguageFactory $languageFactory,
+		LanguageNameUtils $languageNameUtils,
+		LanguageFallback $languageFallback,
+		LanguageConverterFactory $languageConverterFactory
 	) {
 		parent::__construct( $queryModule, $moduleName, 'li' );
-		$this->microtimeFunction = $microtimeFunction;
-	}
-
-	/** @return float */
-	private function microtime() {
-		if ( $this->microtimeFunction ) {
-			return ( $this->microtimeFunction )();
-		} else {
-			return microtime( true );
-		}
+		$this->languageFactory = $languageFactory;
+		$this->languageNameUtils = $languageNameUtils;
+		$this->languageFallback = $languageFallback;
+		$this->languageConverterFactory = $languageConverterFactory;
 	}
 
 	public function execute() {
-		$endTime = $this->microtime() + self::MAX_EXECUTE_SECONDS;
+		// ConvertibleTimestamp::time() used so we can fake the current time in tests
+		$endTime = ConvertibleTimestamp::time() + self::MAX_EXECUTE_SECONDS;
 
-		$props = array_flip( $this->getParameter( 'prop' ) );
+		$props = array_fill_keys( $this->getParameter( 'prop' ), true );
 		$includeCode = isset( $props['code'] );
 		$includeBcp47 = isset( $props['bcp47'] );
 		$includeDir = isset( $props['dir'] );
@@ -80,7 +94,7 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 		$targetLanguageCode = $this->getLanguage()->getCode();
 		$include = 'all';
 
-		$availableLanguageCodes = array_keys( Language::fetchLanguageNames(
+		$availableLanguageCodes = array_keys( $this->languageNameUtils->getLanguageNames(
 			// MediaWiki and extensions may return different sets of language codes
 			// when asked for language names in different languages;
 			// asking for English language names is most likely to give us the full set,
@@ -109,7 +123,7 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 				] );
 			}
 		}
-		// order of $languageCodes is guaranteed by Language::fetchLanguageNames()
+		// order of $languageCodes is guaranteed by LanguageNameUtils::getLanguageNames()
 		// and preserved by array_values() + array_intersect()
 
 		$continue = $this->getParameter( 'continue' );
@@ -129,7 +143,7 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 				continue;
 			}
 
-			$now = $this->microtime();
+			$now = ConvertibleTimestamp::time();
 			if ( $now >= $endTime ) {
 				$this->setContinueEnumParameter( 'continue', $languageCode );
 				break;
@@ -148,21 +162,21 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 			}
 
 			if ( $includeDir ) {
-				$dir = Language::factory( $languageCode )->getDir();
+				$dir = $this->languageFactory->getLanguage( $languageCode )->getDir();
 				$info['dir'] = $dir;
 			}
 
 			if ( $includeAutonym ) {
-				$autonym = Language::fetchLanguageName(
+				$autonym = $this->languageNameUtils->getLanguageName(
 					$languageCode,
-					Language::AS_AUTONYMS,
+					LanguageNameUtils::AUTONYMS,
 					$include
 				);
 				$info['autonym'] = $autonym;
 			}
 
 			if ( $includeName ) {
-				$name = Language::fetchLanguageName(
+				$name = $this->languageNameUtils->getLanguageName(
 					$languageCode,
 					$targetLanguageCode,
 					$include
@@ -171,17 +185,19 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 			}
 
 			if ( $includeFallbacks ) {
-				$fallbacks = Language::getFallbacksFor(
+				$fallbacks = $this->languageFallback->getAll(
 					$languageCode,
 					// allow users to distinguish between implicit and explicit 'en' fallbacks
-					Language::STRICT_FALLBACKS
+					LanguageFallback::STRICT
 				);
 				ApiResult::setIndexedTagName( $fallbacks, 'fb' );
 				$info['fallbacks'] = $fallbacks;
 			}
 
 			if ( $includeVariants ) {
-				$variants = Language::factory( $languageCode )->getVariants();
+				$language = $this->languageFactory->getLanguage( $languageCode );
+				$converter = $this->languageConverterFactory->getLanguageConverter( $language );
+				$variants = $converter->getVariants();
 				ApiResult::setIndexedTagName( $variants, 'var' );
 				$info['variants'] = $variants;
 			}
@@ -201,9 +217,9 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 	public function getAllowedParams() {
 		return [
 			'prop' => [
-				self::PARAM_DFLT => 'code',
-				self::PARAM_ISMULTI => true,
-				self::PARAM_TYPE => [
+				ParamValidator::PARAM_DEFAULT => 'code',
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_TYPE => [
 					'code',
 					'bcp47',
 					'dir',
@@ -215,8 +231,8 @@ class ApiQueryLanguageinfo extends ApiQueryBase {
 				self::PARAM_HELP_MSG_PER_VALUE => [],
 			],
 			'code' => [
-				self::PARAM_DFLT => '*',
-				self::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_DEFAULT => '*',
+				ParamValidator::PARAM_ISMULTI => true,
 			],
 			'continue' => [
 				self::PARAM_HELP_MSG => 'api-help-param-continue',

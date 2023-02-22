@@ -1,11 +1,13 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+
 /**
  * @covers Http
  * @group Http
  * @group small
  */
-class HttpTest extends MediaWikiTestCase {
+class HttpTest extends MediaWikiIntegrationTestCase {
 
 	/**
 	 * @covers Http::getProxy
@@ -13,14 +15,14 @@ class HttpTest extends MediaWikiTestCase {
 	public function testGetProxy() {
 		$this->hideDeprecated( 'Http::getProxy' );
 
-		$this->setMwGlobals( 'wgHTTPProxy', false );
+		$this->overrideConfigValue( MainConfigNames::HTTPProxy, false );
 		$this->assertSame(
 			'',
 			Http::getProxy(),
 			'default setting'
 		);
 
-		$this->setMwGlobals( 'wgHTTPProxy', 'proxy.domain.tld' );
+		$this->overrideConfigValue( MainConfigNames::HTTPProxy, 'proxy.domain.tld' );
 		$this->assertEquals(
 			'proxy.domain.tld',
 			Http::getProxy()

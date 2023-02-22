@@ -1,11 +1,13 @@
 <?php
 
 use MediaWiki\MediaWikiServices;
+use MediaWiki\ResourceLoader\FileModule;
+use PHPUnit\Framework\TestSuite;
 
 /**
  * @author Sam Smith <samsmith@wikimedia.org>
  */
-class LessTestSuite extends PHPUnit_Framework_TestSuite {
+class LessTestSuite extends TestSuite {
 	public function __construct() {
 		parent::__construct();
 
@@ -13,13 +15,12 @@ class LessTestSuite extends PHPUnit_Framework_TestSuite {
 
 		foreach ( $resourceLoader->getModuleNames() as $name ) {
 			$module = $resourceLoader->getModule( $name );
-			if ( !$module || !$module instanceof ResourceLoaderFileModule ) {
+			if ( !$module || !$module instanceof FileModule ) {
 				continue;
 			}
 
 			foreach ( $module->getAllStyleFiles() as $styleFile ) {
-				// TODO (phuedx, 2014-03-19) The
-				// ResourceLoaderFileModule class shouldn't
+				// TODO (phuedx, 2014-03-19) The FileModule class shouldn't
 				// know how to get a file's extension.
 				if ( $module->getStyleSheetLang( $styleFile ) !== 'less' ) {
 					continue;

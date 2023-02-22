@@ -2,6 +2,8 @@
 
 namespace TextExtracts\Test;
 
+use ILanguageConverter;
+use MediaWiki\Languages\LanguageConverterFactory;
 use MediaWikiCoversValidator;
 use TextExtracts\ApiQueryExtracts;
 use Wikimedia\TestingAccessWrapper;
@@ -12,18 +14,30 @@ use Wikimedia\TestingAccessWrapper;
  *
  * @license GPL-2.0-or-later
  */
-class ApiQueryExtractsTest extends \MediaWikiTestCase {
+class ApiQueryExtractsTest extends \MediaWikiIntegrationTestCase {
 	use MediaWikiCoversValidator;
-	use \PHPUnit4And6Compat;
 
 	private function newInstance() {
 		$config = new \HashConfig( [
 			'ParserCacheExpireTime' => \IExpiringStore::TTL_INDEFINITE,
 		] );
 
+		$configFactory = $this->createMock( \ConfigFactory::class );
+		$configFactory->method( 'makeConfig' )
+			->with( 'textextracts' )
+			->willReturn( $config );
+
+		$cache = new \WANObjectCache( [ 'cache' => new \HashBagOStuff() ] );
+
 		$context = $this->createMock( \IContextSource::class );
 		$context->method( 'getConfig' )
 			->willReturn( $config );
+		$context->method( 'msg' )
+			->willReturnCallback( function ( $key, ...$params ) {
+				$msg = $this->createMock( \Message::class );
+				$msg->method( 'text' )->willReturn( "($key)" );
+				return $msg;
+			} );
 
 		$main = $this->createMock( \ApiMain::class );
 		$main->expects( $this->once() )
@@ -35,12 +49,24 @@ class ApiQueryExtractsTest extends \MediaWikiTestCase {
 			->method( 'getMain' )
 			->willReturn( $main );
 
-		return new ApiQueryExtracts( $query, '', $config );
+		$langConv = $this->createMock( ILanguageConverter::class );
+		$langConv->method( 'getPreferredVariant' )
+			->willReturn( 'en' );
+		$langConvFactory = $this->createMock( LanguageConverterFactory::class );
+		$langConvFactory->method( 'getLanguageConverter' )
+			->willReturn( $langConv );
+
+		return new ApiQueryExtracts(
+			$query,
+			'',
+			$configFactory,
+			$cache,
+			$langConvFactory,
+			$this->getServiceContainer()->getWikiPageFactory()
+		);
 	}
 
 	public function testMemCacheHelpers() {
-		$this->setMwGlobals( 'wgMemc', new \HashBagOStuff() );
-
 		$title = $this->createMock( \Title::class );
 		$title->method( 'getPageLanguage' )
 			->willReturn( $this->createMock( \Language::class ) );
@@ -48,13 +74,22 @@ class ApiQueryExtractsTest extends \MediaWikiTestCase {
 		$page = $this->createMock( \WikiPage::class );
 		$page->method( 'getTitle' )
 			->willReturn( $title );
+		$page->method( 'getId' )
+			->willReturn( 123 );
+		$page->method( 'getTouched' )
+			->willReturn( '20010101000000' );
 
 		$text = 'Text to cache';
 
 		/** @var ApiQueryExtracts $instance */
 		$instance = TestingAccessWrapper::newFromObject( $this->newInstance() );
+		// Default param values for this API module
+		$instance->params = [ 'intro' => false, 'plaintext' => false ];
+
 		$this->assertFalse( $instance->getFromCache( $page, false ), 'is not cached yet' );
+
 		$instance->setCache( $page, $text );
+		$instance->cache->clearProcessCache();
 		$this->assertSame( $text, $instance->getFromCache( $page, false ) );
 	}
 
@@ -62,21 +97,21 @@ class ApiQueryExtractsTest extends \MediaWikiTestCase {
 		/** @var ApiQueryExtracts $instance */
 		$instance = TestingAccessWrapper::newFromObject( $this->newInstance() );
 
-		$this->assertInternalType( 'string', $instance->getCacheMode( [] ) );
+		$this->assertIsString( $instance->getCacheMode( [] ) );
 		$this->assertNotEmpty( $instance->getExamplesMessages() );
-		$this->assertInternalType( 'string', $instance->getHelpUrls() );
+		$this->assertIsString( $instance->getHelpUrls() );
 
 		$params = $instance->getAllowedParams();
-		$this->assertInternalType( 'array', $params );
+		$this->assertIsArray( $params );
 
-		$this->assertSame( $params['chars'][\ApiBase::PARAM_MIN], 1 );
-		$this->assertSame( $params['chars'][\ApiBase::PARAM_MAX], 1200 );
+		$this->assertSame( 1, $params['chars'][\ApiBase::PARAM_MIN] );
+		$this->assertSame( 1200, $params['chars'][\ApiBase::PARAM_MAX] );
 
-		$this->assertSame( $params['limit'][\ApiBase::PARAM_DFLT], 20 );
-		$this->assertSame( $params['limit'][\ApiBase::PARAM_TYPE], 'limit' );
-		$this->assertSame( $params['limit'][\ApiBase::PARAM_MIN], 1 );
-		$this->assertSame( $params['limit'][\ApiBase::PARAM_MAX], 20 );
-		$this->assertSame( $params['limit'][\ApiBase::PARAM_MAX2], 20 );
+		$this->assertSame( 20, $params['limit'][\ApiBase::PARAM_DFLT] );
+		$this->assertSame( 'limit', $params['limit'][\ApiBase::PARAM_TYPE] );
+		$this->assertSame( 1, $params['limit'][\ApiBase::PARAM_MIN] );
+		$this->assertSame( 20, $params['limit'][\ApiBase::PARAM_MAX] );
+		$this->assertSame( 20, $params['limit'][\ApiBase::PARAM_MAX2] );
 	}
 
 	/**
@@ -116,6 +151,64 @@ class ApiQueryExtractsTest extends \MediaWikiTestCase {
 	}
 
 	/**
+	 * @dataProvider provideTextsToTruncate
+	 */
+	public function testTruncate( $text, array $params, $expected ) {
+		/** @var ApiQueryExtracts $instance */
+		$instance = TestingAccessWrapper::newFromObject( $this->newInstance() );
+		$instance->params = $params + [ 'chars' => null, 'sentences' => null, 'plaintext' => true ];
+
+		$this->assertSame( $expected, $instance->truncate( $text ) );
+	}
+
+	public function provideTextsToTruncate() {
+		return [
+			[ '', [], '' ],
+			[ 'abc', [], 'abc' ],
+			[
+				'abc',
+				[ 'chars' => 1 ],
+				'abc'
+			],
+			[
+				'abc',
+				[ 'chars' => 1, 'plaintext' => false ],
+				'abc'
+			],
+			[
+				'abc',
+				[ 'sentences' => 1 ],
+				'abc'
+			],
+			[
+				'abc abc. xyz xyz.',
+				[ 'chars' => 1 ],
+				'abc(ellipsis)'
+			],
+			[
+				'abc abc. xyz xyz.',
+				[ 'sentences' => 1 ],
+				'abc abc.'
+			],
+			[
+				'abc abc. xyz xyz.',
+				[ 'chars' => 1000 ],
+				'abc abc. xyz xyz.'
+			],
+			[
+				'abc abc. xyz xyz.',
+				[ 'chars' => 1000, 'plaintext' => false ],
+				'abc abc. xyz xyz.'
+			],
+			[
+				'abc abc. xyz xyz.',
+				[ 'sentences' => 10 ],
+				'abc abc. xyz xyz.'
+			],
+		];
+	}
+
+	/**
 	 * @dataProvider provideSectionsToFormat
 	 */
 	public function testDoSections( $text, $format, $expected ) {
@@ -148,10 +241,11 @@ class ApiQueryExtractsTest extends \MediaWikiTestCase {
 			],
 
 			'Multiple matches' => [
-				"${marker}First\n${marker}Second",
+				"{$marker}First\n{$marker}Second",
 				'wiki',
 				"\n=== First ===\n\n=== Second ===",
 			],
 		];
 	}
+
 }

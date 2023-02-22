@@ -21,14 +21,16 @@
 
 /**
  * Wrapper around RecursiveDirectoryIterator/DirectoryIterator that
- * catches exception or does any custom behavoir that we may want.
+ * catches exception or does any custom behavior that we may want.
  * Do not use this class from places outside FSFileBackend.
  *
  * @ingroup FileBackend
  */
 abstract class FSFileBackendList implements Iterator {
-	/** @var Iterator */
+	/** @var Iterator|null */
 	protected $iter;
+	/** @var string */
+	protected $lastError;
 
 	/** @var int */
 	protected $suffixStart;
@@ -55,6 +57,7 @@ abstract class FSFileBackendList implements Iterator {
 			$this->iter = $this->initIterator( $path );
 		} catch ( UnexpectedValueException $e ) {
 			$this->iter = null; // bad permissions? deleted?
+			$this->lastError = $e->getMessage();
 		}
 	}
 
@@ -63,6 +66,7 @@ abstract class FSFileBackendList implements Iterator {
 	 *
 	 * @param string $dir File system directory
 	 * @return Iterator
+	 * @throws UnexpectedValueException
 	 */
 	protected function initIterator( $dir ) {
 		if ( !empty( $this->params['topOnly'] ) ) { // non-recursive
@@ -85,14 +89,15 @@ abstract class FSFileBackendList implements Iterator {
 	 * @see Iterator::key()
 	 * @return int
 	 */
-	public function key() {
+	public function key(): int {
 		return $this->pos;
 	}
 
 	/**
 	 * @see Iterator::current()
-	 * @return string|bool String or false
+	 * @return string|false
 	 */
+	#[\ReturnTypeWillChange]
 	public function current() {
 		return $this->getRelPath( $this->iter->current()->getPathname() );
 	}
@@ -101,11 +106,13 @@ abstract class FSFileBackendList implements Iterator {
 	 * @see Iterator::next()
 	 * @throws FileBackendError
 	 */
-	public function next() {
+	public function next(): void {
 		try {
 			$this->iter->next();
 			$this->filterViaNext();
 		} catch ( UnexpectedValueException $e ) { // bad permissions? deleted?
+			$this->lastError = $e->getMessage();
+
 			throw new FileBackendError( "File iterator gave UnexpectedValueException." );
 		}
 		++$this->pos;
@@ -115,12 +122,14 @@ abstract class FSFileBackendList implements Iterator {
 	 * @see Iterator::rewind()
 	 * @throws FileBackendError
 	 */
-	public function rewind() {
+	public function rewind(): void {
 		$this->pos = 0;
 		try {
 			$this->iter->rewind();
 			$this->filterViaNext();
 		} catch ( UnexpectedValueException $e ) { // bad permissions? deleted?
+			$this->lastError = $e->getMessage();
+
 			throw new FileBackendError( "File iterator gave UnexpectedValueException." );
 		}
 	}
@@ -129,8 +138,15 @@ abstract class FSFileBackendList implements Iterator {
 	 * @see Iterator::valid()
 	 * @return bool
 	 */
-	public function valid() {
+	public function valid(): bool {
 		return $this->iter && $this->iter->valid();
+	}
+
+	/**
+	 * @return string|null The last caught exception message
+	 */
+	public function getLastError() {
+		return $this->lastError;
 	}
 
 	/**

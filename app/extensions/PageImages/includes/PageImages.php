@@ -1,12 +1,40 @@
 <?php
 
+namespace PageImages;
+
+use ApiBase;
+use ApiMain;
+use FauxRequest;
+use File;
+use IContextSource;
+use MediaWiki\Api\Hook\ApiOpenSearchSuggestHook;
+use MediaWiki\Hook\BeforePageDisplayHook;
+use MediaWiki\Hook\InfoActionHook;
+use MediaWiki\MediaWikiServices;
+use OutputPage;
+use Skin;
+use Title;
+
 /**
  * @license WTFPL
  * @author Max Semenik
  * @author Brad Jorsch
  * @author Thiemo Kreuz
  */
-class PageImages {
+class PageImages implements
+	ApiOpenSearchSuggestHook,
+	BeforePageDisplayHook,
+	InfoActionHook
+{
+	/**
+	 * @const value for free images
+	 */
+	public const LICENSE_FREE = 'free';
+
+	/**
+	 * @const value for images with any type of license
+	 */
+	public const LICENSE_ANY = 'any';
 
 	/**
 	 * Page property used to store the best page image information.
@@ -17,7 +45,7 @@ class PageImages {
 	 * and cause them to be regenerated.
 	 * @see PageImages::PROP_NAME_FREE
 	 */
-	const PROP_NAME = 'page_image';
+	public const PROP_NAME = 'page_image';
 
 	/**
 	 * Page property used to store the best free page image information
@@ -25,7 +53,7 @@ class PageImages {
 	 * existing page property names on a production instance
 	 * and cause them to be regenerated.
 	 */
-	const PROP_NAME_FREE = 'page_image_free';
+	public const PROP_NAME_FREE = 'page_image_free';
 
 	/**
 	 * Get property name used in page_props table. When a page image
@@ -40,6 +68,24 @@ class PageImages {
 	}
 
 	/**
+	 * Get property names used in page_props table
+	 *
+	 * If the license is free, then only the free property name will be returned,
+	 * otherwise both free and non-free property names will be returned. That's
+	 * because we save the image name only once if it's free and the best image.
+	 *
+	 * @param string $license either LICENSE_FREE or LICENSE_ANY,
+	 * specifying whether to return the non-free property name or not
+	 * @return string|array
+	 */
+	public static function getPropNames( $license ) {
+		if ( $license === self::LICENSE_FREE ) {
+			return self::getPropName( true );
+		}
+		return [ self::getPropName( true ), self::getPropName( false ) ];
+	}
+
+	/**
 	 * Returns page image for a given title
 	 *
 	 * @param Title $title Title to get page image for
@@ -47,8 +93,18 @@ class PageImages {
 	 * @return File|bool
 	 */
 	public static function getPageImage( Title $title ) {
+		// Do not query for special pages or other titles never in the database
+		if ( !$title->canExist() ) {
+			return false;
+		}
+
 		if ( $title->inNamespace( NS_FILE ) ) {
-			return wfFindFile( $title );
+			return MediaWikiServices::getInstance()->getRepoGroup()->findFile( $title );
+		}
+
+		if ( !$title->exists() ) {
+			// No page id to select from
+			return false;
 		}
 
 		$dbr = wfGetDB( DB_REPLICA );
@@ -64,7 +120,7 @@ class PageImages {
 
 		$file = false;
 		if ( $fileName ) {
-			$file = wfFindFile( $fileName );
+			$file = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $fileName );
 		}
 
 		return $file;
@@ -78,7 +134,7 @@ class PageImages {
 	 * @param IContextSource $context Context, used to extract the title of the page
 	 * @param array[] &$pageInfo Auxillary information about the page.
 	 */
-	public static function onInfoAction( IContextSource $context, &$pageInfo ) {
+	public function onInfoAction( $context, &$pageInfo ) {
 		global $wgThumbLimits;
 
 		$imageFile = self::getPageImage( $context->getTitle() );
@@ -87,7 +143,8 @@ class PageImages {
 			return;
 		}
 
-		$thumbSetting = $context->getUser()->getOption( 'thumbsize' );
+		$userOptionsLookup = MediaWikiServices::getInstance()->getUserOptionsLookup();
+		$thumbSetting = $userOptionsLookup->getOption( $context->getUser(), 'thumbsize' );
 		$thumbSize = $wgThumbLimits[$thumbSetting];
 
 		$thumb = $imageFile->transform( [ 'width' => $thumbSize ] );
@@ -112,7 +169,7 @@ class PageImages {
 	 *
 	 * @param array[] &$results Array of results to add page images too
 	 */
-	public static function onApiOpenSearchSuggest( array &$results ) {
+	public function onApiOpenSearchSuggest( &$results ) {
 		global $wgPageImagesExpandOpenSearchXml;
 
 		if ( !$wgPageImagesExpandOpenSearchXml || !count( $results ) ) {
@@ -196,22 +253,35 @@ class PageImages {
 	}
 
 	/**
-	 * @param OutputPage &$out The page being output.
-	 * @param Skin &$skin Skin object used to generate the page. Ignored
+	 * @param OutputPage $out The page being output.
+	 * @param Skin $skin Skin object used to generate the page. Ignored
 	 */
-	public static function onBeforePageDisplay( OutputPage &$out, Skin &$skin ) {
+	public function onBeforePageDisplay( $out, $skin ): void {
+		if ( !$out->getConfig()->get( 'PageImagesOpenGraph' ) ) {
+			return;
+		}
 		$imageFile = self::getPageImage( $out->getContext()->getTitle() );
 		if ( !$imageFile ) {
+			$fallback = $out->getConfig()->get( 'PageImagesOpenGraphFallbackImage' );
+			if ( $fallback ) {
+				$out->addMeta( 'og:image', wfExpandUrl( $fallback, PROTO_CANONICAL ) );
+			}
 			return;
 		}
 
-		// See https://developers.facebook.com/docs/sharing/best-practices?locale=en_US#tags
-		$thumb = $imageFile->transform( [ 'width' => 1200 ] );
-		if ( !$thumb ) {
-			return;
+		// Open Graph protocol -- https://ogp.me/
+		// Multiple images are supported according to https://ogp.me/#array
+		// See https://developers.facebook.com/docs/sharing/best-practices?locale=en_US#images
+		// See T282065: WhatsApp expects an image <300kB
+		foreach ( [ 1200, 800, 640 ] as $width ) {
+			$thumb = $imageFile->transform( [ 'width' => $width ] );
+			if ( !$thumb ) {
+				continue;
+			}
+			$out->addMeta( 'og:image', wfExpandUrl( $thumb->getUrl(), PROTO_CANONICAL ) );
+			$out->addMeta( 'og:image:width', strval( $thumb->getWidth() ) );
+			$out->addMeta( 'og:image:height', strval( $thumb->getHeight() ) );
 		}
-
-		$out->addMeta( 'og:image', wfExpandUrl( $thumb->getUrl(), PROTO_CANONICAL ) );
 	}
 
 }

@@ -1,15 +1,16 @@
 {
 	"@metadata": {
 		"authors": [
+			"01miki10",
 			"Beluga",
 			"Crt",
 			"Jaakonam",
+			"MITO",
 			"Mies",
 			"Nike",
 			"Olli",
 			"Pxos",
-			"Stryn",
-			"01miki10"
+			"Stryn"
 		]
 	},
 	"nuke": "Massapoisto",
@@ -28,6 +29,7 @@
 	"nuke-maxpages": "Sivujen enimmäismäärä:",
 	"nuke-editby": "Luonut [[Special:Contributions/$1|{{GENDER:$1|$1}}]]",
 	"nuke-deleted": "Sivu '''$1''' on poistettu.",
+	"nuke-deletion-queued": "Sivu '''$1''' on poistojonossa.",
 	"nuke-not-deleted": "Sivua [[:$1]] '''ei voitu''' poistaa.",
 	"nuke-delete-more": "[[Special:Nuke|Poista enemmän sivuja]]",
 	"nuke-pattern": "SQL LIKE -malli (esim. %) sivun nimelle:",

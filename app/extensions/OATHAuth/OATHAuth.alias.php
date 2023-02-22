@@ -12,7 +12,8 @@ $specialPageAliases = [];
 $specialPageAliases['en'] = [
 	'DisableOATHForUser' => [ 'DisableOATHForUser' ],
 	'OATHManage' => [ 'Manage_Two-factor_authentication', 'OATH_Manage', 'OATHManage',
-		'OATH', 'Two-factor_authentication', 'OATHAuth' ]
+		'OATH', 'Two-factor_authentication', 'OATHAuth' ],
+	'VerifyOATHForUser' => [ 'VerifyOATHForUser' ],
 ];
 
 /** Arabic (العربية) */
@@ -28,6 +29,8 @@ $specialPageAliases['arz'] = [
 /** Czech (čeština) */
 $specialPageAliases['cs'] = [
 	'OATHManage' => [ 'Spravovat_dvoufaktorové_ověření', 'Dvoufaktorové_ověření' ],
+	'DisableOATHForUser' => [ 'Deaktivovat_uživateli_dvoufaktorové_ověření' ],
+	'VerifyOATHForUser' => [ 'Ověřit_dvoufaktorové_ověření' ],
 ];
 
 /** Spanish (Español) */
@@ -56,6 +59,15 @@ $specialPageAliases['gl'] = [
 	]
 ];
 
+/** Korean (한국어) */
+$specialPageAliases['ko'] = [
+	'OATHManage' => [
+		'2요소_인증_관리', '2요소인증관리', '2요소인증',
+		'2단계인증관리', '2단계인증',
+		'OATH_관리', 'OATH관리'
+	]
+];
+
 /** Northern Luri (لۊری شومالی) */
 $specialPageAliases['lrc'] = [
 	'OATHManage' => [ 'قأسأم' ],
@@ -76,11 +88,13 @@ $specialPageAliases['pl'] = [
 
 /** Serbian Cyrillic (српски (ћирилица)) */
 $specialPageAliases['sr-ec'] = [
+	'DisableOATHForUser' => [ 'Онемогућавање_двофакторске_потврде_идентитета' ],
 	'OATHManage' => [ 'Двофакторска_потврда_идентитета' ],
 ];
 
 /** Serbian Latin (srpski (latinica)) */
 $specialPageAliases['sr-el'] = [
+	'DisableOATHForUser' => [ 'Onemogućavanje_dvofaktorske_potvrde_identiteta' ],
 	'OATHManage' => [ 'Dvofaktorska_potvrda_identiteta' ],
 ];
 

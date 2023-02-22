@@ -1,11 +1,22 @@
 <?php
 
-use \MediaWiki\MediaWikiServices;
+namespace MediaWiki\Extension\SpamBlacklist;
+
+use ExtensionRegistry;
+use LogPage;
+use ManualLogEntry;
+use MediaWiki\CheckUser\Hooks as CUHooks;
+use MediaWiki\MediaWikiServices;
+use ObjectCache;
+use RequestContext;
+use Title;
+use User;
+use Wikimedia\AtEase\AtEase;
 use Wikimedia\Rdbms\Database;
 
 class SpamBlacklist extends BaseBlacklist {
-	const STASH_TTL = 180;
-	const STASH_AGE_DYING = 150;
+	private const STASH_TTL = 180;
+	private const STASH_AGE_DYING = 150;
 
 	/**
 	 * Returns the code for the blacklist implementation
@@ -31,10 +42,11 @@ class SpamBlacklist extends BaseBlacklist {
 
 	/**
 	 * @param string[] $links An array of links to check against the blacklist
-	 * @param Title|null $title The title of the page to which the filter shall be applied.
+	 * @param ?Title $title The title of the page to which the filter shall be applied.
 	 *               This is used to load the old links already on the page, so
 	 *               the filter is only applied to links that got added. If not given,
 	 *               the filter is applied to all $links.
+	 * @param User $user Relevant user
 	 * @param bool $preventLog Whether to prevent logging of hits. Set to true when
 	 *               the action is testing the links rather than attempting to save them
 	 *               (e.g. the API spamblacklist action)
@@ -42,7 +54,13 @@ class SpamBlacklist extends BaseBlacklist {
 	 *
 	 * @return string[]|bool Matched text(s) if the edit should not be allowed; false otherwise
 	 */
-	public function filter( array $links, Title $title = null, $preventLog = false, $mode = 'check' ) {
+	public function filter(
+		array $links,
+		?Title $title,
+		User $user,
+		$preventLog = false,
+		$mode = 'check'
+	) {
 		$statsd = MediaWikiServices::getInstance()->getStatsdDataFactory();
 		$cache = ObjectCache::getLocalClusterInstance();
 
@@ -70,7 +88,8 @@ class SpamBlacklist extends BaseBlacklist {
 			}
 		} elseif ( $mode === 'stash' ) {
 			if ( $knownNonMatchAsOf && ( time() - $knownNonMatchAsOf ) < self::STASH_AGE_DYING ) {
-				return false; // OK; not about to expire soon
+				// OK; not about to expire soon
+				return false;
 			}
 		}
 
@@ -101,9 +120,9 @@ class SpamBlacklist extends BaseBlacklist {
 				wfDebugLog( 'SpamBlacklist', "Excluding whitelisted URLs from " . count( $whitelists ) .
 					" regexes: " . implode( ', ', $whitelists ) . "\n" );
 				foreach ( $whitelists as $regex ) {
-					Wikimedia\suppressWarnings();
+					AtEase::suppressWarnings();
 					$newLinks = preg_replace( $regex, '', $links );
-					Wikimedia\restoreWarnings();
+					AtEase::restoreWarnings();
 					if ( is_string( $newLinks ) ) {
 						// If there wasn't a regex error, strip the matching URLs
 						$links = $newLinks;
@@ -116,21 +135,20 @@ class SpamBlacklist extends BaseBlacklist {
 				" regexes: " . implode( ', ', $blacklists ) . "\n" );
 			$retVal = false;
 			foreach ( $blacklists as $regex ) {
-				Wikimedia\suppressWarnings();
+				AtEase::suppressWarnings();
 				$matches = [];
 				$check = ( preg_match_all( $regex, $links, $matches ) > 0 );
-				Wikimedia\restoreWarnings();
+				AtEase::restoreWarnings();
 				if ( $check ) {
 					wfDebugLog( 'SpamBlacklist', "Match!\n" );
-					global $wgRequest;
-					$ip = $wgRequest->getIP();
+					$ip = RequestContext::getMain()->getRequest()->getIP();
 					$fullUrls = [];
 					$fullLineRegex = substr( $regex, 0, strrpos( $regex, '/' ) ) . '.*/Sim';
 					preg_match_all( $fullLineRegex, $links, $fullUrls );
 					$imploded = implode( ' ', $fullUrls[0] );
 					wfDebugLog( 'SpamBlacklistHit', "$ip caught submitting spam: $imploded\n" );
-					if ( !$preventLog ) {
-						$this->logFilterHit( $title, $imploded ); // Log it
+					if ( !$preventLog && $title ) {
+						$this->logFilterHit( $user, $title, $imploded );
 					}
 					if ( $retVal === false ) {
 						$retVal = [];
@@ -171,22 +189,30 @@ class SpamBlacklist extends BaseBlacklist {
 			// Key is warmed via warmCachesForFilter() from ApiStashEdit
 			$cache->makeKey( 'external-link-list', $title->getLatestRevID() ),
 			$cache::TTL_MINUTE,
-			function ( $oldValue, &$ttl, array &$setOpts ) use ( $title, $fname ) {
+			static function ( $oldValue, &$ttl, array &$setOpts ) use ( $title, $fname ) {
 				$dbr = wfGetDB( DB_REPLICA );
 				$setOpts += Database::getCacheSetOptions( $dbr );
 
 				return $dbr->selectFieldValues(
 					'externallinks',
 					'el_to',
-					[ 'el_from' => $title->getArticleID() ], // should be zero queries
+					// should be zero queries
+					[ 'el_from' => $title->getArticleID() ],
 					$fname
 				);
 			}
 		);
 	}
 
-	public function warmCachesForFilter( Title $title, array $entries ) {
-		$this->filter( $entries, $title, true /* no logging */, 'stash' );
+	public function warmCachesForFilter( Title $title, array $entries, User $user ) {
+		$this->filter(
+			$entries,
+			$title,
+			$user,
+			// no logging
+			true,
+			'stash'
+		);
 	}
 
 	/**
@@ -212,14 +238,15 @@ class SpamBlacklist extends BaseBlacklist {
 	 * Logs the filter hit to Special:Log if
 	 * $wgLogSpamBlacklistHits is enabled.
 	 *
+	 * @param User $user
 	 * @param Title $title
 	 * @param string $url URL that the user attempted to add
 	 */
-	public function logFilterHit( $title, $url ) {
-		global $wgUser, $wgLogSpamBlacklistHits;
+	public function logFilterHit( User $user, $title, $url ) {
+		global $wgLogSpamBlacklistHits;
 		if ( $wgLogSpamBlacklistHits ) {
 			$logEntry = new ManualLogEntry( 'spamblacklist', 'hit' );
-			$logEntry->setPerformer( $wgUser );
+			$logEntry->setPerformer( $user );
 			$logEntry->setTarget( $title );
 			$logEntry->setParameters( [
 				'4::url' => $url,
@@ -229,11 +256,9 @@ class SpamBlacklist extends BaseBlacklist {
 			if ( $log->isRestricted() ) {
 				// Make sure checkusers can see this action if the log is restricted
 				// (which is the default)
-				if ( ExtensionRegistry::getInstance()->isLoaded( 'CheckUser' )
-					&& class_exists( CheckUserHooks::class )
-				) {
+				if ( ExtensionRegistry::getInstance()->isLoaded( 'CheckUser' ) ) {
 					$rc = $logEntry->getRecentChange( $logid );
-					CheckUserHooks::updateCheckUserData( $rc );
+					CUHooks::updateCheckUserData( $rc );
 				}
 			} else {
 				// If the log is unrestricted, publish normally to RC,

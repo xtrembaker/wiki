@@ -1,11 +1,10 @@
 {
 	"@metadata": {
 		"authors": [
-			"Kuvaly",
-			"Kaszeba"
+			"Kaszeba",
+			"Kuvaly"
 		]
 	},
-	"wikieditor-toolbar-loading": "Ladowanié...",
 	"wikieditor-toolbar-tool-bold": "Grëbi",
 	"wikieditor-toolbar-tool-bold-example": "Wëtłëszczony drëk",
 	"wikieditor-toolbar-tool-italic": "Kùrsywa",

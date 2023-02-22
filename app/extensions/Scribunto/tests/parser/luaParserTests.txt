@@ -1,3 +1,13 @@
+!! options
+parsoid-compatible
+version=2
+!! end
+
+# Force the test runner to ensure the extension is loaded
+!! functionhooks
+invoke
+!! endfunctionhooks
+
 !! article
 Module:Test
 !! text
@@ -177,7 +187,6 @@ return {
 }
 !! endarticle
 
-
 !! article
 Module:Metatables
 !! text
@@ -225,86 +234,114 @@ Template:Scribunto_frame_caching
 
 !! test
 Scribunto: no such module
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"] }
+!! wikitext
 {{#invoke:foo|bar}}
-!! result
+!! html/php
 <p><strong class="error"><span class="scribunto-error" id="mw-scribunto-error-0">Script error: No such module &quot;foo&quot;.</span></strong>
 </p>
+!! html/parsoid
+<p><strong class="error" about="#mwt1" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:foo","function":"invoke"},"params":{"1":{"wt":"bar"}},"i":0}}]}'><span class="scribunto-error" id="mw-scribunto-error-0">Script error: No such module <span typeof="mw:Entity">"</span>foo<span typeof="mw:Entity">"</span>.</span></strong></p>
 !! end
 
 !! test
 Scribunto: no such function
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"] }
+!! wikitext
 {{#invoke:test|blah}}
-!! result
+!! html/php
 <p><strong class="error"><span class="scribunto-error" id="mw-scribunto-error-0">Script error: The function &quot;blah&quot; does not exist.</span></strong>
 </p>
+!! html/parsoid
+<p><strong class="error" about="#mwt1" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:test","function":"invoke"},"params":{"1":{"wt":"blah"}},"i":0}}]}'><span class="scribunto-error" id="mw-scribunto-error-0">Script error: The function <span typeof="mw:Entity">"</span>blah<span typeof="mw:Entity">"</span> does not exist.</span></strong></p>
 !! end
 
 !! test
 Scribunto: hello world
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|hello}}
-!! result
+!! html
 <p>hello
 </p>
 !! end
 
 !! test
 Scribunto: getAllArgs
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|getAllArgs|x|y|z|a=1|b=2|c=3|7=?}}
-!! result
+!! html
 <p>1=x, 2=y, 3=z, 7=?, a=1, b=2, c=3
 </p>
 !! end
 
 !! test
 Scribunto: getAllArgs, deprecated style
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|getAllArgs2|x|y|z|a=1|b=2|c=3|7=?}}
-!! result
+!! html
 <p>1=x, 2=y, 3=z, 7=?, a=1, b=2, c=3
 </p>
 !! end
 
 !! test
 Scribunto: getNumericArgs
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|getNumericArgs|x|y|z|a=1|b=2|c=3|7=?}}
-!! result
+!! html
 <p>1=x, 2=y, 3=z
 </p>
 !! end
 
 !! test
 Scribunto: named numeric parameters
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"] }
+!! wikitext
 {{#invoke:test|getArg|2|a|2=b}}
 {{#invoke:test|getArg|2|2=a|b}}
-!! result
+!! html/php
 <p>b
 b
 </p>
+!! html/parsoid
+<p><span about="#mwt1" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:test","function":"invoke"},"params":{"1":{"wt":"getArg"},"2":{"wt":"b"},"3":{"wt":"a"}},"i":0}}]}'>b</span>
+<span about="#mwt2" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:test","function":"invoke"},"params":{"1":{"wt":"getArg"},"2":{"wt":"a"},"3":{"wt":"b"}},"i":0}}]}'>b</span></p>
 !! end
 
 !! test
 Scribunto: template-style argument trimming
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"] }
+!! wikitext
 {{#invoke:test|getArgLength|2| x }}
 {{#invoke:test|getArgLength|2|2= x }}
-!! result
+!! html/php
 <p>3
 1
 </p>
+!! html/parsoid
+<p><span about="#mwt1" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:test","function":"invoke"},"params":{"1":{"wt":"getArgLength"},"2":{"wt":"2"},"3":{"wt":" x "}},"i":0}}]}'>3</span>
+<span about="#mwt2" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:test","function":"invoke"},"params":{"1":{"wt":"getArgLength"},"2":{"wt":"x"}},"i":0}}]}'>1</span></p>
 !! end
 
 !! test
 Scribunto: missing argument
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|getArgType|2}}
 {{#invoke:test|getArgType|blah}}
-!! result
+!! html
 <p>nil
 nil
 </p>
@@ -312,93 +349,113 @@ nil
 
 !! test
 Scribunto: parent frame access
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{Scribunto_all_args|x|y|z|a = 1|b = 2|c = 3}}
-!! result
+!! html
 <p>1=x, 2=y, 3=z, a=1, b=2, c=3
 </p>
 !! end
 
 !! test
 Scribunto: expandTemplate
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|testExpandTemplate}}
-!! result
+!! html
 <p>x=1, y=2, z=|||
 </p>
 !! end
 
 !! test
 Scribunto: expandTemplate with headers
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 ==foo==
 {{#invoke:test|testExpandTemplateWithHeaders}}
-!! result
+!! html
 <h2><span class="mw-headline" id="foo">foo</span><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/index.php?title=Parser_test&amp;action=edit&amp;section=1" title="Edit section: foo">edit</a><span class="mw-editsection-bracket">]</span></span></h2>
-<h2><span class="mw-headline" id="bar">bar</span><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/index.php?title=Template:Scribunto_template_with_headers&amp;action=edit&amp;section=T-1" title="Template:Scribunto template with headers">edit</a><span class="mw-editsection-bracket">]</span></span></h2>
+<h2><span class="mw-headline" id="bar">bar</span><span class="mw-editsection"><span class="mw-editsection-bracket">[</span><a href="/index.php?title=Template:Scribunto_template_with_headers&amp;action=edit&amp;section=T-1" title="Edit section: bar">edit</a><span class="mw-editsection-bracket">]</span></span></h2>
 !! end
 
 !! test
 Scribunto: newTemplateParserValue
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|testNewTemplateParserValue}}
-!! result
+!! html
 <p>x=1, y=2, z=blah
 </p>
 !! end
 
 !! test
 Scribunto: preprocess
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|testPreprocess|foo}}
-!! result
+!! html
 <p>1=foo|x=y
 </p>
 !! end
 
 !! test
 Scribunto: newParserValue
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|testNewParserValue|foo}}
-!! result
+!! html
 <p>1=foo|x=y
 </p>
 !! end
 
 !! test
 Scribunto: table return
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|emptyTable}}
-!! result
+!! html
 <p>table
 </p>
 !! end
 
 !! test
 Scribunto: require
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|import}}
-!! result
+!! html
 <p>3
 </p>
 !! end
 
 !! test
 Scribunto: access to a module imported at the chunk level
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|bitop}}
-!! result
+!! html
 <p>15
 </p>
 !! end
 
 !! test
 Scribunto: invoke instance upvalue isolation
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|isolationTestUpvalue|1}}
 {{#invoke:test|isolationTestUpvalue|2}}
 {{#invoke:test|isolationTestUpvalue|3}}
-!! result
+!! html
 <p>1
 2
 3
@@ -407,11 +464,13 @@ Scribunto: invoke instance upvalue isolation
 
 !! test
 Scribunto: invoke instance global isolation
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|isolationTestGlobal|1}}
 {{#invoke:test|isolationTestGlobal|2}}
 {{#invoke:test|isolationTestGlobal|3}}
-!! result
+!! html
 <p>1
 2
 3
@@ -420,9 +479,11 @@ Scribunto: invoke instance global isolation
 
 !! test
 Scribunto: ASCII null
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|null}}
-!! result
+!! html
 <p>�
 </p>
 !! end
@@ -431,37 +492,44 @@ Scribunto: ASCII null
 Scribunto: isSubsting during PST
 !! options
 pst
-!! input
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{safesubst:#invoke:test|isSubsting}}
-!! result
+!! html
 true
 !! end
 
 !! test
 Scribunto: isSubsting during normal parse
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{safesubst:#invoke:test|isSubsting}}
-!! result
+!! html
 <p>false
 </p>
 !! end
 
 !! test
 Scribunto: frame:getTitle
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|getFrameTitle}}
-!! result
+!! html
 <p>Module:Test
 </p>
 !! end
 
 !! test
 Scribunto: Metatable on export table
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:Metatables|zero}}
 {{#invoke:Metatables|one}}
 {{#invoke:Metatables|two}}
-!! result
+!! html
 <p>You called the zero method from p
 You called the one method from mt1
 You called the two method from mt2
@@ -470,26 +538,79 @@ You called the two method from mt2
 
 !! test
 Scribunto: Correct argument numbering with equals sign in function name
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|test=InFunctionName|good|bad}}
-!! result
+!! html
 <p>good
 </p>
 !! end
 
 !! test
 Scribunto: Strip markers in CSS
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 {{#invoke:test|testStrippedCss|<nowiki>#ff0000</nowiki>}}
-!! result
+!! html
 <div style="color:#ff0000"></div>
 !! end
 
 !! test
 Scribunto: Parser output isn't incorrectly cached across frames
-!! input
+!! options
+parsoid={ "modes": ["wt2html","wt2wt"], "normalizePhp": true }
+!! wikitext
 Root: {{#invoke:test|testFrameCaching}} Template: {{Scribunto frame caching}}
-!! result
+!! html
 <p>Root: Parent frame is the root: yes. Child frame is the root: no. Template: Parent frame is the root: no. Child frame is the root: no.
 </p>
+!! end
+
+# Tests for T272507
+!! article
+Module:EchoTest
+!! text
+local p = {}
+function p.echo(frame)
+    return frame.args[1]
+end
+return p
+!! end
+
+!! article
+Module:UnstripTest
+!! text
+local p = {}
+function p.unstrip(frame)
+    return mw.text.nowiki(mw.text.unstripNoWiki(frame.args[1]))
+end
+return p
+!! end
+
+# Temporarily disable this test to break a circular dependency between core & Scribunto
+!! test
+Scribunto: Test unstripNowiki behavior
+!! options
+disabled
+parsoid={ "modes": ["wt2html","wt2wt"] }
+!! wikitext
+{{#invoke:EchoTest|echo|<nowiki>foo</nowiki>}}
+{{#invoke:EchoTest|echo|<nowiki>[[Foo]]</nowiki>}}
+
+{{#invoke:UnstripTest|unstrip|<nowiki>foo</nowiki>}}
+{{#invoke:UnstripTest|unstrip|<nowiki>[[Foo]]</nowiki>}}
+!! html/php
+<p>foo
+[[Foo]]
+</p><p>foo
+&#91;&#91;Foo&#93;&#93;
+</p>
+!! html/parsoid
+<p><span typeof="mw:Nowiki mw:Transclusion" about="#mwt2" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:EchoTest","function":"invoke"},"params":{"1":{"wt":"echo"},"2":{"wt":"&lt;nowiki>foo&lt;/nowiki>"}},"i":0}}]}'>foo</span>
+<span typeof="mw:Nowiki mw:Transclusion" about="#mwt6" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:EchoTest","function":"invoke"},"params":{"1":{"wt":"echo"},"2":{"wt":"&lt;nowiki>[[Foo]]&lt;/nowiki>"}},"i":0}}]}'>[[Foo]]</span></p>
+
+<p><span about="#mwt10" typeof="mw:Transclusion" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:UnstripTest","function":"invoke"},"params":{"1":{"wt":"unstrip"},"2":{"wt":"&lt;nowiki>foo&lt;/nowiki>"}},"i":0}}]}'>foo</span>
+<span typeof="mw:Transclusion mw:Entity" about="#mwt12" data-mw='{"parts":[{"template":{"target":{"wt":"#invoke:UnstripTest","function":"invoke"},"params":{"1":{"wt":"unstrip"},"2":{"wt":"&lt;nowiki>[[Foo]]&lt;/nowiki>"}},"i":0}}]}'>[</span><span typeof="mw:Entity" about="#mwt12">[</span><span about="#mwt12">Foo</span><span typeof="mw:Entity" about="#mwt12">]</span><span typeof="mw:Entity" about="#mwt12">]</span></p>
 !! end

@@ -26,7 +26,7 @@
 
 /**
  * Used for importing XML dumps where the content of the dump is in a string.
- * This class is ineffecient, and should only be used for small dumps.
+ * This class is inefficient, and should only be used for small dumps.
  * For larger dumps, ImportStreamSource should be used instead.
  *
  * @ingroup SpecialPage
@@ -36,27 +36,26 @@ class ImportStringSource implements ImportSource {
 	private $mString;
 
 	/** @var bool */
-	private $mRead;
+	private $mRead = false;
 
 	/**
 	 * @param string $string
 	 */
-	function __construct( $string ) {
+	public function __construct( $string ) {
 		$this->mString = $string;
-		$this->mRead = false;
 	}
 
 	/**
 	 * @return bool
 	 */
-	function atEnd() {
+	public function atEnd() {
 		return $this->mRead;
 	}
 
 	/**
 	 * @return bool|string
 	 */
-	function readChunk() {
+	public function readChunk() {
 		if ( $this->atEnd() ) {
 			return false;
 		}

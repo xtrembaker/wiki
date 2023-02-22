@@ -24,6 +24,10 @@
 namespace MediaWiki\Session;
 
 use CachedBagOStuff;
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\HookContainer\HookRunner;
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
 use Psr\Log\LoggerInterface;
 use User;
 use WebRequest;
@@ -66,6 +70,22 @@ final class SessionBackend {
 	/** @var bool */
 	private $forcePersist = false;
 
+	/**
+	 * The reason for the next persistSession/unpersistSession call. Only used for logging. Can be:
+	 * - 'renew': triggered by a renew() call)
+	 * - 'no-store': the session was not found in the session store
+	 * - 'no-expiry': there was no expiry * in the session store data; this probably shouldn't happen
+	 * - null otherwise.
+	 * @var string|null
+	 */
+	private $persistenceChangeType;
+
+	/**
+	 * The data from the previous logPersistenceChange() log event. Used for deduplication.
+	 * @var array
+	 */
+	private $persistenceChangeData = [];
+
 	/** @var bool */
 	private $metaDirty = false;
 
@@ -80,6 +100,9 @@ final class SessionBackend {
 
 	/** @var LoggerInterface */
 	private $logger;
+
+	/** @var HookRunner */
+	private $hookRunner;
 
 	/** @var int */
 	private $lifetime;
@@ -109,7 +132,7 @@ final class SessionBackend {
 	private $delaySave = 0;
 
 	/** @var bool */
-	private $usePhpSessionHandling = true;
+	private $usePhpSessionHandling;
 	/** @var bool */
 	private $checkPHPSessionRecursionGuard = false;
 
@@ -121,12 +144,15 @@ final class SessionBackend {
 	 * @param SessionInfo $info Session info to populate from
 	 * @param CachedBagOStuff $store Backend data store
 	 * @param LoggerInterface $logger
+	 * @param HookContainer $hookContainer
 	 * @param int $lifetime Session data lifetime in seconds
 	 */
 	public function __construct(
-		SessionId $id, SessionInfo $info, CachedBagOStuff $store, LoggerInterface $logger, $lifetime
+		SessionId $id, SessionInfo $info, CachedBagOStuff $store, LoggerInterface $logger,
+		HookContainer $hookContainer, $lifetime
 	) {
-		$phpSessionHandling = \RequestContext::getMain()->getConfig()->get( 'PHPSessionHandling' );
+		$phpSessionHandling = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::PHPSessionHandling );
 		$this->usePhpSessionHandling = $phpSessionHandling !== 'disable';
 
 		if ( $info->getUserInfo() && !$info->getUserInfo()->isVerified() ) {
@@ -145,6 +171,7 @@ final class SessionBackend {
 		$this->user = $info->getUserInfo() ? $info->getUserInfo()->getUser() : new User;
 		$this->store = $store;
 		$this->logger = $logger;
+		$this->hookRunner = new HookRunner( $hookContainer );
 		$this->lifetime = $lifetime;
 		$this->provider = $info->getProvider();
 		$this->persist = $info->wasPersisted();
@@ -160,10 +187,11 @@ final class SessionBackend {
 			$this->data = [];
 			$this->dataDirty = true;
 			$this->metaDirty = true;
+			$this->persistenceChangeType = 'no-store';
 			$this->logger->debug(
 				'SessionBackend "{session}" is unsaved, marking dirty in constructor',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 			] );
 		} else {
 			$this->data = $blob['data'];
@@ -174,10 +202,11 @@ final class SessionBackend {
 				$this->expires = (int)$blob['metadata']['expires'];
 			} else {
 				$this->metaDirty = true;
+				$this->persistenceChangeType = 'no-expiry';
 				$this->logger->debug(
 					'SessionBackend "{session}" metadata dirty due to missing expiration timestamp',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 				] );
 			}
 		}
@@ -198,7 +227,7 @@ final class SessionBackend {
 
 	/**
 	 * Deregister a Session
-	 * @private For use by \MediaWiki\Session\Session::__destruct() only
+	 * @internal For use by \MediaWiki\Session\Session::__destruct() only
 	 * @param int $index
 	 */
 	public function deregisterSession( $index ) {
@@ -211,7 +240,7 @@ final class SessionBackend {
 
 	/**
 	 * Shut down a session
-	 * @private For use by \MediaWiki\Session\SessionManager::shutdown() only
+	 * @internal For use by \MediaWiki\Session\SessionManager::shutdown() only
 	 */
 	public function shutdown() {
 		$this->save( true );
@@ -228,7 +257,7 @@ final class SessionBackend {
 
 	/**
 	 * Fetch the SessionId object
-	 * @private For internal use by WebRequest
+	 * @internal For internal use by WebRequest
 	 * @return SessionId
 	 */
 	public function getSessionId() {
@@ -257,7 +286,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" metadata dirty due to ID reset (formerly "{oldId}")',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 					'oldId' => $oldId,
 			] );
 
@@ -308,7 +337,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" force-persist due to persist()',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 			] );
 			$this->autosave();
 		} else {
@@ -327,7 +356,7 @@ final class SessionBackend {
 			) {
 				$this->logger->debug(
 					'SessionBackend "{session}" Closing PHP session for unpersist',
-					[ 'session' => $this->id ]
+					[ 'session' => $this->id->__toString() ]
 				);
 				session_write_close();
 				session_id( '' );
@@ -366,7 +395,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" metadata dirty due to remember-user change',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 			] );
 			$this->autosave();
 		}
@@ -427,7 +456,7 @@ final class SessionBackend {
 		$this->logger->debug(
 			'SessionBackend "{session}" metadata dirty due to user change',
 			[
-				'session' => $this->id,
+				'session' => $this->id->__toString(),
 		] );
 		$this->autosave();
 	}
@@ -463,7 +492,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" metadata dirty due to force-HTTPS change',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 			] );
 			$this->autosave();
 		}
@@ -478,7 +507,6 @@ final class SessionBackend {
 	}
 
 	/**
-	 * Set the "logged out" timestamp
 	 * @param int|null $ts
 	 */
 	public function setLoggedOutTimestamp( $ts = null ) {
@@ -489,7 +517,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" metadata dirty due to logged-out-timestamp change',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 			] );
 			$this->autosave();
 		}
@@ -497,7 +525,7 @@ final class SessionBackend {
 
 	/**
 	 * Fetch provider metadata
-	 * @protected For use by SessionProvider subclasses only
+	 * @note For use by SessionProvider subclasses only
 	 * @return array|null
 	 */
 	public function getProviderMetadata() {
@@ -505,8 +533,7 @@ final class SessionBackend {
 	}
 
 	/**
-	 * Set provider metadata
-	 * @protected For use by SessionProvider subclasses only
+	 * @note For use by SessionProvider subclasses only
 	 * @param array|null $metadata
 	 */
 	public function setProviderMetadata( $metadata ) {
@@ -519,7 +546,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" metadata dirty due to provider metadata change',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 			] );
 			$this->autosave();
 		}
@@ -531,7 +558,7 @@ final class SessionBackend {
 	 * Note the caller is responsible for calling $this->dirty() if anything in
 	 * the array is changed.
 	 *
-	 * @private For use by \MediaWiki\Session\Session only.
+	 * @internal For use by \MediaWiki\Session\Session only.
 	 * @return array
 	 */
 	public function &getData() {
@@ -554,7 +581,7 @@ final class SessionBackend {
 				$this->logger->debug(
 					'SessionBackend "{session}" data dirty due to addData(): {callers}',
 					[
-						'session' => $this->id,
+						'session' => $this->id->__toString(),
 						'callers' => wfGetAllCallers( 5 ),
 				] );
 			}
@@ -563,14 +590,14 @@ final class SessionBackend {
 
 	/**
 	 * Mark data as dirty
-	 * @private For use by \MediaWiki\Session\Session only.
+	 * @internal For use by \MediaWiki\Session\Session only.
 	 */
 	public function dirty() {
 		$this->dataDirty = true;
 		$this->logger->debug(
 			'SessionBackend "{session}" data dirty due to dirty(): {callers}',
 			[
-				'session' => $this->id,
+				'session' => $this->id->__toString(),
 				'callers' => wfGetAllCallers( 5 ),
 		] );
 	}
@@ -587,15 +614,16 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{callers}" metadata dirty for renew(): {callers}',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 					'callers' => wfGetAllCallers( 5 ),
 			] );
 			if ( $this->persist ) {
+				$this->persistenceChangeType = 'renew';
 				$this->forcePersist = true;
 				$this->logger->debug(
 					'SessionBackend "{session}" force-persist for renew(): {callers}',
 					[
-						'session' => $this->id,
+						'session' => $this->id->__toString(),
 						'callers' => wfGetAllCallers( 5 ),
 				] );
 			}
@@ -647,8 +675,8 @@ final class SessionBackend {
 				'SessionBackend "{session}" not saving, user {user} was ' .
 				'passed to SessionManager::preventSessionsForUser',
 				[
-					'session' => $this->id,
-					'user' => $this->user,
+					'session' => $this->id->__toString(),
+					'user' => $this->user->__toString(),
 			] );
 			return;
 		}
@@ -659,14 +687,14 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" creating token for user {user} on save',
 				[
-					'session' => $this->id,
-					'user' => $this->user,
+					'session' => $this->id->__toString(),
+					'user' => $this->user->__toString(),
 			] );
 			$this->user->setToken();
-			if ( !wfReadOnly() ) {
+			if ( !MediaWikiServices::getInstance()->getReadOnlyMode()->isReadOnly() ) {
 				// Promise that the token set here will be valid; save it at end of request
 				$user = $this->user;
-				\DeferredUpdates::addCallableUpdate( function () use ( $user ) {
+				\DeferredUpdates::addCallableUpdate( static function () use ( $user ) {
 					$user->saveSettings();
 				} );
 			}
@@ -680,7 +708,7 @@ final class SessionBackend {
 			$this->logger->debug(
 				'SessionBackend "{session}" data dirty due to hash mismatch, {expected} !== {got}',
 				[
-					'session' => $this->id,
+					'session' => $this->id->__toString(),
 					'expected' => $this->dataHash,
 					'got' => md5( serialize( $this->data ) ),
 			] );
@@ -695,7 +723,7 @@ final class SessionBackend {
 			'SessionBackend "{session}" save: dataDirty={dataDirty} ' .
 			'metaDirty={metaDirty} forcePersist={forcePersist}',
 			[
-				'session' => $this->id,
+				'session' => $this->id->__toString(),
 				'dataDirty' => (int)$this->dataDirty,
 				'metaDirty' => (int)$this->metaDirty,
 				'forcePersist' => (int)$this->forcePersist,
@@ -706,6 +734,7 @@ final class SessionBackend {
 			if ( $this->persist ) {
 				foreach ( $this->requests as $request ) {
 					$request->setSessionId( $this->getSessionId() );
+					$this->logPersistenceChange( $request, true );
 					$this->provider->persistSession( $this, $request );
 				}
 				if ( !$closing ) {
@@ -714,6 +743,7 @@ final class SessionBackend {
 			} else {
 				foreach ( $this->requests as $request ) {
 					if ( $request->getSessionId() === $this->id ) {
+						$this->logPersistenceChange( $request, false );
 						$this->provider->unpersistSession( $request );
 					}
 				}
@@ -721,6 +751,7 @@ final class SessionBackend {
 		}
 
 		$this->forcePersist = false;
+		$this->persistenceChangeType = null;
 
 		if ( !$this->metaDirty && !$this->dataDirty ) {
 			return;
@@ -731,7 +762,8 @@ final class SessionBackend {
 			'provider' => (string)$this->provider,
 			'providerMetadata' => $this->providerMetadata,
 			'userId' => $anon ? 0 : $this->user->getId(),
-			'userName' => User::isValidUserName( $this->user->getName() ) ? $this->user->getName() : null,
+			'userName' => MediaWikiServices::getInstance()->getUserNameUtils()
+				->isValid( $this->user->getName() ) ? $this->user->getName() : null,
 			'userToken' => $anon ? null : $this->user->getToken(),
 			'remember' => !$anon && $this->remember,
 			'forceHTTPS' => $this->forceHTTPS,
@@ -740,7 +772,7 @@ final class SessionBackend {
 			'persisted' => $this->persist,
 		];
 
-		\Hooks::run( 'SessionMetadata', [ $this, &$metadata, $this->requests ] );
+		$this->hookRunner->onSessionMetadata( $this, $metadata, $this->requests );
 
 		foreach ( $origMetadata as $k => $v ) {
 			if ( $metadata[$k] !== $v ) {
@@ -749,7 +781,6 @@ final class SessionBackend {
 		}
 
 		$flags = $this->persist ? 0 : CachedBagOStuff::WRITE_CACHE_ONLY;
-		$flags |= CachedBagOStuff::WRITE_SYNC; // write to all datacenters
 		$this->store->set(
 			$this->store->makeKey( 'MWSession', (string)$this->id ),
 			[
@@ -783,12 +814,61 @@ final class SessionBackend {
 				$this->logger->debug(
 					'SessionBackend "{session}" Taking over PHP session',
 					[
-						'session' => $this->id,
+						'session' => $this->id->__toString(),
 				] );
 				session_id( (string)$this->id );
 				AtEase::quietCall( 'session_start' );
 			}
 		}
+	}
+
+	/**
+	 * Helper method for logging persistSession/unpersistSession calls.
+	 * @param WebRequest $request
+	 * @param bool $persist True when persisting, false when unpersisting
+	 */
+	private function logPersistenceChange( WebRequest $request, bool $persist ) {
+		if ( !$this->isPersistent() && !$persist ) {
+			// FIXME SessionManager calls unpersistSession() on anonymous requests (and the cookie
+			//   filtering in WebResponse makes it a noop). Skip those.
+			return;
+		}
+
+		$verb = $persist ? 'Persisting' : 'Unpersisting';
+		if ( $this->persistenceChangeType === 'renew' ) {
+			$message = "$verb session for renewal";
+		} elseif ( $this->persistenceChangeType === 'no-store' ) {
+			$message = "$verb session due to no pre-existing stored session";
+		} elseif ( $this->persistenceChangeType === 'no-expiry' ) {
+			$message = "$verb session due to lack of stored expiry";
+		} elseif ( $this->persistenceChangeType === null ) {
+			$message = "$verb session for unknown reason";
+		}
+
+		// Because SessionManager repeats session loading several times in the same request,
+		// it will try to persist or unpersist several times. WebResponse deduplicates, but
+		// we want to deduplicate logging as well since the volume is already fairly large.
+		$id = $this->getId();
+		$user = $this->getUser()->isAnon() ? '<anon>' : $this->getUser()->getName();
+		if ( $this->persistenceChangeData
+			&& $this->persistenceChangeData['id'] === $id
+			&& $this->persistenceChangeData['user'] === $user
+			// @phan-suppress-next-line PhanPossiblyUndeclaredVariable message always set
+			&& $this->persistenceChangeData['message'] === $message
+		) {
+			return;
+		}
+		// @phan-suppress-next-line PhanPossiblyUndeclaredVariable message always set
+		$this->persistenceChangeData = [ 'id' => $id, 'user' => $user, 'message' => $message ];
+
+		// @phan-suppress-next-line PhanTypeMismatchArgumentNullable,PhanPossiblyUndeclaredVariable message always set
+		$this->logger->info( $message, [
+			'id' => $id,
+			'provider' => get_class( $this->getProvider() ),
+			'user' => $user,
+			'clientip' => $request->getIP(),
+			'userAgent' => $request->getHeader( 'user-agent' ),
+		] );
 	}
 
 }

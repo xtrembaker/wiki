@@ -7,25 +7,24 @@
 class TitleArrayFromResultTest extends MediaWikiUnitTestCase {
 
 	private function getMockResultWrapper( $row = null, $numRows = 1 ) {
-		$resultWrapper = $this->getMockBuilder( Wikimedia\Rdbms\ResultWrapper::class )
+		$resultWrapper = $this->getMockBuilder( Wikimedia\Rdbms\IResultWrapper::class )
 			->disableOriginalConstructor();
 
 		$resultWrapper = $resultWrapper->getMock();
 		$resultWrapper->expects( $this->atLeastOnce() )
 			->method( 'current' )
-			->will( $this->returnValue( $row ) );
-		$resultWrapper->expects( $this->any() )
-			->method( 'numRows' )
-			->will( $this->returnValue( $numRows ) );
+			->willReturn( $row );
+		$resultWrapper->method( 'numRows' )
+			->willReturn( $numRows );
 
 		return $resultWrapper;
 	}
 
 	private function getRowWithTitle( $namespace = 3, $title = 'foo' ) {
-		$row = new stdClass();
-		$row->page_namespace = $namespace;
-		$row->page_title = $title;
-		return $row;
+		return (object)[
+			'page_namespace' => $namespace,
+			'page_title' => $title,
+		];
 	}
 
 	/**
@@ -56,8 +55,8 @@ class TitleArrayFromResultTest extends MediaWikiUnitTestCase {
 		$this->assertEquals( $resultWrapper, $object->res );
 		$this->assertSame( 0, $object->key );
 		$this->assertInstanceOf( Title::class, $object->current );
-		$this->assertEquals( $namespace, $object->current->mNamespace );
-		$this->assertEquals( $title, $object->current->mTextform );
+		$this->assertEquals( $namespace, $object->current->getNamespace() );
+		$this->assertEquals( $title, $object->current->getText() );
 	}
 
 	public static function provideNumberOfRows() {
@@ -89,8 +88,8 @@ class TitleArrayFromResultTest extends MediaWikiUnitTestCase {
 		$row = $this->getRowWithTitle( $namespace, $title );
 		$object = new TitleArrayFromResult( $this->getMockResultWrapper( $row ) );
 		$this->assertInstanceOf( Title::class, $object->current() );
-		$this->assertEquals( $namespace, $object->current->mNamespace );
-		$this->assertEquals( $title, $object->current->mTextform );
+		$this->assertEquals( $namespace, $object->current->getNamespace() );
+		$this->assertEquals( $title, $object->current->getText() );
 	}
 
 	public function provideTestValid() {

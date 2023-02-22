@@ -33,7 +33,6 @@ class InstallException extends \MWException {
 	private $status;
 
 	/**
-	 * InstallException constructor.
 	 * @param \Status $status State when an exception occurs
 	 * @param string $message The Exception message to throw
 	 * @param int $code The Exception code
@@ -45,7 +44,7 @@ class InstallException extends \MWException {
 		$this->status = $status;
 	}
 
-	public function getStatus() : \Status {
+	public function getStatus(): \Status {
 		return $this->status;
 	}
 }

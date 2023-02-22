@@ -19,25 +19,27 @@
  */
 
 use GuzzleHttp\Client;
+use GuzzleHttp\HandlerStack;
+use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
+use Psr\Http\Message\RequestInterface;
 
 /**
  * MWHttpRequest implemented using the Guzzle library
  *
- * Differences from the CurlHttpRequest implementation:
- *   1) a new 'sink' option is available as an alternative to callbacks.  See:
- *        http://docs.guzzlephp.org/en/stable/request-options.html#sink)
- *      The 'callback' option remains available as well.  If both 'sink' and 'callback' are
- *      specified, 'sink' is used.
- *   2) callers may set a custom handler via the 'handler' option.
- *      If this is not set, Guzzle will use curl (if available) or PHP streams (otherwise)
- *   3) setting either sslVerifyHost or sslVerifyCert will enable both.  Guzzle does not allow
- *      them to be set separately.
+ * @note a new 'sink' option is available as an alternative to callbacks.
+ *   See: http://docs.guzzlephp.org/en/stable/request-options.html#sink)
+ *   The 'callback' option remains available as well.  If both 'sink' and 'callback' are
+ *   specified, 'sink' is used.
+ * @note Callers may set a custom handler via the 'handler' option.
+ *   If this is not set, Guzzle will use curl (if available) or PHP streams (otherwise)
+ * @note Setting either sslVerifyHost or sslVerifyCert will enable both.
+ *   Guzzle does not allow them to be set separately.
  *
  * @since 1.33
  */
 class GuzzleHttpRequest extends MWHttpRequest {
-	const SUPPORTS_FILE_POSTS = true;
+	public const SUPPORTS_FILE_POSTS = true;
 
 	protected $handler = null;
 	protected $sink = null;
@@ -45,6 +47,8 @@ class GuzzleHttpRequest extends MWHttpRequest {
 	protected $guzzleOptions = [ 'http_errors' => false ];
 
 	/**
+	 * @internal Use HttpRequestFactory
+	 *
 	 * @param string $url Url to use. If protocol-relative, will be expanded to an http:// URL
 	 * @param array $options (optional) extra params to pass (see HttpRequestFactory::create())
 	 * @param string $caller The method making this request, for profiling
@@ -152,11 +156,32 @@ class GuzzleHttpRequest extends MWHttpRequest {
 			$this->guzzleOptions['expect'] = false;
 		}
 
-		$this->guzzleOptions['headers'] = $this->reqHeaders;
+		// Create Middleware to use cookies from $this->getCookieJar(),
+		// which is in MediaWiki CookieJar format, not in Guzzle-specific CookieJar format.
+		// Note: received cookies (from HTTP response) don't need to be handled here,
+		// they will be added back into the CookieJar by MWHttpRequest::parseCookies().
+		$stack = HandlerStack::create( $this->handler );
 
-		if ( $this->handler ) {
-			$this->guzzleOptions['handler'] = $this->handler;
-		}
+		// @phan-suppress-next-line PhanUndeclaredFunctionInCallable
+		$stack->remove( 'cookies' );
+
+		$mwCookieJar = $this->getCookieJar();
+		$stack->push( Middleware::mapRequest(
+			static function ( RequestInterface $request ) use ( $mwCookieJar ) {
+				$uri = $request->getUri();
+				$cookieHeader = $mwCookieJar->serializeToHttpRequest(
+					$uri->getPath() ?: '/',
+					$uri->getHost()
+				);
+				if ( !$cookieHeader ) {
+					return $request;
+				}
+
+				return $request->withHeader( 'Cookie', $cookieHeader );
+			}
+		), 'cookies' );
+
+		$this->guzzleOptions['handler'] = $stack;
 
 		if ( $this->sink ) {
 			$this->guzzleOptions['sink'] = $this->sink;
@@ -168,9 +193,13 @@ class GuzzleHttpRequest extends MWHttpRequest {
 			$this->guzzleOptions['verify'] = false;
 		}
 
+		$client = new Client( $this->guzzleOptions );
+		$request = new Request( $this->method, $this->url );
+		foreach ( $this->reqHeaders as $name => $value ) {
+			$request = $request->withHeader( $name, $value );
+		}
+
 		try {
-			$client = new Client( $this->guzzleOptions );
-			$request = new Request( $this->method, $this->url );
 			$response = $client->send( $request );
 			$this->headerList = $response->getHeaders();
 

@@ -21,17 +21,20 @@
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
  */
-require_once __DIR__ . "/src/SecurityCheckPlugin.php";
-require_once __DIR__ . "/src/MWVisitor.php";
-require_once __DIR__ . "/src/MWPreVisitor.php";
 
+use ast\Node;
+use Phan\AST\UnionTypeVisitor;
 use Phan\CodeBase;
-use Phan\Config;
+use Phan\Exception\CodeBaseException;
 use Phan\Language\Context;
+use Phan\Language\Element\FunctionInterface;
 use Phan\Language\FQSEN\FullyQualifiedClassName;
-use Phan\Language\FQSEN\FullyQualifiedFunctionLikeName;
-use Phan\Language\FQSEN\FullyQualifiedFunctionName as FQSENFunc;
-use Phan\Language\FQSEN\FullyQualifiedMethodName as FQSENMethod;
+use SecurityCheckPlugin\FunctionTaintedness;
+use SecurityCheckPlugin\MWPreVisitor;
+use SecurityCheckPlugin\MWVisitor;
+use SecurityCheckPlugin\SecurityCheckPlugin;
+use SecurityCheckPlugin\Taintedness;
+use SecurityCheckPlugin\TaintednessVisitor;
 
 class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 	/**
@@ -49,14 +52,9 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 	}
 
 	/**
-	 * @var array A mapping from hook names to FQSEN that implement it
-	 */
-	protected $hookSubscribers = [];
-
-	/**
 	 * @inheritDoc
 	 */
-	protected function getCustomFuncTaints() : array {
+	protected function getCustomFuncTaints(): array {
 		$selectWrapper = [
 				self::SQL_EXEC_TAINT,
 				// List of fields. MW does not escape things like COUNT(*)
@@ -72,6 +70,22 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 				self::NO_TAINT,
 				// What should DB results be considered?
 				'overall' => self::YES_TAINT
+		];
+
+		$linkRendererMethods = [
+			self::NO_TAINT, /* target */
+			self::ESCAPES_HTML, /* text (using HtmlArmor) */
+			// The array keys for this aren't escaped (!)
+			self::NO_TAINT, /* attribs */
+			self::NO_TAINT, /* query */
+			'overall' => self::ESCAPED_TAINT
+		];
+
+		$shellCommandOutput = [
+			// This is a bit unclear. Most of the time
+			// you should probably be escaping the results
+			// of a shell command, but not all the time.
+			'overall' => self::YES_TAINT
 		];
 
 		return [
@@ -277,23 +291,7 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 			],
 			'\Wikimedia\Rdbms\Database::buildLike' => [
 				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
-				self::YES_TAINT & ~self::SQL_TAINT,
+				( self::YES_TAINT & ~self::SQL_TAINT ) | self::VARIADIC_PARAM,
 				'overall' => self::NO_TAINT
 			],
 			// makeList is special cased in MWVistor::checkMakeList
@@ -312,16 +310,7 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 			'\Message::__toString' => [ 'overall' => self::ESCAPED_TAINT ],
 			'\Message::escaped' => [ 'overall' => self::ESCAPED_TAINT ],
 			'\Message::rawParams' => [
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
-				self::HTML_TAINT | self::RAW_PARAM,
+				self::HTML_EXEC_TAINT | self::RAW_PARAM | self::VARIADIC_PARAM,
 				// meh, not sure how right the overall is.
 				'overall' => self::HTML_TAINT
 			],
@@ -342,45 +331,30 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 				'overall' => self::YES_TAINT
 			],
 			'\wfEscapeShellArg' => [
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
+				( self::YES_TAINT & ~self::SHELL_TAINT ) | self::VARIADIC_PARAM,
 				'overall' => self::NO_TAINT
 			],
 			'\MediaWiki\Shell\Shell::escape' => [
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
-				self::YES_TAINT & ~self::SHELL_TAINT,
+				( self::YES_TAINT & ~self::SHELL_TAINT ) | self::VARIADIC_PARAM,
 				'overall' => self::NO_TAINT
 			],
 			'\MediaWiki\Shell\Command::unsafeParams' => [
-				self::SHELL_EXEC_TAINT,
+				self::SHELL_EXEC_TAINT | self::VARIADIC_PARAM,
 				'overall' => self::NO_TAINT
 			],
-			'\MediaWiki\Shell\Result::getStdout' => [
-				// This is a bit unclear. Most of the time
-				// you should probably be escaping the results
-				// of a shell command, but not all the time.
-				'overall' => self::YES_TAINT
+			'\MediaWiki\Shell\Result::getStdout' => $shellCommandOutput,
+			'\MediaWiki\Shell\Result::getStderr' => $shellCommandOutput,
+			// Methods from wikimedia/Shellbox
+			'\Shellbox\Shellbox::escape' => [
+				( self::YES_TAINT & ~self::SHELL_TAINT ) | self::VARIADIC_PARAM,
+				'overall' => self::NO_TAINT
 			],
-			'\MediaWiki\Shell\Result::getStderr' => [
-				// This is a bit unclear. Most of the time
-				// you should probably be escaping the results
-				// of a shell command, but not all the time.
-				'overall' => self::YES_TAINT
+			'\Shellbox\Command\Command::unsafeParams' => [
+				self::SHELL_EXEC_TAINT | self::VARIADIC_PARAM,
+				'overall' => self::NO_TAINT
 			],
+			'\Shellbox\Command\UnboxedResult::getStdout' => $shellCommandOutput,
+			'\Shellbox\Command\UnboxedResult::getStderr' => $shellCommandOutput,
 			'\Html::rawElement' => [
 				self::YES_TAINT,
 				self::ESCAPES_HTML,
@@ -434,7 +408,7 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 			],
 			'\OutputPage::parse' => [ 'overall' => self::NO_TAINT, ],
 			'\Sanitizer::removeHTMLtags' => [
-				self::ESCAPES_HTML,
+				self::NO_TAINT, // See T268353
 				self::SHELL_EXEC_TAINT, /* attribute callback */
 				self::NO_TAINT, /* callback args */
 				self::YES_TAINT, /* extra tags */
@@ -479,7 +453,7 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 			'\WebRequest::getHeader' => [ 'overall' => self::YES_TAINT, ],
 			'\WebRequest::getAcceptLang' => [ 'overall' => self::YES_TAINT, ],
 			'\HtmlArmor::__construct' => [
-				self::HTML_TAINT | self::RAW_PARAM,
+				self::HTML_EXEC_TAINT | self::RAW_PARAM,
 				'overall' => self::NO_TAINT
 			],
 			// Due to limitations in how we handle list()
@@ -499,211 +473,124 @@ class MediaWikiSecurityCheckPlugin extends SecurityCheckPlugin {
 			// the url query parameters.
 			'\Linker::linkKnown' => [
 				self::NO_TAINT, /* target */
-				self::HTML_TAINT | self::RAW_PARAM, /* raw html text */
+				self::HTML_EXEC_TAINT | self::RAW_PARAM, /* raw html text */
 				// The array keys for this aren't escaped (!)
 				self::NO_TAINT, /* customAttribs */
 				self::NO_TAINT, /* query */
 				self::NO_TAINT, /* options. All are safe */
 				'overall' => self::ESCAPED_TAINT
 			],
-			'\MediaWiki\Linker\LinkRenderer::buildAElement' => [
-				self::NO_TAINT, /* target */
-				self::ESCAPES_HTML, /* text (using HtmlArmor) */
-				// The array keys for this aren't escaped (!)
-				self::NO_TAINT, /* attribs */
-				self::NO_TAINT, /* known */
-				'overall' => self::ESCAPED_TAINT
-			],
-			'\MediaWiki\Linker\LinkRenderer::makeLink' => [
-				self::NO_TAINT, /* target */
-				self::ESCAPES_HTML, /* text (using HtmlArmor) */
-				// The array keys for this aren't escaped (!)
-				self::NO_TAINT, /* attribs */
-				self::NO_TAINT, /* query */
-				'overall' => self::ESCAPED_TAINT
-			],
-			'\MediaWiki\Linker\LinkRenderer::makeKnownLink' => [
-				self::NO_TAINT, /* target */
-				self::ESCAPES_HTML, /* text (using HtmlArmor) */
-				// The array keys for this aren't escaped (!)
-				self::NO_TAINT, /* attribs */
-				self::NO_TAINT, /* query */
-				'overall' => self::ESCAPED_TAINT
-			],
-			'\MediaWiki\Linker\LinkRenderer::makePreloadedLink' => [
-				self::NO_TAINT, /* target */
-				self::ESCAPES_HTML, /* text (using HtmlArmor) */
-				// The array keys for this aren't escaped (!)
-				self::NO_TAINT, /* attribs */
-				self::NO_TAINT, /* query */
-				'overall' => self::ESCAPED_TAINT
-			],
+			'\MediaWiki\Linker\LinkRenderer::buildAElement' => $linkRendererMethods,
+			'\MediaWiki\Linker\LinkRenderer::makeLink' => $linkRendererMethods,
+			'\MediaWiki\Linker\LinkRenderer::makeKnownLink' => $linkRendererMethods,
+			'\MediaWiki\Linker\LinkRenderer::makePreloadedLink' => $linkRendererMethods,
+			'\MediaWiki\Linker\LinkRenderer::makeBrokenLink' => $linkRendererMethods,
 		];
-	}
-
-	/**
-	 * Add a hook implementation to our list.
-	 *
-	 * This also handles parser hooks which aren't normal hooks.
-	 * Non-normal hooks start their name with a "!"
-	 *
-	 * @param string $hookName Name of hook
-	 * @param FullyQualifiedFunctionLikeName $fqsen The implementing method
-	 * @return bool true if already registered, false otherwise
-	 */
-	public function registerHook( string $hookName, FullyQualifiedFunctionLikeName $fqsen ) {
-		if ( !isset( $this->hookSubscribers[$hookName] ) ) {
-			$this->hookSubscribers[$hookName] = [];
-		}
-		foreach ( $this->hookSubscribers[$hookName] as $subscribe ) {
-			if ( (string)$subscribe === (string)$fqsen ) {
-				// dupe
-				return true;
-			}
-		}
-		$this->hookSubscribers[$hookName][] = $fqsen;
-		return false;
-	}
-
-	/**
-	 * Register hooks from extension.json/skin.json
-	 *
-	 * Assumes extension.json/skin.json is in project root directory
-	 * unless SECURITY_CHECK_EXT_PATH is set
-	 */
-	protected function loadExtensionJson() {
-		static $done;
-		if ( $done ) {
-			return;
-		}
-		$done = true;
-		foreach ( [ 'extension.json', 'skin.json' ] as $filename ) {
-			$envPath = getenv( 'SECURITY_CHECK_EXT_PATH' );
-			if ( $envPath ) {
-				$jsonPath = $envPath . '/' . $filename;
-			} else {
-				$jsonPath = Config::projectPath( $filename );
-			}
-			if ( file_exists( $jsonPath ) ) {
-				$json = json_decode( file_get_contents( $jsonPath ), true );
-				if ( !is_array( $json ) ) {
-					continue;
-				}
-				if ( isset( $json['Hooks'] ) && is_array( $json['Hooks'] ) ) {
-					foreach ( $json['Hooks'] as $hookName => $cbList ) {
-						foreach ( (array)$cbList as $cb ) {
-							// All callbacks here are simple
-							// "someFunction" or "Class::SomeMethod"
-							if ( strpos( $cb, '::' ) === false ) {
-								$callback = FQSENFunc::fromFullyQualifiedString(
-									$cb
-								);
-							} else {
-								$callback = FQSENMethod::fromFullyQualifiedString(
-									$cb
-								);
-							}
-							$this->registerHook( $hookName, $callback );
-						}
-					}
-				}
-			}
-		}
-	}
-
-	/**
-	 * Get a list of subscribers for hook
-	 *
-	 * @param string $hookName Hook in question. Hooks starting with ! are special.
-	 * @return FullyQualifiedFunctionLikeName[]
-	 */
-	public function getHookSubscribers( string $hookName ) : array {
-		$this->loadExtensionJson();
-		if ( isset( $this->hookSubscribers[$hookName] ) ) {
-			return $this->hookSubscribers[$hookName];
-		}
-		return [];
-	}
-
-	/**
-	 * Is a particular function implementing a special hook.
-	 *
-	 * @note This assumes that any given func will only implement
-	 *   one hook
-	 * @param FullyQualifiedFunctionLikeName $fqsen The function to check
-	 * @return string|null The hook it is implementing or null if no hook
-	 */
-	public function isSpecialHookSubscriber( FullyQualifiedFunctionLikeName $fqsen ) {
-		$this->loadExtensionJson();
-		$specialHooks = [
-			'!ParserFunctionHook',
-			'!ParserHook'
-		];
-
-		// @todo This is probably not the most efficient thing.
-		foreach ( $specialHooks as $hook ) {
-			if ( !isset( $this->hookSubscribers[$hook] ) ) {
-				continue;
-			}
-			foreach ( $this->hookSubscribers[$hook] as $implFQSEN ) {
-				if ( (string)$implFQSEN === (string)$fqsen ) {
-					return $hook;
-				}
-			}
-		}
-		return null;
 	}
 
 	/**
 	 * Mark XSS's that happen in a Maintenance subclass as false a positive
 	 *
-	 * @param int $lhsTaint The dangerous taints to be output (e.g. LHS of assignment)
-	 * @param int $rhsTaint The taint of the expression
-	 * @param string &$msg The issue description
-	 * @param Context $context
-	 * @param CodeBase $code_base
-	 * @return bool Is this a false positive?
+	 * @inheritDoc
 	 */
 	public function isFalsePositive(
-		int $lhsTaint,
-		int $rhsTaint,
+		int $combinedTaint,
 		string &$msg,
 		Context $context,
 		CodeBase $code_base
-	) : bool {
-		if (
-			( $lhsTaint & $rhsTaint ) === self::HTML_TAINT
-		) {
+	): bool {
+		if ( $combinedTaint === self::HTML_TAINT ) {
+			$path = str_replace( '\\', '/', $context->getFile() );
 			if (
-				strpos( $context->getFile(), "maintenance/" ) === 0 ||
-				strpos( $context->getFile(), "./maintenance/" ) === 0
+				strpos( $path, 'maintenance/' ) === 0 ||
+				strpos( $path, '/maintenance/' ) !== false
 			) {
 				// For classes not using Maintenance subclasses
-				$msg = ' [Likely false positive because in maintenance'
-					. ' subdirectory, thus probably CLI]';
+				$msg .= ' [Likely false positive because in maintenance subdirectory, thus probably CLI]';
 				return true;
 			}
 			if ( !$context->isInClassScope() ) {
 				return false;
 			}
-			$class = $context->getClassInScope( $code_base );
 			$maintFQSEN = FullyQualifiedClassName::fromFullyQualifiedString(
 				'\\Maintenance'
 			);
 			if ( !$code_base->hasClassWithFQSEN( $maintFQSEN ) ) {
 				return false;
 			}
-			$maint = $code_base->getClassByFQSEN( $maintFQSEN );
-			$isMaint = $class->isSubclassOf( $code_base, $maint );
+			$classFQSEN = $context->getClassFQSEN();
+			$isMaint = TaintednessVisitor::isSubclassOf( $classFQSEN, $maintFQSEN, $code_base );
 			if ( $isMaint ) {
-				$msg .= ' [Likely false positive because in a subclass ' .
-					'of Maintenance, thus probably CLI]';
+				$msg .= ' [Likely false positive because in a subclass of Maintenance, thus probably CLI]';
 				return true;
 			}
 		}
 		return false;
 	}
 
+	/**
+	 * Disable double escape checking for messages with polymorphic methods
+	 *
+	 * A common cause of false positives for double escaping is that some
+	 * methods take a string|Message, and this confuses the tool given
+	 * the __toString() behaviour of Message. So disable double escape
+	 * checking for that.
+	 *
+	 * This is quite hacky. Ideally the tool would treat methods taking
+	 * multiple types as separate for each type, and also be able to
+	 * reason out simple conditions of the form if ( $arg instanceof Message ).
+	 * However that's much more complicated due to dependence on phan.
+	 *
+	 * @inheritDoc
+	 * @suppress PhanUnusedPublicMethodParameter
+	 */
+	public function modifyArgTaint(
+		Taintedness $curArgTaintedness,
+		Node $argument,
+		int $argIndex,
+		FunctionInterface $func,
+		FunctionTaintedness $funcTaint,
+		Context $context,
+		CodeBase $code_base
+	): Taintedness {
+		if ( $curArgTaintedness->has( self::ESCAPED_TAINT ) ) {
+			$argumentIsMaybeAMsg = false;
+			/** @var \Phan\Language\Element\Clazz[] $classes */
+			$classes = UnionTypeVisitor::unionTypeFromNode( $code_base, $context, $argument )
+				->asClassList( $code_base, $context );
+			try {
+				foreach ( $classes as $cl ) {
+					if ( $cl->getFQSEN()->__toString() === '\Message' ) {
+						$argumentIsMaybeAMsg = true;
+						break;
+					}
+				}
+			} catch ( CodeBaseException $_ ) {
+				// A class that doesn't exist, don't crash.
+				return $curArgTaintedness;
+			}
+
+			$param = $func->getParameterForCaller( $argIndex );
+			if ( !$argumentIsMaybeAMsg || !$param || !$param->getUnionType()->hasStringType() ) {
+				return $curArgTaintedness;
+			}
+			/** @var \Phan\Language\Element\Clazz[] $classesParam */
+			$classesParam = $param->getUnionType()->asClassList( $code_base, $context );
+			try {
+				foreach ( $classesParam as $cl ) {
+					if ( $cl->getFQSEN()->__toString() === '\Message' ) {
+						// So we are here. Input is a Message, and func expects either a Message or string
+						// (or something else). So disable double escape check.
+						return $curArgTaintedness->without( self::ESCAPED_TAINT );
+					}
+				}
+			} catch ( CodeBaseException $_ ) {
+				// A class that doesn't exist, don't crash.
+				return $curArgTaintedness;
+			}
+		}
+		return $curArgTaintedness;
+	}
 }
 
 return new MediaWikiSecurityCheckPlugin;

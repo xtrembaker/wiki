@@ -51,6 +51,7 @@
 
 		/**
 		 * Default item for the size menu.
+		 *
 		 * @property {OO.ui.MenuOptionWidget}
 		 */
 		this.defaultItem = this.downloadSizeMenu.getMenu().findSelectedItem();
@@ -85,10 +86,7 @@
 		this.$downloadButton = $( '<a>' )
 			.attr( 'target', '_blank' )
 			.attr( 'download', '' )
-			.addClass( 'mw-ui-button mw-ui-progressive mw-mmv-download-go-button' )
-			.on( 'click', function () {
-				mw.mmv.actionLogger.log( 'download' );
-			} );
+			.addClass( 'mw-ui-button mw-ui-progressive mw-mmv-download-go-button' );
 
 		this.$selectionArrow = $( '<span>' )
 			.addClass( 'mw-ui-button mw-ui-progressive mw-mmv-download-select-menu' )
@@ -120,10 +118,6 @@
 			'original'
 		);
 
-		this.downloadSizeMenu.getMenu().on( 'select', function ( item ) {
-			mw.mmv.actionLogger.log( 'download-select-menu-' + item.data.name );
-		} );
-
 		$container.append( this.downloadSizeMenu.$element );
 	};
 
@@ -137,10 +131,7 @@
 			.attr( 'target', '_blank' )
 			.addClass( 'mw-mmv-download-preview-link' )
 			.text( mw.message( 'multimediaviewer-download-preview-link-title' ).text() )
-			.appendTo( $container )
-			.on( 'click', function () {
-				mw.mmv.actionLogger.log( 'download-view-in-browser' );
-			} );
+			.appendTo( $container );
 	};
 
 	DP.createAttributionButton = function ( $container ) {
@@ -314,6 +305,12 @@
 	DP.setButtonText = function ( sizeClass, extension, width, height ) {
 		var sizeClassMessage, sizeMessage, dimensionMessage;
 
+		// The following messages are used here:
+		// * multimediaviewer-download-original-button-name
+		// * multimediaviewer-download-small-button-name
+		// * multimediaviewer-download-medium-button-name
+		// * multimediaviewer-download-large-button-name
+		// * multimediaviewer-download-xl-button-name
 		sizeClassMessage = mw.message( 'multimediaviewer-download-' + sizeClass + '-button-name' ).text();
 		dimensionMessage = mw.message( 'multimediaviewer-embed-dimensions', width, height ).text();
 		sizeMessage = mw.message( 'multimediaviewer-embed-dimensions-with-file-format',
@@ -386,7 +383,10 @@
 		attributionCtaMessage = ( license && license.needsAttribution() ) ?
 			'multimediaviewer-download-attribution-cta-header' :
 			'multimediaviewer-download-optional-attribution-cta-header';
+		// Message defined above
+		// eslint-disable-next-line mediawiki/msg-doc
 		this.$attributionCtaHeader.text( mw.message( attributionCtaMessage ).text() );
+		// eslint-disable-next-line mediawiki/msg-doc
 		this.$attributionHowHeader.text( mw.message( attributionCtaMessage ).text() );
 	};
 

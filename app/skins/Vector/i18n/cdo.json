@@ -1,9 +1,9 @@
 {
 	"@metadata": {
 		"authors": [
+			"GnuDoyng",
 			"Yejianfei",
-			"唐吉訶德的侍從",
-			"GnuDoyng"
+			"唐吉訶德的侍從"
 		]
 	},
 	"vector-action-addsection": "Gă uâ-dà̤",
@@ -16,6 +16,6 @@
 	"vector-view-edit": "Siŭ-gāi",
 	"vector-view-history": "Káng lĭk-sṳ̄",
 	"vector-view-view": "Tĕ̤k",
-	"vector-view-viewsource": "看源代碼",
+	"vector-view-viewsource": "Káng nguòng-dâi-mā",
 	"vector-more-actions": "Gó-sâ̤"
 }

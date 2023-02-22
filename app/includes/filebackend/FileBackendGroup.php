@@ -21,8 +21,12 @@
  * @ingroup FileBackend
  */
 
+use MediaWiki\Config\ServiceOptions;
+use MediaWiki\FileBackend\FSFile\TempFSFileFactory;
+use MediaWiki\FileBackend\LockManager\LockManagerGroupFactory;
 use MediaWiki\Logger\LoggerFactory;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\MainConfigNames;
+use Wikimedia\ObjectFactory\ObjectFactory;
 
 /**
  * Class to handle file backend registration
@@ -31,46 +35,79 @@ use MediaWiki\MediaWikiServices;
  * @since 1.19
  */
 class FileBackendGroup {
-	/** @var FileBackendGroup */
-	protected static $instance = null;
-
-	/** @var array (name => ('class' => string, 'config' => array, 'instance' => object)) */
+	/**
+	 * @var array[] (name => ('class' => string, 'config' => array, 'instance' => object))
+	 * @phan-var array<string,array{class:class-string,config:array,instance:object}>
+	 */
 	protected $backends = [];
 
-	protected function __construct() {
-	}
+	/** @var ServiceOptions */
+	private $options;
+
+	/** @var BagOStuff */
+	private $srvCache;
+
+	/** @var WANObjectCache */
+	private $wanCache;
+
+	/** @var MimeAnalyzer */
+	private $mimeAnalyzer;
+
+	/** @var LockManagerGroupFactory */
+	private $lmgFactory;
+
+	/** @var TempFSFileFactory */
+	private $tmpFileFactory;
+
+	/** @var ObjectFactory */
+	private $objectFactory;
 
 	/**
-	 * @return FileBackendGroup
+	 * @internal For use by ServiceWiring
 	 */
-	public static function singleton() {
-		if ( self::$instance == null ) {
-			self::$instance = new self();
-			self::$instance->initFromGlobals();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * Destroy the singleton instance
-	 */
-	public static function destroySingleton() {
-		self::$instance = null;
-	}
+	public const CONSTRUCTOR_OPTIONS = [
+		MainConfigNames::DirectoryMode,
+		MainConfigNames::FileBackends,
+		MainConfigNames::ForeignFileRepos,
+		MainConfigNames::LocalFileRepo,
+		'fallbackWikiId',
+	];
 
 	/**
-	 * Register file backends from the global variables
+	 * @param ServiceOptions $options
+	 * @param ConfiguredReadOnlyMode $configuredReadOnlyMode
+	 * @param BagOStuff $srvCache
+	 * @param WANObjectCache $wanCache
+	 * @param MimeAnalyzer $mimeAnalyzer
+	 * @param LockManagerGroupFactory $lmgFactory
+	 * @param TempFSFileFactory $tmpFileFactory
+	 * @param ObjectFactory $objectFactory
 	 */
-	protected function initFromGlobals() {
-		global $wgLocalFileRepo, $wgForeignFileRepos, $wgFileBackends, $wgDirectoryMode;
+	public function __construct(
+		ServiceOptions $options,
+		ConfiguredReadOnlyMode $configuredReadOnlyMode,
+		BagOStuff $srvCache,
+		WANObjectCache $wanCache,
+		MimeAnalyzer $mimeAnalyzer,
+		LockManagerGroupFactory $lmgFactory,
+		TempFSFileFactory $tmpFileFactory,
+		ObjectFactory $objectFactory
+	) {
+		$this->options = $options;
+		$this->srvCache = $srvCache;
+		$this->wanCache = $wanCache;
+		$this->mimeAnalyzer = $mimeAnalyzer;
+		$this->lmgFactory = $lmgFactory;
+		$this->tmpFileFactory = $tmpFileFactory;
+		$this->objectFactory = $objectFactory;
 
 		// Register explicitly defined backends
-		$this->register( $wgFileBackends, wfConfiguredReadOnlyReason() );
+		$this->register( $options->get( MainConfigNames::FileBackends ), $configuredReadOnlyMode->getReason() );
 
 		$autoBackends = [];
 		// Automatically create b/c backends for file repos...
-		$repos = array_merge( $wgForeignFileRepos, [ $wgLocalFileRepo ] );
+		$repos = array_merge(
+			$options->get( MainConfigNames::ForeignFileRepos ), [ $options->get( MainConfigNames::LocalFileRepo ) ] );
 		foreach ( $repos as $info ) {
 			$backendName = $info['backend'];
 			if ( is_object( $backendName ) || isset( $this->backends[$backendName] ) ) {
@@ -82,11 +119,12 @@ class FileBackendGroup {
 			$deletedDir = $info['deletedDir'] ?? false; // deletion disabled
 			$thumbDir = $info['thumbDir'] ?? "{$directory}/thumb";
 			$transcodedDir = $info['transcodedDir'] ?? "{$directory}/transcoded";
+			$lockManager = $info['lockManager'] ?? 'fsLockManager';
 			// Get the FS backend configuration
 			$autoBackends[] = [
 				'name' => $backendName,
 				'class' => FSFileBackend::class,
-				'lockManager' => 'fsLockManager',
+				'lockManager' => $lockManager,
 				'containerPaths' => [
 					"{$repoName}-public" => "{$directory}",
 					"{$repoName}-thumb" => $thumbDir,
@@ -95,12 +133,12 @@ class FileBackendGroup {
 					"{$repoName}-temp" => "{$directory}/temp"
 				],
 				'fileMode' => $info['fileMode'] ?? 0644,
-				'directoryMode' => $wgDirectoryMode,
+				'directoryMode' => $options->get( MainConfigNames::DirectoryMode ),
 			];
 		}
 
 		// Register implicitly defined backends
-		$this->register( $autoBackends, wfConfiguredReadOnlyReason() );
+		$this->register( $autoBackends, $configuredReadOnlyMode->getReason() );
 	}
 
 	/**
@@ -123,28 +161,8 @@ class FileBackendGroup {
 			}
 			$class = $config['class'];
 
-			if ( isset( $config['domainId'] ) ) {
-				$domainId = $config['domainId'];
-			} elseif ( isset( $config['wikiId'] ) ) {
-				$domainId = $config['wikiId']; // b/c
-			} else {
-				// Only use the raw database/prefix for backwards compatibility
-				$ld = WikiMap::getCurrentWikiDbDomain();
-				$domainId = strlen( $ld->getTablePrefix() )
-					? "{$ld->getDatabase()}-{$ld->getTablePrefix()}"
-					: $ld->getDatabase();
-				// If the local wiki ID and local domain ID do not match, probably due to a
-				// non-default schema, issue a warning. A non-default schema indicates that
-				// it might be used to disambiguate different wikis.
-				$wikiId = WikiMap::getWikiIdFromDbDomain( $ld );
-				if ( $ld->getSchema() !== null && $domainId !== $wikiId ) {
-					wfWarn(
-						"\$wgFileBackend entry '$name' should have 'domainId' set.\n" .
-						"Legacy default 'domainId' is '$domainId' but wiki ID is '$wikiId'."
-					);
-				}
-			}
-			$config['domainId'] = $domainId;
+			$config['domainId'] =
+				$config['domainId'] ?? $config['wikiId'] ?? $this->options->get( 'fallbackWikiId' );
 			$config['readOnly'] = $config['readOnly'] ?? $readOnlyReason;
 
 			unset( $config['class'] ); // backend won't need this
@@ -199,7 +217,6 @@ class FileBackendGroup {
 		}
 
 		$config = $this->backends[$name]['config'];
-		$services = MediaWikiServices::getInstance();
 
 		return array_merge(
 			// Default backend parameters
@@ -207,12 +224,12 @@ class FileBackendGroup {
 				'mimeCallback' => [ $this, 'guessMimeInternal' ],
 				'obResetFunc' => 'wfResetOutputBuffers',
 				'streamMimeFunc' => [ StreamFile::class, 'contentTypeFromPath' ],
-				'tmpFileFactory' => $services->getTempFSFileFactory(),
+				'tmpFileFactory' => $this->tmpFileFactory,
 				'statusWrapper' => [ Status::class, 'wrap' ],
-				'wanCache' => $services->getMainWANObjectCache(),
-				'srvCache' => ObjectCache::getLocalServerInstance( 'hash' ),
+				'wanCache' => $this->wanCache,
+				'srvCache' => $this->srvCache,
 				'logger' => LoggerFactory::getInstance( 'FileOperation' ),
-				'profiler' => function ( $section ) {
+				'profiler' => static function ( $section ) {
 					return Profiler::instance()->scopedProfileIn( $section );
 				}
 			],
@@ -222,11 +239,8 @@ class FileBackendGroup {
 			[
 				'class' => $this->backends[$name]['class'],
 				'lockManager' =>
-					LockManagerGroup::singleton( $config['domainId'] )
+					$this->lmgFactory->getLockManagerGroup( $config['domainId'] )
 						->get( $config['lockManager'] ),
-				'fileJournal' => isset( $config['fileJournal'] )
-					? FileJournal::factory( $config['fileJournal'], $name )
-					: FileJournal::factory( [ 'class' => NullFileJournal::class ], $name )
 			]
 		);
 	}
@@ -254,18 +268,16 @@ class FileBackendGroup {
 	 * @since 1.27
 	 */
 	public function guessMimeInternal( $storagePath, $content, $fsPath ) {
-		$magic = MediaWiki\MediaWikiServices::getInstance()->getMimeAnalyzer();
 		// Trust the extension of the storage path (caller must validate)
 		$ext = FileBackend::extensionFromPath( $storagePath );
-		$type = $magic->guessTypesForExtension( $ext );
+		$type = $this->mimeAnalyzer->getMimeTypeFromExtensionOrNull( $ext );
 		// For files without a valid extension (or one at all), inspect the contents
 		if ( !$type && $fsPath ) {
-			$type = $magic->guessMimeType( $fsPath, false );
-		} elseif ( !$type && strlen( $content ) ) {
-			$tmpFile = MediaWikiServices::getInstance()->getTempFSFileFactory()
-				->newTempFSFile( 'mime_', '' );
+			$type = $this->mimeAnalyzer->guessMimeType( $fsPath, false );
+		} elseif ( !$type && $content !== null && $content !== '' ) {
+			$tmpFile = $this->tmpFileFactory->newTempFSFile( 'mime_', '' );
 			file_put_contents( $tmpFile->getPath(), $content );
-			$type = $magic->guessMimeType( $tmpFile->getPath(), false );
+			$type = $this->mimeAnalyzer->guessMimeType( $tmpFile->getPath(), false );
 		}
 		return $type ?: 'unknown/unknown';
 	}

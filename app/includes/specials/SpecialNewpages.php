@@ -21,7 +21,17 @@
  * @ingroup SpecialPage
  */
 
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Cache\LinkBatchFactory;
+use MediaWiki\Content\IContentHandlerFactory;
+use MediaWiki\MainConfigNames;
+use MediaWiki\Permissions\GroupPermissionsLookup;
+use MediaWiki\Revision\MutableRevisionRecord;
+use MediaWiki\Revision\RevisionLookup;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\SlotRecord;
+use MediaWiki\User\UserIdentityValue;
+use MediaWiki\User\UserOptionsLookup;
+use Wikimedia\Rdbms\ILoadBalancer;
 
 /**
  * A special page that list newly created pages
@@ -33,12 +43,64 @@ class SpecialNewpages extends IncludableSpecialPage {
 	 * @var FormOptions
 	 */
 	protected $opts;
+	/** @var array[] */
 	protected $customFilters;
 
 	protected $showNavigation = false;
 
-	public function __construct() {
+	/** @var LinkBatchFactory */
+	private $linkBatchFactory;
+
+	/** @var CommentStore */
+	private $commentStore;
+
+	/** @var IContentHandlerFactory */
+	private $contentHandlerFactory;
+
+	/** @var GroupPermissionsLookup */
+	private $groupPermissionsLookup;
+
+	/** @var ILoadBalancer */
+	private $loadBalancer;
+
+	/** @var RevisionLookup */
+	private $revisionLookup;
+
+	/** @var NamespaceInfo */
+	private $namespaceInfo;
+
+	/** @var UserOptionsLookup */
+	private $userOptionsLookup;
+
+	/**
+	 * @param LinkBatchFactory $linkBatchFactory
+	 * @param CommentStore $commentStore
+	 * @param IContentHandlerFactory $contentHandlerFactory
+	 * @param GroupPermissionsLookup $groupPermissionsLookup
+	 * @param ILoadBalancer $loadBalancer
+	 * @param RevisionLookup $revisionLookup
+	 * @param NamespaceInfo $namespaceInfo
+	 * @param UserOptionsLookup $userOptionsLookup
+	 */
+	public function __construct(
+		LinkBatchFactory $linkBatchFactory,
+		CommentStore $commentStore,
+		IContentHandlerFactory $contentHandlerFactory,
+		GroupPermissionsLookup $groupPermissionsLookup,
+		ILoadBalancer $loadBalancer,
+		RevisionLookup $revisionLookup,
+		NamespaceInfo $namespaceInfo,
+		UserOptionsLookup $userOptionsLookup
+	) {
 		parent::__construct( 'Newpages' );
+		$this->linkBatchFactory = $linkBatchFactory;
+		$this->commentStore = $commentStore;
+		$this->contentHandlerFactory = $contentHandlerFactory;
+		$this->groupPermissionsLookup = $groupPermissionsLookup;
+		$this->loadBalancer = $loadBalancer;
+		$this->revisionLookup = $revisionLookup;
+		$this->namespaceInfo = $namespaceInfo;
+		$this->userOptionsLookup = $userOptionsLookup;
 	}
 
 	/**
@@ -48,10 +110,16 @@ class SpecialNewpages extends IncludableSpecialPage {
 		$opts = new FormOptions();
 		$this->opts = $opts; // bind
 		$opts->add( 'hideliu', false );
-		$opts->add( 'hidepatrolled', $this->getUser()->getBoolOption( 'newpageshidepatrolled' ) );
+		$opts->add(
+			'hidepatrolled',
+			$this->userOptionsLookup->getBoolOption( $this->getUser(), 'newpageshidepatrolled' )
+		);
 		$opts->add( 'hidebots', false );
 		$opts->add( 'hideredirs', true );
-		$opts->add( 'limit', $this->getUser()->getIntOption( 'rclimit' ) );
+		$opts->add(
+			'limit',
+			$this->userOptionsLookup->getIntOption( $this->getUser(), 'rclimit' )
+		);
 		$opts->add( 'offset', '' );
 		$opts->add( 'namespace', '0' );
 		$opts->add( 'username', '' );
@@ -63,7 +131,8 @@ class SpecialNewpages extends IncludableSpecialPage {
 		$opts->add( 'size', 0 );
 
 		$this->customFilters = [];
-		Hooks::run( 'SpecialNewPagesFilters', [ $this, &$this->customFilters ] );
+		$this->getHookRunner()->onSpecialNewPagesFilters( $this, $this->customFilters );
+		// @phan-suppress-next-line PhanEmptyForeach False positive
 		foreach ( $this->customFilters as $key => $params ) {
 			$opts->add( $key, $params['default'] );
 		}
@@ -153,7 +222,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 			$out->setFeedAppendQuery( wfArrayToCgi( $allValues ) );
 		}
 
-		$pager = new NewPagesPager( $this, $this->opts );
+		$pager = $this->getNewPagesPager();
 		$pager->mLimit = $this->opts->getValue( 'limit' );
 		$pager->mOffset = $this->opts->getValue( 'offset' );
 
@@ -176,19 +245,17 @@ class SpecialNewpages extends IncludableSpecialPage {
 
 		// Option value -> message mapping
 		$filters = [
-			'hideliu' => 'rcshowhideliu',
-			'hidepatrolled' => 'rcshowhidepatr',
-			'hidebots' => 'rcshowhidebots',
-			'hideredirs' => 'whatlinkshere-hideredirs'
+			'hideliu' => 'newpages-showhide-registered',
+			'hidepatrolled' => 'newpages-showhide-patrolled',
+			'hidebots' => 'newpages-showhide-bots',
+			'hideredirs' => 'newpages-showhide-redirect'
 		];
 		foreach ( $this->customFilters as $key => $params ) {
 			$filters[$key] = $params['msg'];
 		}
 
 		// Disable some if needed
-		if ( !MediaWikiServices::getInstance()->getPermissionManager()
-				->groupHasPermission( '*', 'createpage' )
-		) {
+		if ( !$this->canAnonymousUsersCreatePages() ) {
 			unset( $filters['hideliu'] );
 		}
 		if ( !$this->getUser()->useNPPatrol() ) {
@@ -267,7 +334,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 			'tagFilter' => [
 				'type' => 'tagfilter',
 				'name' => 'tagfilter',
-				'label-raw' => $this->msg( 'tag-filter' )->parse(),
+				'label-message' => 'tag-filter',
 				'default' => $tagFilterVal,
 			],
 			'username' => [
@@ -281,7 +348,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 			'size' => [
 				'type' => 'sizefilter',
 				'name' => 'size',
-				'default' => -$max * $size,
+				'default' => ( $max ? -1 : 1 ) * $size,
 			],
 		];
 
@@ -298,15 +365,15 @@ class SpecialNewpages extends IncludableSpecialPage {
 			// The form should be visible on each request (inclusive requests with submitted forms), so
 			// return always false here.
 			->setSubmitCallback(
-				function () {
+				static function () {
 					return false;
 				}
 			)
-			->setSubmitText( $this->msg( 'newpages-submit' )->text() )
-			->setWrapperLegend( $this->msg( 'newpages' )->text() )
+			->setSubmitTextMsg( 'newpages-submit' )
+			->setWrapperLegendMsg( 'newpages' )
 			->addFooterText( Html::rawElement(
 				'div',
-				null,
+				[],
 				$this->filterLinks()
 			) )
 			->show();
@@ -316,23 +383,29 @@ class SpecialNewpages extends IncludableSpecialPage {
 	/**
 	 * @param stdClass $result Result row from recent changes
 	 * @param Title $title
-	 * @return bool|Revision
+	 * @return RevisionRecord
 	 */
-	protected function revisionFromRcResult( stdClass $result, Title $title ) {
-		return new Revision( [
-			'comment' => CommentStore::getStore()->getComment( 'rc_comment', $result )->text,
-			'deleted' => $result->rc_deleted,
-			'user_text' => $result->rc_user_text,
-			'user' => $result->rc_user,
-			'actor' => $result->rc_actor,
-		], 0, $title );
+	protected function revisionFromRcResult( stdClass $result, Title $title ): RevisionRecord {
+		$revRecord = new MutableRevisionRecord( $title );
+		$revRecord->setComment(
+			$this->commentStore->getComment( 'rc_comment', $result )
+		);
+		$revRecord->setVisibility( (int)$result->rc_deleted );
+
+		$user = new UserIdentityValue(
+			(int)$result->rc_user,
+			$result->rc_user_text
+		);
+		$revRecord->setUser( $user );
+
+		return $revRecord;
 	}
 
 	/**
 	 * Format a row, providing the timestamp, links to the page/history,
 	 * size, user links, and a comment
 	 *
-	 * @param object $result Result row
+	 * @param stdClass $result Result row
 	 * @return string
 	 */
 	public function formatRow( $result ) {
@@ -340,7 +413,7 @@ class SpecialNewpages extends IncludableSpecialPage {
 
 		// Revision deletion works on revisions,
 		// so cast our recent change row to a revision row.
-		$rev = $this->revisionFromRcResult( $result, $title );
+		$revRecord = $this->revisionFromRcResult( $result, $title );
 
 		$classes = [];
 		$attribs = [ 'data-mw-revid' => $result->rev_id ];
@@ -367,14 +440,25 @@ class SpecialNewpages extends IncludableSpecialPage {
 			[ 'class' => 'mw-newpages-pagename' ],
 			$query
 		);
-		$histLink = $linkRenderer->makeKnownLink(
+		$linkArr = [];
+		$linkArr[] = $linkRenderer->makeKnownLink(
 			$title,
 			$this->msg( 'hist' )->text(),
-			[],
+			[ 'class' => 'mw-newpages-history' ],
 			[ 'action' => 'history' ]
 		);
-		$hist = Html::rawElement( 'span', [ 'class' => 'mw-newpages-history' ],
-			$this->msg( 'parentheses' )->rawParams( $histLink )->escaped() );
+		if ( $this->contentHandlerFactory->getContentHandler( $title->getContentModel() )
+			->supportsDirectEditing()
+		) {
+			$linkArr[] = $linkRenderer->makeKnownLink(
+				$title,
+				$this->msg( 'editlink' )->text(),
+				[ 'class' => 'mw-newpages-edit' ],
+				[ 'action' => 'edit' ]
+			);
+		}
+		$links = $this->msg( 'parentheses' )->rawParams( $this->getLanguage()
+			->pipeList( $linkArr ) )->escaped();
 
 		$length = Html::rawElement(
 			'span',
@@ -384,8 +468,8 @@ class SpecialNewpages extends IncludableSpecialPage {
 			)->escaped()
 		);
 
-		$ulink = Linker::revUserTools( $rev );
-		$comment = Linker::revComment( $rev );
+		$ulink = Linker::revUserTools( $revRecord );
+		$comment = Linker::revComment( $revRecord );
 
 		if ( $this->patrollable( $result ) ) {
 			$classes[] = 'not-patrolled';
@@ -421,27 +505,40 @@ class SpecialNewpages extends IncludableSpecialPage {
 			);
 		}
 
-		$ret = "{$time} {$dm}{$plink} {$hist} {$dm}{$length} {$dm}{$ulink} {$comment} "
+		$ret = "{$time} {$dm}{$plink} {$links} {$dm}{$length} {$dm}{$ulink} {$comment} "
 			. "{$tagDisplay} {$oldTitleText}";
 
 		// Let extensions add data
-		Hooks::run( 'NewPagesLineEnding', [ $this, &$ret, $result, &$classes, &$attribs ] );
+		$this->getHookRunner()->onNewPagesLineEnding(
+			$this, $ret, $result, $classes, $attribs );
 		$attribs = array_filter( $attribs,
 			[ Sanitizer::class, 'isReservedDataAttribute' ],
 			ARRAY_FILTER_USE_KEY
 		);
 
-		if ( count( $classes ) ) {
-			$attribs['class'] = implode( ' ', $classes );
+		if ( $classes ) {
+			$attribs['class'] = $classes;
 		}
 
 		return Html::rawElement( 'li', $attribs, $ret ) . "\n";
 	}
 
+	private function getNewPagesPager() {
+		return new NewPagesPager(
+			$this,
+			$this->groupPermissionsLookup,
+			$this->getHookContainer(),
+			$this->linkBatchFactory,
+			$this->loadBalancer,
+			$this->namespaceInfo,
+			$this->opts
+		);
+	}
+
 	/**
 	 * Should a specific result row provide "patrollable" links?
 	 *
-	 * @param object $result Result row
+	 * @param stdClass $result Result row
 	 * @return bool
 	 */
 	protected function patrollable( $result ) {
@@ -454,13 +551,13 @@ class SpecialNewpages extends IncludableSpecialPage {
 	 * @param string $type
 	 */
 	protected function feed( $type ) {
-		if ( !$this->getConfig()->get( 'Feed' ) ) {
+		if ( !$this->getConfig()->get( MainConfigNames::Feed ) ) {
 			$this->getOutput()->addWikiMsg( 'feed-unavailable' );
 
 			return;
 		}
 
-		$feedClasses = $this->getConfig()->get( 'FeedClasses' );
+		$feedClasses = $this->getConfig()->get( MainConfigNames::FeedClasses );
 		if ( !isset( $feedClasses[$type] ) ) {
 			$this->getOutput()->addWikiMsg( 'feed-invalid' );
 
@@ -473,9 +570,9 @@ class SpecialNewpages extends IncludableSpecialPage {
 			$this->getPageTitle()->getFullURL()
 		);
 
-		$pager = new NewPagesPager( $this, $this->opts );
+		$pager = $this->getNewPagesPager();
 		$limit = $this->opts->getValue( 'limit' );
-		$pager->mLimit = min( $limit, $this->getConfig()->get( 'FeedLimit' ) );
+		$pager->mLimit = min( $limit, $this->getConfig()->get( MainConfigNames::FeedLimit ) );
 
 		$feed->outHeader();
 		if ( $pager->getNumRows() > 0 ) {
@@ -488,8 +585,8 @@ class SpecialNewpages extends IncludableSpecialPage {
 
 	protected function feedTitle() {
 		$desc = $this->getDescription();
-		$code = $this->getConfig()->get( 'LanguageCode' );
-		$sitename = $this->getConfig()->get( 'Sitename' );
+		$code = $this->getConfig()->get( MainConfigNames::LanguageCode );
+		$sitename = $this->getConfig()->get( MainConfigNames::Sitename );
 
 		return "$sitename - $desc [$code]";
 	}
@@ -518,22 +615,31 @@ class SpecialNewpages extends IncludableSpecialPage {
 	}
 
 	protected function feedItemDesc( $row ) {
-		$revision = Revision::newFromId( $row->rev_id );
-		if ( !$revision ) {
+		$revisionRecord = $this->revisionLookup->getRevisionById( $row->rev_id );
+		if ( !$revisionRecord ) {
 			return '';
 		}
 
-		$content = $revision->getContent();
+		$content = $revisionRecord->getContent( SlotRecord::MAIN );
 		if ( $content === null ) {
 			return '';
 		}
 
 		// XXX: include content model/type in feed item?
-		return '<p>' . htmlspecialchars( $revision->getUserText() ) .
+		$revUser = $revisionRecord->getUser();
+		$revUserText = $revUser ? $revUser->getName() : '';
+		$revComment = $revisionRecord->getComment();
+		$revCommentText = $revComment ? $revComment->text : '';
+		return '<p>' . htmlspecialchars( $revUserText ) .
 			$this->msg( 'colon-separator' )->inContentLanguage()->escaped() .
-			htmlspecialchars( FeedItem::stripComment( $revision->getComment() ) ) .
+			htmlspecialchars( FeedItem::stripComment( $revCommentText ) ) .
 			"</p>\n<hr />\n<div>" .
 			nl2br( htmlspecialchars( $content->serialize() ) ) . "</div>";
+	}
+
+	private function canAnonymousUsersCreatePages() {
+		return $this->groupPermissionsLookup->groupHasPermission( '*', 'createpage' ) ||
+			$this->groupPermissionsLookup->groupHasPermission( '*', 'createtalk' );
 	}
 
 	protected function getGroupName() {

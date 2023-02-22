@@ -25,14 +25,22 @@
 
 use MediaWiki\ChangeTags\Taggable;
 use MediaWiki\Linker\LinkTarget;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\PageReference;
 use MediaWiki\User\UserIdentity;
-use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Assert\Assert;
+use Wikimedia\IPUtils;
+use Wikimedia\Rdbms\IDatabase;
 
 /**
  * Class for creating new log entries and inserting them into the database.
  *
+ * @newable
+ * @note marked as newable in 1.35 for lack of a better alternative,
+ *       but should be changed to use the builder pattern or the
+ *       command pattern.
  * @since 1.19
+ * @see https://www.mediawiki.org/wiki/Manual:Logging_to_Special:Log
  */
 class ManualLogEntry extends LogEntryBase implements Taggable {
 	/** @var string Type of log entry */
@@ -47,7 +55,7 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	/** @var array */
 	protected $relations = [];
 
-	/** @var User Performer of the action for the log entry */
+	/** @var UserIdentity Performer of the action for the log entry */
 	protected $performer;
 
 	/** @var Title Target title for the log entry */
@@ -78,9 +86,12 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	protected $legacy = false;
 
 	/**
+	 * @stable to call
 	 * @since 1.19
-	 * @param string $type
-	 * @param string $subtype
+	 * @param string $type Log type. Should match $wgLogTypes.
+	 * @param string $subtype Log subtype (action). Should match $wgLogActions or
+	 *   (together with $type) $wgLogActionsHandlers.
+	 * @note
 	 */
 	public function __construct( $type, $subtype ) {
 		$this->type = $type;
@@ -92,11 +103,18 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	 *
 	 * You can pass params to the log action message by prefixing the keys with
 	 * a number and optional type, using colons to separate the fields. The
-	 * numbering should start with number 4, the first three parameters are
-	 * hardcoded for every message.
+	 * numbering should start with number 4 (matching the $4 message parameter),
+	 * the first three parameters are hardcoded for every message ($1 is a link
+	 * to the username and user talk page of the performing user, $2 is just the
+	 * username (for determining gender), $3 is a link to the target page).
+	 *
+	 * Typically, these parameters will be used in the logentry-<type>-<subtype>
+	 * message, but custom formatters, declared via $wgLogActionsHandlers, can
+	 * override that.
 	 *
 	 * If you want to store stuff that should not be available in messages, don't
-	 * prefix the array key with a number and don't use the colons.
+	 * prefix the array key with a number and don't use the colons. Parameters
+	 * which should be searchable need to be set with setRelations() instead.
 	 *
 	 * Example:
 	 *   $entry->setParameters(
@@ -107,6 +125,8 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	 *
 	 * @since 1.19
 	 * @param array $parameters Associative array
+	 * @see LogFormatter::formatParameterValue for valid parameter types and
+	 *   their meanings
 	 */
 	public function setParameters( $parameters ) {
 		$this->parameters = $parameters;
@@ -130,17 +150,25 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	 * @param UserIdentity $performer
 	 */
 	public function setPerformer( UserIdentity $performer ) {
-		$this->performer = User::newFromIdentity( $performer );
+		$this->performer = $performer;
 	}
 
 	/**
 	 * Set the title of the object changed.
 	 *
+	 * @param LinkTarget|PageReference $target calling with LinkTarget
+	 *   is deprecated since 1.37
 	 * @since 1.19
-	 * @param LinkTarget $target
 	 */
-	public function setTarget( LinkTarget $target ) {
-		$this->target = Title::newFromLinkTarget( $target );
+	public function setTarget( $target ) {
+		if ( $target instanceof PageReference ) {
+			// @phan-suppress-next-line PhanPossiblyNullTypeMismatchProperty castFrom does not return null here
+			$this->target = Title::castFromPageReference( $target );
+		} elseif ( $target instanceof LinkTarget ) {
+			$this->target = Title::newFromLinkTarget( $target );
+		} else {
+			throw new InvalidArgumentException( "Invalid target provided" );
+		}
 	}
 
 	/**
@@ -159,7 +187,7 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	 * @since 1.19
 	 * @param string $comment
 	 */
-	public function setComment( $comment ) {
+	public function setComment( string $comment ) {
 		$this->comment = $comment;
 	}
 
@@ -184,9 +212,11 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	 *
 	 * @since 1.27
 	 * @param string|string[]|null $tags
-	 * @deprecated since 1.33 Please use addTags() instead
+	 * @deprecated since 1.33 Please use addTags() instead.
+	 *  Hard deprecated since 1.39.
 	 */
 	public function setTags( $tags ) {
+		wfDeprecated( __METHOD__, '1.33' );
 		if ( $this->tags ) {
 			wfDebug( 'Overwriting existing ManualLogEntry tags' );
 		}
@@ -253,11 +283,14 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 	 * @throws MWException
 	 */
 	public function insert( IDatabase $dbw = null ) {
-		$dbw = $dbw ?: wfGetDB( DB_MASTER );
+		$dbw = $dbw ?: wfGetDB( DB_PRIMARY );
 
 		if ( $this->timestamp === null ) {
 			$this->timestamp = wfTimestampNow();
 		}
+
+		$actorId = MediaWikiServices::getInstance()->getActorStore()
+			->acquireActorId( $this->getPerformerIdentity(), $dbw );
 
 		// Trim spaces on user supplied text
 		$comment = trim( $this->getComment() );
@@ -276,6 +309,7 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 			'log_type' => $this->getType(),
 			'log_action' => $this->getSubtype(),
 			'log_timestamp' => $dbw->timestamp( $this->getTimestamp() ),
+			'log_actor' => $actorId,
 			'log_namespace' => $this->getTarget()->getNamespace(),
 			'log_title' => $this->getTarget()->getDBkey(),
 			'log_page' => $this->getTarget()->getArticleID(),
@@ -285,8 +319,6 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 			$data['log_deleted'] = $this->deleted;
 		}
 		$data += CommentStore::getStore()->insert( $dbw, 'log_comment', $comment );
-		$data += ActorMigration::newMigration()
-			->getInsertValues( $dbw, 'log_user', $this->getPerformer() );
 
 		$dbw->insert( 'logging', $data, __METHOD__ );
 		$this->id = $dbw->insertId();
@@ -329,12 +361,12 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 		$formatter->setContext( $context );
 
 		$logpage = SpecialPage::getTitleFor( 'Log', $this->getType() );
-		$user = $this->getPerformer();
+		$user = $this->getPerformerIdentity();
 		$ip = "";
-		if ( $user->isAnon() ) {
+		if ( !$user->isRegistered() ) {
 			// "MediaWiki default" and friends may have
 			// no IP address in their name
-			if ( IP::isIPAddress( $user->getName() ) ) {
+			if ( IPUtils::isIPAddress( $user->getName() ) ) {
 				$ip = $user->getName();
 			}
 		}
@@ -384,7 +416,7 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 			function () use ( $newId, $to, $canAddTags ) {
 				$log = new LogPage( $this->getType() );
 				if ( !$log->isRestricted() ) {
-					Hooks::runWithoutAbort( 'ManualLogEntryBeforePublish', [ $this ] );
+					Hooks::runner()->onManualLogEntryBeforePublish( $this );
 					$rc = $this->getRecentChange( $newId );
 
 					if ( $to === 'rc' || $to === 'rcandudp' ) {
@@ -410,26 +442,35 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 				}
 			},
 			DeferredUpdates::POSTSEND,
-			wfGetDB( DB_MASTER )
+			wfGetDB( DB_PRIMARY )
 		);
 	}
 
+	/**
+	 * @return string
+	 */
 	public function getType() {
 		return $this->type;
 	}
 
+	/**
+	 * @return string
+	 */
 	public function getSubtype() {
 		return $this->subtype;
 	}
 
+	/**
+	 * @return array
+	 */
 	public function getParameters() {
 		return $this->parameters;
 	}
 
 	/**
-	 * @return User
+	 * @return UserIdentity
 	 */
-	public function getPerformer() {
+	public function getPerformerIdentity(): UserIdentity {
 		return $this->performer;
 	}
 
@@ -440,12 +481,18 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 		return $this->target;
 	}
 
+	/**
+	 * @return string|false
+	 */
 	public function getTimestamp() {
 		$ts = $this->timestamp ?? wfTimestampNow();
 
 		return wfTimestamp( TS_MW, $ts );
 	}
 
+	/**
+	 * @return string
+	 */
 	public function getComment() {
 		return $this->comment;
 	}
@@ -484,6 +531,9 @@ class ManualLogEntry extends LogEntryBase implements Taggable {
 		return $this->legacy;
 	}
 
+	/**
+	 * @return int
+	 */
 	public function getDeleted() {
 		return (int)$this->deleted;
 	}

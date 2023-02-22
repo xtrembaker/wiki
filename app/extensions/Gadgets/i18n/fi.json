@@ -1,12 +1,13 @@
 {
 	"@metadata": {
 		"authors": [
+			"01miki10",
 			"Crt",
+			"MITO",
 			"Nike",
 			"Olli",
-			"Stryn",
-			"01miki10",
-			"Pyscowicz"
+			"Pyscowicz",
+			"Stryn"
 		]
 	},
 	"gadgets-desc": "Tarjoaa mahdollisuuden käyttäjille ottaa käyttöön [[Special:Gadgets|määritettyjä CSS- ja JavaScript-pienoisohjelmia]] omista [[Special:Preferences#mw-prefsection-gadgets|asetuksistaan]].",
@@ -23,11 +24,13 @@
 	"gadgetusage-default": "Oletus",
 	"gadgets-title": "Pienoisohjelmat",
 	"gadgets-pagetext": "Alla on lista pienoisohjelmista, joita käyttäjät voivat ottaa käyttöön [[Special:Preferences#mw-prefsection-gadgets|asetussivulta]]. Pienoisohjelmat määritetään [[MediaWiki:Gadgets-definition|täältä]].\n\nTämä lista antaa helpon pääsyn järjestelmäviesteihin, jotka sisältävät pienoisohjelmien kuvauksen ja koodin.",
+	"gadgets-editdescription": "Muokkaa kuvausta",
+	"gadgets-viewdescription": "Näytä kuvaus",
 	"gadgets-uses": "Käyttää",
 	"gadgets-required-rights": "Edellyttää {{PLURAL:$2|seuraavaa oikeutta|seuraavia oikeuksia}}:\n\n$1",
 	"gadgets-required-skins": "Saatavilla {{PLURAL:$2|seuraavaan ulkoasuun|seuraaviin ulkoasuihin}}: $1.",
 	"gadgets-default": "Oletusarvoisesti käytössä kaikille.",
-	"gadgets-legacy": "Pienoisohjelmaa ei ole ladattu. Siirry käyttämään ResourceLoaderia. ([https://www.mediawiki.org/wiki/ResourceLoader/Migration_guide_(users) Katso lisää])",
+	"gadgets-legacy": "Pienoisohjelmaa ei ole ladattu. Siirry käyttämään ResourceLoaderia. ([https://www.mediawiki.org/wiki/Special:MyLanguage/ResourceLoader/Migration_guide_(users) Katso lisää])",
 	"gadgets-export": "Vie",
 	"gadgets-export-title": "Pienoisohjelmien vienti",
 	"gadgets-not-found": "Pienoisohjelmaa $1 ei löytynyt.",

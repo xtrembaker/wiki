@@ -13,43 +13,32 @@ class ArrayDiffFormatterTest extends \MediaWikiUnitTestCase {
 	 * @dataProvider provideTestFormat
 	 * @covers ArrayDiffFormatter::format
 	 */
-	public function testFormat( $input, $expectedOutput ) {
+	public function testFormat( Diff $input, array $expectedOutput ) {
 		$instance = new ArrayDiffFormatter();
 		$output = $instance->format( $input );
-		$this->assertEquals( $expectedOutput, $output );
+		$this->assertSame( $expectedOutput, $output );
 	}
 
-	private function getMockDiff( $edits ) {
-		$diff = $this->getMockBuilder( Diff::class )
-			->disableOriginalConstructor()
-			->getMock();
-		$diff->expects( $this->any() )
-			->method( 'getEdits' )
-			->will( $this->returnValue( $edits ) );
+	private function getMockDiff( array $edits ) {
+		$diff = $this->createMock( Diff::class );
+		$diff->method( 'getEdits' )
+			->willReturn( $edits );
 		return $diff;
 	}
 
-	private function getMockDiffOp( $type = null, $orig = [], $closing = [] ) {
-		$diffOp = $this->getMockBuilder( DiffOp::class )
-			->disableOriginalConstructor()
-			->getMock();
-		$diffOp->expects( $this->any() )
-			->method( 'getType' )
-			->will( $this->returnValue( $type ) );
-		$diffOp->expects( $this->any() )
-			->method( 'getOrig' )
-			->will( $this->returnValue( $orig ) );
+	private function getMockDiffOp( string $type, $orig = [], array $closing = [] ) {
+		$diffOp = $this->createMock( DiffOp::class );
+		$diffOp->method( 'getType' )
+			->willReturn( $type );
+		$diffOp->method( 'getOrig' )
+			->willReturn( $orig );
 		if ( $type === 'change' ) {
-			$diffOp->expects( $this->any() )
-				->method( 'getClosing' )
+			$diffOp->method( 'getClosing' )
 				->with( $this->isType( 'integer' ) )
-				->will( $this->returnCallback( function () {
-					return 'mockLine';
-				} ) );
+				->willReturn( 'mockLine' );
 		} else {
-			$diffOp->expects( $this->any() )
-				->method( 'getClosing' )
-				->will( $this->returnValue( $closing ) );
+			$diffOp->method( 'getClosing' )
+				->willReturn( $closing );
 		}
 		return $diffOp;
 	}
@@ -66,40 +55,43 @@ class ArrayDiffFormatterTest extends \MediaWikiUnitTestCase {
 			$this->getMockDiff( [ $this->getMockDiffOp( 'delete', [], [ 'line' ] ) ] ),
 			$this->getMockDiff( [ $this->getMockDiffOp( 'copy', [], [ 'line' ] ) ] ),
 		];
+		foreach ( $emptyArrayTestCases as $testCase ) {
+			yield [ $testCase, [] ];
+		}
 
-		$otherTestCases = [];
-		$otherTestCases[] = [
+		yield [
 			$this->getMockDiff( [ $this->getMockDiffOp( 'add', [], [ 'a1' ] ) ] ),
 			[ [ 'action' => 'add', 'new' => 'a1', 'newline' => 1 ] ],
 		];
-		$otherTestCases[] = [
+		yield [
 			$this->getMockDiff( [ $this->getMockDiffOp( 'add', [], [ 'a1', 'a2' ] ) ] ),
 			[
 				[ 'action' => 'add', 'new' => 'a1', 'newline' => 1 ],
 				[ 'action' => 'add', 'new' => 'a2', 'newline' => 2 ],
 			],
 		];
-		$otherTestCases[] = [
+		yield [
 			$this->getMockDiff( [ $this->getMockDiffOp( 'delete', [ 'd1' ] ) ] ),
 			[ [ 'action' => 'delete', 'old' => 'd1', 'oldline' => 1 ] ],
 		];
-		$otherTestCases[] = [
+		yield [
 			$this->getMockDiff( [ $this->getMockDiffOp( 'delete', [ 'd1', 'd2' ] ) ] ),
 			[
 				[ 'action' => 'delete', 'old' => 'd1', 'oldline' => 1 ],
 				[ 'action' => 'delete', 'old' => 'd2', 'oldline' => 2 ],
 			],
 		];
-		$otherTestCases[] = [
+		yield [
 			$this->getMockDiff( [ $this->getMockDiffOp( 'change', [ 'd1' ], [ 'a1' ] ) ] ),
 			[ [
 				'action' => 'change',
 				'old' => 'd1',
 				'new' => 'mockLine',
-				'newline' => 1, 'oldline' => 1
+				'oldline' => 1,
+				'newline' => 1,
 			] ],
 		];
-		$otherTestCases[] = [
+		yield [
 			$this->getMockDiff( [ $this->getMockDiffOp(
 				'change',
 				[ 'd1', 'd2' ],
@@ -110,25 +102,18 @@ class ArrayDiffFormatterTest extends \MediaWikiUnitTestCase {
 					'action' => 'change',
 					'old' => 'd1',
 					'new' => 'mockLine',
-					'newline' => 1, 'oldline' => 1
+					'oldline' => 1,
+					'newline' => 1,
 				],
 				[
 					'action' => 'change',
 					'old' => 'd2',
 					'new' => 'mockLine',
-					'newline' => 2, 'oldline' => 2
+					'oldline' => 2,
+					'newline' => 2,
 				],
 			],
 		];
-
-		$testCases = [];
-		foreach ( $emptyArrayTestCases as $testCase ) {
-			$testCases[] = [ $testCase, [] ];
-		}
-		foreach ( $otherTestCases as $testCase ) {
-			$testCases[] = [ $testCase[0], $testCase[1] ];
-		}
-		return $testCases;
 	}
 
 }

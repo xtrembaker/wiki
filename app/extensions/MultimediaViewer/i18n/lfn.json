@@ -1,11 +1,10 @@
 {
 	"@metadata": {
 		"authors": [
-			"Robin van der Vliet",
-			"Mafcadio"
+			"Mafcadio",
+			"Robin van der Vliet"
 		]
 	},
-	"multimediaviewer-help-mmv": "Aida",
 	"multimediaviewer-html-embed-credit-link-text": "Lia",
 	"multimediaviewer-small-embed-dimensions": "Peti $1",
 	"multimediaviewer-title-popup-text": "Descrive"

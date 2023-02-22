@@ -1,10 +1,10 @@
-@import 'mediawiki.mixins';
-@import 'mediawiki.ui/variables';
-@import 'mw.rcfilters.variables';
+@import 'mediawiki.mixins.less';
+@import 'mediawiki.ui/variables.less';
+@import 'mw.rcfilters.variables.less';
 
 .mw-rcfilters-ui-itemMenuOptionWidget {
 	padding: 0 0.5em;
-	.box-sizing( border-box );
+	box-sizing: border-box;
 
 	&:not( :last-child ):not( .mw-rcfilters-ui-itemMenuOptionWidget-identifier-talk ) {
 		border-bottom: 1px solid @colorGray14;

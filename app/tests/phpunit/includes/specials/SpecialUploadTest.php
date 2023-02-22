@@ -1,12 +1,15 @@
 <?php
 
-class SpecialUploadTest extends MediaWikiTestCase {
+use MediaWiki\MainConfigNames;
+
+class SpecialUploadTest extends MediaWikiIntegrationTestCase {
 	/**
 	 * @covers SpecialUpload::getInitialPageText
 	 * @dataProvider provideGetInitialPageText
 	 */
 	public function testGetInitialPageText( $expected, $inputParams ) {
-		$result = call_user_func_array( [ 'SpecialUpload', 'getInitialPageText' ], $inputParams );
+		$this->overrideConfigValue( MainConfigNames::LanguageCode, 'en' );
+		$result = SpecialUpload::getInitialPageText( ...$inputParams );
 		$this->assertEquals( $expected, $result );
 	}
 

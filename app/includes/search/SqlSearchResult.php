@@ -1,5 +1,4 @@
 <?php
-
 /**
  * Search engine result issued from SearchData search engines.
  *
@@ -22,12 +21,14 @@
  * @ingroup Search
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+
 class SqlSearchResult extends RevisionSearchResult {
 	/** @var string[] */
 	private $terms;
 
 	/**
-	 * SqlSearchResult constructor.
 	 * @param Title $title
 	 * @param string[] $terms list of parsed terms
 	 */
@@ -37,7 +38,7 @@ class SqlSearchResult extends RevisionSearchResult {
 	}
 
 	/**
-	 * return string[]
+	 * @return string[]
 	 */
 	public function getTermMatches(): array {
 		return $this->terms;
@@ -47,13 +48,14 @@ class SqlSearchResult extends RevisionSearchResult {
 	 * @param array $terms Terms to highlight (this parameter is deprecated)
 	 * @return string Highlighted text snippet, null (and not '') if not supported
 	 */
-	function getTextSnippet( $terms = [] ) {
-		global $wgAdvancedSearchHighlighting;
+	public function getTextSnippet( $terms = [] ) {
+		$advancedSearchHighlighting = MediaWikiServices::getInstance()
+			->getMainConfig()->get( MainConfigNames::AdvancedSearchHighlighting );
 		$this->initText();
 
 		$h = new SearchHighlighter();
 		if ( count( $this->terms ) > 0 ) {
-			if ( $wgAdvancedSearchHighlighting ) {
+			if ( $advancedSearchHighlighting ) {
 				return $h->highlightText( $this->mText, $this->terms );
 			} else {
 				return $h->highlightSimple( $this->mText, $this->terms );

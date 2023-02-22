@@ -25,6 +25,9 @@
 			icon: 'alert',
 			framed: false,
 			popup: {
+				// This popup is always "visible", but hidden using CSS. OOUI event handlers that try to
+				// close it interfere with other things on the page. (T309093)
+				autoClose: false,
 				classes: [ 'mediawiki-filewarning' ],
 				padded: true,
 				width: 400,
@@ -35,7 +38,8 @@
 	function loadMessage( $target, message ) {
 		if ( message ) {
 			$target.removeClass( 'empty' )
-				.text( mw.message( message ).text() );
+				// eslint-disable-next-line mediawiki/msg-doc
+				.text( mw.msg( message ) );
 		}
 	}
 

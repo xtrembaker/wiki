@@ -42,12 +42,14 @@
 		/**
 		 * Whether this user has ever opened the metadata panel.
 		 * Based on a localstorage flag; will be set to true if the client does not support localstorage.
+		 *
 		 * @type {boolean}
 		 */
 		this.hasOpenedMetadata = undefined;
 
 		/**
 		 * Whether we've already fired an animation for the metadata div in this lightbox session.
+		 *
 		 * @property {boolean}
 		 * @private
 		 */
@@ -65,9 +67,9 @@
 			panel.keydown( e );
 		} );
 
-		$( window ).on( 'scroll.mmvp', $.throttle( 250, function () {
+		$( window ).on( 'scroll.mmvp', mw.util.throttle( function () {
 			panel.scroll();
-		} ) );
+		}, 250 ) );
 
 		this.$container.on( 'mmv-metadata-open', function () {
 			if ( !panel.hasOpenedMetadata && panel.localStorage.store ) {
@@ -183,7 +185,6 @@
 		if ( scrollTopTarget === scrollTop ) {
 			return $.Deferred().resolve().promise();
 		} else {
-			mw.mmv.actionLogger.log( direction === 'up' ? 'metadata-open' : 'metadata-close' );
 			if ( direction === 'up' && !panelIsOpen ) {
 				// FIXME nasty. This is not really an event but a command sent to the metadata panel;
 				// child UI elements should not send commands to their parents. However, there is no way
@@ -237,13 +238,8 @@
 
 		if ( panelIsOpen && !this.panelWasOpen ) { // just opened
 			this.$container.trigger( 'mmv-metadata-open' );
-			// This will include keyboard- and mouseclick-initiated open events as well,
-			// since the panel is anomated, which counts as scrolling.
-			// Filtering these seems too much trouble to be worth it.
-			mw.mmv.actionLogger.log( 'metadata-scroll-open' );
 		} else if ( !panelIsOpen && this.panelWasOpen ) { // just closed
 			this.$container.trigger( 'mmv-metadata-close' );
-			mw.mmv.actionLogger.log( 'metadata-scroll-close' );
 		}
 		this.panelWasOpen = panelIsOpen;
 	};

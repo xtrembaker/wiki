@@ -141,7 +141,7 @@ class CompressOld extends Maintenance {
 	private function compressOldPages( $start = 0, $extdb = '' ) {
 		$chunksize = 50;
 		$this->output( "Starting from old_id $start...\n" );
-		$dbw = $this->getDB( DB_MASTER );
+		$dbw = $this->getDB( DB_PRIMARY );
 		do {
 			$res = $dbw->select(
 				'text',
@@ -182,7 +182,7 @@ class CompressOld extends Maintenance {
 			# print "Already compressed row {$row->old_id}\n";
 			return false;
 		}
-		$dbw = $this->getDB( DB_MASTER );
+		$dbw = $this->getDB( DB_PRIMARY );
 		$flags = $row->old_flags ? "{$row->old_flags},gzip" : "gzip";
 		$compress = gzdeflate( $row->old_text );
 
@@ -223,15 +223,12 @@ class CompressOld extends Maintenance {
 	 * @param string $extdb
 	 * @param bool|int $maxPageId
 	 * @return bool
-	 * @suppress PhanTypeInvalidDimOffset
 	 */
 	private function compressWithConcat( $startId, $maxChunkSize, $beginDate,
 		$endDate, $extdb = "", $maxPageId = false
 	) {
-		global $wgMultiContentRevisionSchemaMigrationStage;
-
 		$dbr = $this->getDB( DB_REPLICA );
-		$dbw = $this->getDB( DB_MASTER );
+		$dbw = $this->getDB( DB_PRIMARY );
 
 		# Set up external storage
 		if ( $extdb != '' ) {
@@ -239,7 +236,7 @@ class CompressOld extends Maintenance {
 			/** @var ExternalStoreDB $storeObj */
 			$storeObj = $esFactory->getStore( 'DB' );
 		}
-		// @phan-suppress-next-line PhanAccessMethodInternal
+
 		$blobStore = MediaWikiServices::getInstance()
 			->getBlobStoreFactory()
 			->newSqlBlobStore();
@@ -290,20 +287,15 @@ class CompressOld extends Maintenance {
 			$conds[] = "rev_timestamp<'" . $endDate . "'";
 		}
 
-		if ( $wgMultiContentRevisionSchemaMigrationStage & SCHEMA_COMPAT_READ_OLD ) {
-			$tables = [ 'revision', 'text' ];
-			$conds[] = 'rev_text_id=old_id';
-		} else {
-			$slotRoleStore = MediaWikiServices::getInstance()->getSlotRoleStore();
-			$tables = [ 'revision', 'slots', 'content', 'text' ];
-			$conds = array_merge( [
-				'rev_id=slot_revision_id',
-				'slot_role_id=' . $slotRoleStore->getId( SlotRecord::MAIN ),
-				'content_id=slot_content_id',
-				'SUBSTRING(content_address, 1, 3)=' . $dbr->addQuotes( 'tt:' ),
-				'SUBSTRING(content_address, 4)=old_id',
-			], $conds );
-		}
+		$slotRoleStore = MediaWikiServices::getInstance()->getSlotRoleStore();
+		$tables = [ 'revision', 'slots', 'content', 'text' ];
+		$conds = array_merge( [
+			'rev_id=slot_revision_id',
+			'slot_role_id=' . $slotRoleStore->getId( SlotRecord::MAIN ),
+			'content_id=slot_content_id',
+			'SUBSTRING(content_address, 1, 3)=' . $dbr->addQuotes( 'tt:' ),
+			'SUBSTRING(content_address, 4)=old_id',
+		], $conds );
 
 		$fields = [ 'rev_id', 'old_id', 'old_flags', 'old_text' ];
 		$revLoadOptions = 'FOR UPDATE';
@@ -313,8 +305,10 @@ class CompressOld extends Maintenance {
 		# $tables[] = 'page';
 		# $conds[] = 'page_id=rev_page AND rev_id != page_latest';
 
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+
 		for ( $pageId = $startId; $pageId <= $maxPageId; $pageId++ ) {
-			wfWaitForSlaves();
+			$lbFactory->waitForReplication();
 
 			# Wake up
 			$dbr->ping();
@@ -326,7 +320,7 @@ class CompressOld extends Maintenance {
 			if ( $pageRes->numRows() == 0 ) {
 				continue;
 			}
-			$pageRow = $dbr->fetchObject( $pageRes );
+			$pageRow = $pageRes->fetchObject();
 
 			# Display progress
 			$titleObj = Title::makeTitle( $pageRow->page_namespace, $pageRow->page_title );
@@ -339,7 +333,7 @@ class CompressOld extends Maintenance {
 					# Don't operate on the current revision
 					# Use < instead of <> in case the current revision has changed
 					# since the page select, which wasn't locking
-					'rev_id < ' . $pageRow->page_latest
+					'rev_id < ' . (int)$pageRow->page_latest
 				], $conds ),
 				__METHOD__,
 				$revLoadOptions
@@ -411,6 +405,7 @@ class CompressOld extends Maintenance {
 				if ( $usedChunk ) {
 					if ( $extdb != "" ) {
 						# Move blob objects to External Storage
+						// @phan-suppress-next-line PhanPossiblyUndeclaredVariable storeObj is set when used
 						$stored = $storeObj->store( $extdb, serialize( $chunk ) );
 						if ( $stored === false ) {
 							$this->error( "Unable to store object" );
@@ -430,7 +425,8 @@ class CompressOld extends Maintenance {
 									'old_flags' => 'external,utf-8',
 								], [ /* WHERE */
 									'old_id' => $stub->getReferrer(),
-								]
+								],
+								__METHOD__
 							);
 						}
 					} else {
@@ -441,7 +437,8 @@ class CompressOld extends Maintenance {
 								'old_flags' => 'object,utf-8',
 							], [ /* WHERE */
 								'old_id' => $primaryOldid
-							]
+							],
+							__METHOD__
 						);
 
 						# Store the stub objects
@@ -454,7 +451,8 @@ class CompressOld extends Maintenance {
 										'old_flags' => 'object,utf-8',
 									], [ /* WHERE */
 										'old_id' => $revs[$i + $j]->old_id
-									]
+									],
+									__METHOD__
 								);
 							}
 						}

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Phan\Language\FQSEN;
 
-use Phan\Language\FQSEN;
-
 /**
  * This trait allows an FQSEN to have an alternate ID for when
  * there are multiple colliding definitions of the same name.
@@ -70,18 +68,15 @@ trait Alternatives
     /**
      * @return static
      * A FQSEN with the given alternate_id set
-     * @suppress PhanTypeMismatchDeclaredReturn (static vs FQSEN)
      */
     abstract public function withAlternateId(
         int $alternate_id
-    ): FQSEN;
+    );
 
     /**
      * @return static
      * Get the canonical (non-alternate) FQSEN associated
      * with this FQSEN
-     *
-     * @suppress PhanTypeMismatchReturn (Alternatives is a trait, cannot directly implement the FQSEN interface. Related to #800)
      */
     public function getCanonicalFQSEN()
     {

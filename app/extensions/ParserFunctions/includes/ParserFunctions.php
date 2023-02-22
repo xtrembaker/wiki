@@ -1,12 +1,12 @@
 <?php
 
-namespace MediaWiki\Extensions\ParserFunctions;
+namespace MediaWiki\Extension\ParserFunctions;
 
 use DateTime;
 use DateTimeZone;
 use Exception;
+use ILanguageConverter;
 use Language;
-use LinkCache;
 use MediaWiki\MediaWikiServices;
 use MWTimestamp;
 use Parser;
@@ -28,7 +28,7 @@ class ParserFunctions {
 	private static $mTimeChars = 0;
 
 	/** ~10 seconds */
-	const MAX_TIME_CHARS = 6000;
+	private const MAX_TIME_CHARS = 6000;
 
 	/**
 	 * Register ParserClearState hook.
@@ -39,7 +39,7 @@ class ParserFunctions {
 		static $done = false;
 		if ( !$done ) {
 			global $wgHooks;
-			$wgHooks['ParserClearState'][] = function () {
+			$wgHooks['ParserClearState'][] = static function () {
 				self::$mTimeChars = 0;
 			};
 			$done = true;
@@ -80,7 +80,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function ifexpr( Parser $parser, PPFrame $frame, array $args ) {
@@ -112,7 +112,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function if( Parser $parser, PPFrame $frame, array $args ) {
@@ -131,7 +131,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function ifeq( Parser $parser, PPFrame $frame, array $args ) {
@@ -157,7 +157,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function iferror( Parser $parser, PPFrame $frame, array $args ) {
@@ -194,7 +194,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function switch( Parser $parser, PPFrame $frame, array $args ) {
@@ -248,7 +248,7 @@ class ParserFunctions {
 		# Check if the last item had no = sign, thus specifying the default case
 		if ( $lastItemHadNoEquals ) {
 			return $lastItem;
-		} elseif ( !is_null( $default ) ) {
+		} elseif ( $default !== null ) {
 			return trim( $frame->expand( $default ) );
 		} else {
 			return '';
@@ -331,16 +331,17 @@ class ParserFunctions {
 	 * @param Parser $parser
 	 * @param PPFrame $frame
 	 * @param string $titletext
-	 * @param string $then
-	 * @param string $else
+	 * @param PPNode|string|null $then
+	 * @param PPNode|string|null $else
 	 *
-	 * @return string
+	 * @return PPNode|string|null
 	 */
 	private static function ifexistInternal(
 		Parser $parser, PPFrame $frame, $titletext = '', $then = '', $else = ''
 	) {
 		$title = Title::newFromText( $titletext );
-		$parser->getContentLanguage()->findVariantLink( $titletext, $title, true );
+		self::getLanguageConverter( $parser->getContentLanguage() )
+			->findVariantLink( $titletext, $title, true );
 		if ( $title ) {
 			if ( $title->getNamespace() === NS_MEDIA ) {
 				/* If namespace is specified as NS_MEDIA, then we want to
@@ -349,11 +350,13 @@ class ParserFunctions {
 				if ( !$parser->incrementExpensiveFunctionCount() ) {
 					return $else;
 				}
-				$file = wfFindFile( $title );
+				$file = MediaWikiServices::getInstance()->getRepoGroup()->findFile( $title );
 				if ( !$file ) {
+					$parser->getOutput()->addImage(
+						$title->getDBKey(), false, false );
 					return $else;
 				}
-				$parser->mOutput->addImage(
+				$parser->getOutput()->addImage(
 					$file->getName(), $file->getTimestamp(), $file->getSha1() );
 				return $file->exists() ? $then : $else;
 			} elseif ( $title->isSpecialPage() ) {
@@ -371,20 +374,20 @@ class ParserFunctions {
 				return $else;
 			} else {
 				$pdbk = $title->getPrefixedDBkey();
-				$lc = LinkCache::singleton();
+				$lc = MediaWikiServices::getInstance()->getLinkCache();
 				$id = $lc->getGoodLinkID( $pdbk );
 				if ( $id !== 0 ) {
-					$parser->mOutput->addLink( $title, $id );
+					$parser->getOutput()->addLink( $title, $id );
 					return $then;
 				} elseif ( $lc->isBadLink( $pdbk ) ) {
-					$parser->mOutput->addLink( $title, 0 );
+					$parser->getOutput()->addLink( $title, 0 );
 					return $else;
 				}
 				if ( !$parser->incrementExpensiveFunctionCount() ) {
 					return $else;
 				}
 				$id = $title->getArticleID();
-				$parser->mOutput->addLink( $title, $id );
+				$parser->getOutput()->addLink( $title, $id );
 
 				// bug 70495: don't just check whether the ID != 0
 				if ( $title->exists() ) {
@@ -402,7 +405,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function ifexist( Parser $parser, PPFrame $frame, array $args ) {
@@ -542,7 +545,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function time( Parser $parser, PPFrame $frame, array $args ) {
@@ -563,7 +566,7 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param PPFrame $frame
-	 * @param array $args
+	 * @param PPNode[] $args
 	 * @return string
 	 */
 	public static function localTime( Parser $parser, PPFrame $frame, array $args ) {
@@ -581,8 +584,8 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser Parent parser
 	 * @param string $title Title to split
-	 * @param int $parts Number of parts to keep
-	 * @param int $offset Offset starting at 1
+	 * @param string|int $parts Number of parts to keep
+	 * @param string|int $offset Offset starting at 1
 	 * @return string
 	 */
 	public static function titleparts( Parser $parser, $title = '', $parts = 0, $offset = 0 ) {
@@ -652,8 +655,8 @@ class ParserFunctions {
 	 * Note: If the needle is not found, empty string is returned.
 	 * @param Parser $parser
 	 * @param string $inStr
-	 * @param int|string $inNeedle
-	 * @param int $inOffset
+	 * @param string $inNeedle
+	 * @param string|int $inOffset
 	 * @return int|string
 	 */
 	public static function runPos( Parser $parser, $inStr = '', $inNeedle = '', $inOffset = 0 ) {
@@ -686,7 +689,7 @@ class ParserFunctions {
 	 * Note: If the needle is not found, -1 is returned.
 	 * @param Parser $parser
 	 * @param string $inStr
-	 * @param int|string $inNeedle
+	 * @param string $inNeedle
 	 * @return int|string
 	 */
 	public static function runRPos( Parser $parser, $inStr = '', $inNeedle = '' ) {
@@ -724,8 +727,8 @@ class ParserFunctions {
 	 *
 	 * @param Parser $parser
 	 * @param string $inStr
-	 * @param int $inStart
-	 * @param int $inLength
+	 * @param string|int $inStart
+	 * @param string|int $inLength
 	 * @return string
 	 */
 	public static function runSub( Parser $parser, $inStr = '', $inStart = 0, $inLength = 0 ) {
@@ -787,8 +790,8 @@ class ParserFunctions {
 	 * @param string $inStr
 	 * @param string $inReplaceFrom
 	 * @param string $inReplaceTo
-	 * @param int $inLimit
-	 * @return mixed|string
+	 * @param string|int $inLimit
+	 * @return string
 	 */
 	public static function runReplace( Parser $parser, $inStr = '',
 			$inReplaceFrom = '', $inReplaceTo = '', $inLimit = -1 ) {
@@ -850,8 +853,8 @@ class ParserFunctions {
 	 * @param Parser $parser
 	 * @param string $inStr
 	 * @param string $inDiv
-	 * @param int $inPos
-	 * @param int|null $inLim
+	 * @param string|int $inPos
+	 * @param string|null $inLim
 	 * @return string
 	 */
 	public static function runExplode(
@@ -871,7 +874,7 @@ class ParserFunctions {
 
 		$inDiv = preg_quote( $inDiv, '/' );
 
-		$matches = preg_split( '/' . $inDiv . '/u', $inStr, $inLim );
+		$matches = preg_split( '/' . $inDiv . '/u', $inStr, (int)$inLim );
 
 		if ( $inPos >= 0 && isset( $matches[$inPos] ) ) {
 			$result = $matches[$inPos];
@@ -910,7 +913,7 @@ class ParserFunctions {
 	 *
 	 * @param PPNode|string $obj Thing to expand
 	 * @param PPFrame $frame
-	 * @param string &$trimExpanded Expanded and trimmed version of PPNode,
+	 * @param string|null &$trimExpanded Expanded and trimmed version of PPNode,
 	 *   but with char refs intact
 	 * @return string The trimmed, expanded and entity reference decoded version of the PPNode
 	 */
@@ -918,5 +921,16 @@ class ParserFunctions {
 		$expanded = $frame->expand( $obj );
 		$trimExpanded = trim( $expanded );
 		return trim( Sanitizer::decodeCharReferences( $expanded ) );
+	}
+
+	/**
+	 * @since 1.35
+	 * @param Language $language
+	 * @return ILanguageConverter
+	 */
+	private static function getLanguageConverter( Language $language ): ILanguageConverter {
+		return MediaWikiServices::getInstance()
+			->getLanguageConverterFactory()
+			->getLanguageConverter( $language );
 	}
 }

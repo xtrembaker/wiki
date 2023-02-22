@@ -19,6 +19,8 @@
  * @file
  */
 
+use Wikimedia\ParamValidator\ParamValidator;
+
 /**
  * @ingroup API
  * @since 1.25
@@ -27,35 +29,47 @@ class ApiManageTags extends ApiBase {
 
 	public function execute() {
 		$params = $this->extractRequestParams();
-		$user = $this->getUser();
+		$authority = $this->getAuthority();
 
 		// make sure the user is allowed
 		if ( $params['operation'] !== 'delete'
-			&& !$this->getPermissionManager()->userHasRight( $user, 'managechangetags' )
+			&& !$authority->isAllowed( 'managechangetags' )
 		) {
 			$this->dieWithError( 'tags-manage-no-permission', 'permissiondenied' );
-		} elseif ( !$this->getPermissionManager()->userHasRight( $user, 'deletechangetags' ) ) {
+		} elseif ( !$authority->isAllowed( 'deletechangetags' ) ) {
 			$this->dieWithError( 'tags-delete-no-permission', 'permissiondenied' );
 		}
 
 		// Check if user can add the log entry tags which were requested
 		if ( $params['tags'] ) {
-			$ableToTag = ChangeTags::canAddTagsAccompanyingChange( $params['tags'], $user );
+			$ableToTag = ChangeTags::canAddTagsAccompanyingChange( $params['tags'], $authority );
 			if ( !$ableToTag->isOK() ) {
 				$this->dieStatus( $ableToTag );
 			}
 		}
 
 		$result = $this->getResult();
-		$funcName = "{$params['operation']}TagWithChecks";
-		$status = ChangeTags::$funcName(
-			$params['tag'],
-			$params['reason'],
-			$user,
-			$params['ignorewarnings'],
-			$params['tags'] ?: []
-		);
-
+		$tag = $params['tag'];
+		$reason = $params['reason'];
+		$ignoreWarnings = $params['ignorewarnings'];
+		$tags = $params['tags'] ?: [];
+		switch ( $params['operation'] ) {
+			case 'create':
+				$status = ChangeTags::createTagWithChecks( $tag, $reason, $authority, $ignoreWarnings, $tags );
+				break;
+			case 'delete':
+				$status = ChangeTags::deleteTagWithChecks( $tag, $reason, $authority, $ignoreWarnings, $tags );
+				break;
+			case 'activate':
+				$status = ChangeTags::activateTagWithChecks( $tag, $reason, $authority, $ignoreWarnings, $tags );
+				break;
+			case 'deactivate':
+				$status = ChangeTags::deactivateTagWithChecks( $tag, $reason, $authority, $ignoreWarnings, $tags );
+				break;
+			default:
+				// unreachable
+				throw new UnexpectedValueException( 'invalid operation' );
+		}
 		if ( !$status->isOK() ) {
 			$this->dieStatus( $status );
 		}
@@ -86,23 +100,24 @@ class ApiManageTags extends ApiBase {
 	public function getAllowedParams() {
 		return [
 			'operation' => [
-				ApiBase::PARAM_TYPE => [ 'create', 'delete', 'activate', 'deactivate' ],
-				ApiBase::PARAM_REQUIRED => true,
+				ParamValidator::PARAM_TYPE => [ 'create', 'delete', 'activate', 'deactivate' ],
+				ParamValidator::PARAM_REQUIRED => true,
 			],
 			'tag' => [
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true,
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_REQUIRED => true,
 			],
 			'reason' => [
-				ApiBase::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_DEFAULT => '',
 			],
 			'ignorewarnings' => [
-				ApiBase::PARAM_TYPE => 'boolean',
-				ApiBase::PARAM_DFLT => false,
+				ParamValidator::PARAM_TYPE => 'boolean',
+				ParamValidator::PARAM_DEFAULT => false,
 			],
 			'tags' => [
-				ApiBase::PARAM_TYPE => 'tags',
-				ApiBase::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_TYPE => 'tags',
+				ParamValidator::PARAM_ISMULTI => true,
 			],
 		];
 	}

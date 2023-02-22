@@ -22,12 +22,11 @@
  */
 
 use MediaWiki\MediaWikiServices;
-use MediaWiki\Revision\RevisionRecord;
 use MediaWiki\Shell\Shell;
 
 if ( !defined( 'MEDIAWIKI' ) ) {
 	$optionsWithoutArgs = [ 'fix' ];
-	require_once __DIR__ . '/../commandLine.inc';
+	require_once __DIR__ . '/../CommandLineInc.php';
 
 	$cs = new CheckStorage;
 	$fix = isset( $options['fix'] );
@@ -44,7 +43,7 @@ if ( !defined( 'MEDIAWIKI' ) ) {
  * @ingroup Maintenance ExternalStorage
  */
 class CheckStorage {
-	const CONCAT_HEADER = 'O:27:"concatenatedgziphistoryblob"';
+	private const CONCAT_HEADER = 'O:27:"concatenatedgziphistoryblob"';
 	public $oldIdMap, $errors;
 	/** @var ExternalStoreDB */
 	public $dbStore = null;
@@ -57,9 +56,7 @@ class CheckStorage {
 		'fixable' => 'Errors which would already be fixed if --fix was specified',
 	];
 
-	function check( $fix = false, $xml = '' ) {
-		global $wgMultiContentRevisionSchemaMigrationStage;
-
+	public function check( $fix = false, $xml = '' ) {
 		$dbr = wfGetDB( DB_REPLICA );
 		if ( $fix ) {
 			print "Checking, will fix errors if possible...\n";
@@ -87,36 +84,24 @@ class CheckStorage {
 			$dbr->ping();
 
 			// Fetch revision rows
-			if ( $wgMultiContentRevisionSchemaMigrationStage & SCHEMA_COMPAT_READ_OLD ) {
-				$res = $dbr->select( 'revision', [ 'rev_id', 'rev_text_id' ],
-					[ "rev_id BETWEEN $chunkStart AND $chunkEnd" ], __METHOD__ );
-				foreach ( $res as $row ) {
-					if ( !isset( $this->oldIdMap[ $row->rev_text_id ] ) ) {
-						$this->oldIdMap[ $row->rev_text_id ] = [ $row->rev_id ];
-					} elseif ( !in_array( $row->rev_id, $this->oldIdMap[ $row->rev_text_id ] ) ) {
-						$this->oldIdMap[ $row->rev_text_id ][] = $row->rev_id;
-					}
-				}
-			} else {
-				$res = $dbr->select(
-					[ 'slots', 'content' ],
-					[ 'slot_revision_id', 'content_address' ],
-					[ "slot_revision_id BETWEEN $chunkStart AND $chunkEnd" ],
-					__METHOD__,
-					[],
-					[ 'content' => [ 'INNER JOIN', [ 'content_id = slot_content_id' ] ] ]
-				);
-				/** @var \MediaWiki\Storage\SqlBlobStore $blobStore */
-				$blobStore = MediaWikiServices::getInstance()->getBlobStore();
-				'@phan-var \MediaWiki\Storage\SqlBlobStore $blobStore';
-				foreach ( $res as $row ) {
-					$textId = $blobStore->getTextIdFromAddress( $row->content_address );
-					if ( $textId ) {
-						if ( !isset( $this->oldIdMap[$textId] ) ) {
-							$this->oldIdMap[ $textId ] = [ $row->slot_revision_id ];
-						} elseif ( !in_array( $row->slot_revision_id, $this->oldIdMap[$textId] ) ) {
-							$this->oldIdMap[ $textId ][] = $row->slot_revision_id;
-						}
+			$res = $dbr->select(
+				[ 'slots', 'content' ],
+				[ 'slot_revision_id', 'content_address' ],
+				[ "slot_revision_id BETWEEN $chunkStart AND $chunkEnd" ],
+				__METHOD__,
+				[],
+				[ 'content' => [ 'INNER JOIN', [ 'content_id = slot_content_id' ] ] ]
+			);
+			/** @var \MediaWiki\Storage\SqlBlobStore $blobStore */
+			$blobStore = MediaWikiServices::getInstance()->getBlobStore();
+			'@phan-var \MediaWiki\Storage\SqlBlobStore $blobStore';
+			foreach ( $res as $row ) {
+				$textId = $blobStore->getTextIdFromAddress( $row->content_address );
+				if ( $textId ) {
+					if ( !isset( $this->oldIdMap[$textId] ) ) {
+						$this->oldIdMap[ $textId ] = [ $row->slot_revision_id ];
+					} elseif ( !in_array( $row->slot_revision_id, $this->oldIdMap[$textId] ) ) {
+						$this->oldIdMap[ $textId ][] = $row->slot_revision_id;
 					}
 				}
 			}
@@ -143,7 +128,7 @@ class CheckStorage {
 				$id = $row->old_id;
 
 				// Create flagStats row if it doesn't exist
-				$flagStats = $flagStats + [ $flags => 0 ];
+				$flagStats += [ $flags => 0 ];
 				// Increment counter
 				$flagStats[$flags]++;
 
@@ -168,7 +153,7 @@ class CheckStorage {
 					// It's safe to just erase the old_flags field
 					if ( $fix ) {
 						$this->addError( 'fixed', "Warning: old_flags set to 0", $id );
-						$dbw = wfGetDB( DB_MASTER );
+						$dbw = wfGetDB( DB_PRIMARY );
 						$dbw->ping();
 						$dbw->update( 'text', [ 'old_flags' => '' ],
 							[ 'old_id' => $id ], __METHOD__ );
@@ -226,7 +211,7 @@ class CheckStorage {
 
 			// Check external normal blobs for existence
 			if ( count( $externalNormalBlobs ) ) {
-				if ( is_null( $this->dbStore ) ) {
+				if ( $this->dbStore === null ) {
 					$esFactory = MediaWikiServices::getInstance()->getExternalStoreFactory();
 					$this->dbStore = $esFactory->getStore( 'DB' );
 				}
@@ -282,7 +267,7 @@ class CheckStorage {
 						continue;
 					}
 
-					$objectStats = $objectStats + [ $className => 0 ];
+					$objectStats += [ $className => 0 ];
 					$objectStats[$className]++;
 
 					switch ( $className ) {
@@ -301,7 +286,7 @@ class CheckStorage {
 								break;
 							}
 							if ( $className == 'historyblobstub' ) {
-								$concatBlobs[$stubObj->mOldId][] = $oldId;
+								$concatBlobs[$stubObj->getLocation()][] = $oldId;
 							} else {
 								$curIds[$stubObj->mCurId][] = $oldId;
 							}
@@ -359,7 +344,7 @@ class CheckStorage {
 							"Error: Incorrect object header for concat bulk row {$row->old_id}",
 							$concatBlobs[$row->old_id]
 						);
-					} # else good
+					}
 
 					unset( $concatBlobs[$row->old_id] );
 				}
@@ -398,7 +383,7 @@ class CheckStorage {
 		}
 	}
 
-	function addError( $type, $msg, $ids ) {
+	private function addError( $type, $msg, $ids ) {
 		if ( is_array( $ids ) && count( $ids ) == 1 ) {
 			$ids = reset( $ids );
 		}
@@ -418,15 +403,15 @@ class CheckStorage {
 				print "$msg in old_id $id, revisions " . implode( ', ', $revIds ) . "\n";
 			}
 		}
-		$this->errors[$type] = $this->errors[$type] + array_flip( $revIds );
+		$this->errors[$type] += array_fill_keys( $revIds, true );
 	}
 
-	function checkExternalConcatBlobs( $externalConcatBlobs ) {
+	private function checkExternalConcatBlobs( $externalConcatBlobs ) {
 		if ( !count( $externalConcatBlobs ) ) {
 			return;
 		}
 
-		if ( is_null( $this->dbStore ) ) {
+		if ( $this->dbStore === null ) {
 			$esFactory = MediaWikiServices::getInstance()->getExternalStoreFactory();
 			$this->dbStore = $esFactory->getStore( 'DB' );
 		}
@@ -463,7 +448,7 @@ class CheckStorage {
 		}
 	}
 
-	function restoreText( $revIds, $xml ) {
+	private function restoreText( $revIds, $xml ) {
 		global $wgDBname;
 		$tmpDir = wfTempDir();
 
@@ -508,25 +493,27 @@ class CheckStorage {
 		}
 
 		$dbr = wfGetDB( DB_REPLICA );
-		$dbw = wfGetDB( DB_MASTER );
+		$dbw = wfGetDB( DB_PRIMARY );
 		$dbr->ping();
 		$dbw->ping();
 
 		$source = new ImportStreamSource( $file );
-		$importer = new WikiImporter(
-			$source,
-			MediaWikiServices::getInstance()->getMainConfig()
-		);
+		$importer = MediaWikiServices::getInstance()
+			->getWikiImporterFactory()
+			->getWikiImporter( $source );
 		$importer->setRevisionCallback( [ $this, 'importRevision' ] );
-		$importer->setNoticeCallback( function ( $msg, $params ) {
+		$importer->setNoticeCallback( static function ( $msg, $params ) {
 			echo wfMessage( $msg, $params )->text() . "\n";
 		} );
 		$importer->doImport();
 	}
 
-	function importRevision( &$revision, &$importer ) {
+	/**
+	 * @param WikiRevision $revision
+	 */
+	public function importRevision( $revision ) {
 		$id = $revision->getID();
-		$content = $revision->getContent( RevisionRecord::RAW );
+		$content = $revision->getContent();
 		$id = $id ?: '';
 
 		if ( $content === null ) {
@@ -556,24 +543,19 @@ class CheckStorage {
 
 		// Find text row again
 		$dbr = wfGetDB( DB_REPLICA );
-		global $wgMultiContentRevisionSchemaMigrationStage;
-		if ( $wgMultiContentRevisionSchemaMigrationStage & SCHEMA_COMPAT_READ_OLD ) {
-			$oldId = $dbr->selectField( 'revision', 'rev_text_id', [ 'rev_id' => $id ], __METHOD__ );
-		} else {
-			$res = $dbr->selectRow(
-				[ 'slots', 'content' ],
-				[ 'content_address' ],
-				[ 'slot_revision_id' => $id ],
-				__METHOD__,
-				[],
-				[ 'content' => [ 'INNER JOIN', [ 'content_id = slot_content_id' ] ] ]
-			);
-			// @phan-suppress-next-line PhanAccessMethodInternal
-			$blobStore = MediaWikiServices::getInstance()
-				->getBlobStoreFactory()
-				->newSqlBlobStore();
-			$oldId = $blobStore->getTextIdFromAddress( $res->content_address );
-		}
+		$res = $dbr->selectRow(
+			[ 'slots', 'content' ],
+			[ 'content_address' ],
+			[ 'slot_revision_id' => $id ],
+			__METHOD__,
+			[],
+			[ 'content' => [ 'INNER JOIN', [ 'content_id = slot_content_id' ] ] ]
+		);
+
+		$blobStore = MediaWikiServices::getInstance()
+			->getBlobStoreFactory()
+			->newSqlBlobStore();
+		$oldId = $blobStore->getTextIdFromAddress( $res->content_address );
 
 		if ( !$oldId ) {
 			echo "Missing revision row for rev_id $id\n";
@@ -581,10 +563,10 @@ class CheckStorage {
 		}
 
 		// Compress the text
-		$flags = Revision::compressRevisionText( $text );
+		$flags = $blobStore->compressData( $text );
 
 		// Update the text row
-		$dbw = wfGetDB( DB_MASTER );
+		$dbw = wfGetDB( DB_PRIMARY );
 		$dbw->update( 'text',
 			[ 'old_flags' => $flags, 'old_text' => $text ],
 			[ 'old_id' => $oldId ],

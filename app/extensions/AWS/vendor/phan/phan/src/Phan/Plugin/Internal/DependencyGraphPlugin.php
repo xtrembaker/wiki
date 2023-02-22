@@ -22,8 +22,10 @@ use Throwable;
 /**
  * This plugin only works correctly with Phan -j1
  * see tool/pdep for an intelligent wrapper for it
+ *
+ * @phan-file-suppress PhanPluginRemoveDebugAny outputting is deliberate
  */
-class DependencyGraphPlugin extends PluginV3 implements
+final class DependencyGraphPlugin extends PluginV3 implements
     AnalyzeClassCapability,
     PostAnalyzeNodeCapability,
     FinalizeProcessCapability
@@ -55,6 +57,12 @@ class DependencyGraphPlugin extends PluginV3 implements
     public static $static_vars = [];
 
     /**
+     * A list of instantiations observed by this plugin
+     * @var list<array<string,array<string,string>>>
+     */
+    public static $instantiations = [];
+
+    /**
      * Build <filename>:<lineno> string
      */
     private static function getFileString(FileRef $file_ref): string
@@ -74,8 +82,12 @@ class DependencyGraphPlugin extends PluginV3 implements
         return [\substr($file_string, 0, $idx), (int)\substr($file_string, $idx + 1)];
     }
 
-    /** Build file<->class mappings */
-    public function analyzeClass(CodeBase $unused_code_base, Clazz $class): void
+    /**
+     * Build file<->class mappings
+     *
+     * @unused-param $code_base
+     */
+    public function analyzeClass(CodeBase $code_base, Clazz $class): void
     {
         $this->elements[] = $class;
         $cnode = (string)$class->getFQSEN()->getCanonicalFQSEN();
@@ -202,8 +214,10 @@ class DependencyGraphPlugin extends PluginV3 implements
 
     /**
      * Build the actual class and file graphs
+     *
+     * @unused-param $code_base
      */
-    public function finalizeProcess(CodeBase $unused_code_base): void
+    public function finalizeProcess(CodeBase $code_base): void
     {
         if (empty($this->elements)) {
             \fwrite(\STDERR, "Nothing to analyze - please run pdep from your top-level project directory" . \PHP_EOL);
@@ -230,13 +244,13 @@ class DependencyGraphPlugin extends PluginV3 implements
             }
             $refs = $element->getReferenceList();
             foreach ($refs as $ref) {
-                $depNode = $ref->getFile();
+                $dep_node = $ref->getFile();
                 if (empty($this->file_to_class[self::getFileString($ref)])) {
                     continue;
                 }
-                $cdepNode = $this->file_to_class[self::getFileString($ref)];
-                $this->fgraph[$fnode][$depNode] = $ctype . ':' . $ref->getLineNumberStart();
-                $this->cgraph[$cnode][$cdepNode] = $ctype . ':' . $ref->getLineNumberStart();
+                $cdep_node = $this->file_to_class[self::getFileString($ref)];
+                $this->fgraph[$fnode][$dep_node] = $ctype . ':' . $ref->getLineNumberStart();
+                $this->cgraph[$cnode][$cdep_node] = $ctype . ':' . $ref->getLineNumberStart();
             }
         }
 
@@ -268,6 +282,22 @@ class DependencyGraphPlugin extends PluginV3 implements
                 $this->cgraph[$cnode][$c[$cnode]['class']] = 'v:' . $c[$cnode]['lineno'];
             }
         }
+
+        if (!($flags & \PDEP_IGNORE_NEW)) {
+            foreach (self::$instantiations as $c) {
+                $cnode = \key($c);
+                if ($cnode === null) {
+                    continue;
+                }
+                if (!\array_key_exists($cnode, $this->class_to_file)) {
+                    continue;
+                }
+                $fnode = self::getFileLineno($this->class_to_file["$cnode"])[0];
+                $this->fgraph[$fnode][$c[$cnode]['file']]  = 'i:' . $c[$cnode]['lineno'];
+                $this->cgraph[$cnode][$c[$cnode]['class']] = 'i:' . $c[$cnode]['lineno'];
+            }
+        }
+
         $this->processGraph();
     }
 
@@ -369,11 +399,19 @@ class DependencyGraphPlugin extends PluginV3 implements
             // Don't overlap stdout with the progress bar on stderr.
             \fwrite(\STDERR, "\n");
         }
-        if (($flags & \PDEP_IGNORE_STATIC) && $cached_graph) {
-            foreach ($graph as $node => $els) {
-                foreach ($els as $el => $val) {
-                    if (\substr((string)$val, 0, 2) === 'v:' || \substr((string)$val, 0, 2) === 's:') {
-                        unset($graph[$node][$el]);
+        if ($cached_graph) {
+            $ignore_static = $flags & \PDEP_IGNORE_STATIC;
+            $ignore_new = $flags & \PDEP_IGNORE_NEW;
+            if ($ignore_static || $ignore_new) {
+                foreach ($graph as $node => $els) {
+                    foreach ($els as $el => $val) {
+                        $s = \substr((string)$val, 0, 2);
+                        if ($ignore_static && ($s === 'v:' || $s  === 's:')) {
+                            unset($graph[$node][$el]);
+                        }
+                        if ($ignore_new && $s === 'i:') {
+                            unset($graph[$node][$el]);
+                        }
                     }
                 }
             }
@@ -411,12 +449,12 @@ class DependencyGraphPlugin extends PluginV3 implements
         $shapes = '';
         $shape_defined = [];
         echo "strict digraph $title {\nrankdir=RL\nsplines=ortho\n";
-        foreach ($graph as $node => $depNode) {
+        foreach ($graph as $node => $dep_node) {
             if (empty($shape_defined[$node])) {
                 $shapes .= "\"$node\" [shape=box]\n";
                 $shape_defined[$node] = true;
             }
-            foreach ($depNode as $dnode => $val) {
+            foreach ($dep_node as $dnode => $val) {
                 [$type,$lineno] = self::getFileLineno((string)$val);
                 $style = '';
                 if ($type === 's') {
@@ -424,6 +462,9 @@ class DependencyGraphPlugin extends PluginV3 implements
                 }
                 if ($type === 'v') {
                     $style = ',color="#5D3A9B",style=dashed';
+                }
+                if ($type === 'i') {
+                    $style = ',color="#008080"';
                 }
                 echo "\"$dnode\" -> \"$node\" [taillabel=$lineno,labelfontsize=10,labeldistance=1.4{$style}]\n";
                 if (empty($shape_defined[$dnode])) {
@@ -449,7 +490,7 @@ class DependencyGraphPlugin extends PluginV3 implements
         echo "strict digraph $title {\nrankdir=RL\nsplines=ortho\n";
         $shapes = '';
         $shape_defined = [];
-        foreach ($graph as $node => $depNode) {
+        foreach ($graph as $node => $dep_node) {
             if (empty($shape_defined[$node])) {
                 $shape = "";
                 switch ($this->ctype[$node]) {
@@ -470,7 +511,7 @@ class DependencyGraphPlugin extends PluginV3 implements
                     $shape_defined[$node] = true;
                 }
             }
-            foreach ($depNode as $dnode => $val) {
+            foreach ($dep_node as $dnode => $val) {
                 [$dnode] = \explode(',', $dnode);
                 $type = self::getFileLineno((string)$val)[0];
                 $style = '';
@@ -559,7 +600,7 @@ class DependencyGraphPlugin extends PluginV3 implements
         $node_id = 0;
 
         // Nodes
-        foreach ($graph as $node => $depNode) {
+        foreach ($graph as $node => $dep_node) {
             $node_name = \trim($node, "\\");
             $col = '#FFFFFF';
             $ntype = 'class';
@@ -592,7 +633,7 @@ class DependencyGraphPlugin extends PluginV3 implements
             echo '    </node>' . \PHP_EOL;
 
             // Edges
-            foreach ($depNode as $dnode => $val) {
+            foreach ($dep_node as $dnode => $val) {
                 $ecol = '#000000';
                 [$type,$lineno] = self::getFileLineno((string)$val);
                 [$dnode] = \explode(',', $dnode);
@@ -660,7 +701,7 @@ class DependencyGraphVisitor extends PluginAwarePostAnalysisVisitor
         }
         $called_class_name = (string)$called_class->children['name'];
         // None of these add any dependency data we don't already have, so ignore them
-        if (\in_array($called_class_name, ['self', 'parent', 'class', 'static'], true)) {
+        if (\in_array(\strtolower($called_class_name), ['self', 'parent', 'class', 'static'], true)) {
             return;
         }
         $fqsen = (string)FullyQualifiedClassName::fromStringInContext($called_class_name, $context);
@@ -687,11 +728,39 @@ class DependencyGraphVisitor extends PluginAwarePostAnalysisVisitor
             return;
         }
         $called_class_name = (string)$called_class->children['name'];
-        if (\in_array($called_class_name, ['self', 'parent', 'class', 'static'], true)) {
+        if (\in_array(\strtolower($called_class_name), ['self', 'parent', 'class', 'static'], true)) {
             return;
         }
         $fqsen = (string)FullyQualifiedClassName::fromStringInContext($called_class_name, $context);
         DependencyGraphPlugin::$static_calls[] = [$fqsen => ['class' => (string)$class_fqsen,'file' => $context->getFile(),'lineno' => $context->getLineNumberStart()]];
+    }
+
+    /**
+     * When we hit an AST_NEW
+     * @throws Exception
+     */
+    public function visitNew(Node $node): void
+    {
+        $context = $this->context;
+        try {
+            $class_fqsen = $context->getClassFQSEN();
+        } catch (Throwable $unused_e) {
+            return;
+        }
+        if ($context->isInGlobalScope()) {
+            return;
+        }
+        $called_class = $node->children['class'];
+        if (!isset($called_class->children['name'])) {
+            return;
+        }
+        $called_class_name = (string)$called_class->children['name'];
+        // None of these add any dependency data we don't already have, so ignore them
+        if (\in_array(\strtolower($called_class_name), ['self', 'parent', 'class', 'static'], true)) {
+            return;
+        }
+        $fqsen = (string)FullyQualifiedClassName::fromStringInContext($called_class_name, $context);
+        DependencyGraphPlugin::$instantiations[] = [$fqsen => ['class' => (string)$class_fqsen,'file' => $context->getFile(),'lineno' => $context->getLineNumberStart()]];
     }
 }
 

@@ -27,15 +27,11 @@
  * @group TestsWithNoNeedForAwsCredentials
  * @covers AmazonS3CompatTools
  */
-class AmazonS3CompatToolsTest extends MediaWikiTestCase {
+class AmazonS3CompatToolsTest extends MediaWikiIntegrationTestCase {
 	/**
 	 * @covers AmazonS3CompatTools::isPublicWiki()
 	 */
 	public function testIsPublicWiki() {
-		if ( !method_exists( $this, 'setGroupPermissions' ) ) { // MediaWiki 1.27 (deprecated)
-			$this->markTestSkipped( 'Test skipped: not supported in MediaWiki 1.27' );
-		}
-
 		$this->setGroupPermissions( '*', 'read', false );
 		$this->assertFalse( AmazonS3CompatTools::isPublicWiki() );
 

@@ -23,6 +23,8 @@
 
 /**
  * Compact stacked vertical format for forms.
+ *
+ * @stable to extend
  */
 class VFormHTMLForm extends HTMLForm {
 	/**
@@ -112,10 +114,7 @@ class VFormHTMLForm extends HTMLForm {
 		}
 
 		if ( $this->mShowCancel ) {
-			$target = $this->mCancelTarget ?: Title::newMainPage();
-			if ( $target instanceof Title ) {
-				$target = $target->getLocalURL();
-			}
+			$target = $this->getCancelTargetURL();
 			$buttons .= Html::element(
 					'a',
 					[
@@ -133,7 +132,9 @@ class VFormHTMLForm extends HTMLForm {
 				'value' => $button['value']
 			];
 
+			// @phan-suppress-next-line PhanTypePossiblyInvalidDimOffset Always set in HTMLForm::addButton
 			if ( $button['attribs'] ) {
+				// @phan-suppress-next-line PhanTypePossiblyInvalidDimOffset Always set in HTMLForm::addButton
 				$attrs += $button['attribs'];
 			}
 

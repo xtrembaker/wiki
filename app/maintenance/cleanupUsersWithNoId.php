@@ -21,6 +21,7 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Rdbms\IDatabase;
 
 require_once __DIR__ . '/Maintenance.php';
@@ -94,7 +95,7 @@ class CleanupUsersWithNoId extends LoggedUpdateMaintenance {
 	 * Calculate a "next" condition and progress display string
 	 * @param IDatabase $dbw
 	 * @param string[] $indexFields Fields in the index being ordered by
-	 * @param object $row Database row
+	 * @param stdClass $row Database row
 	 * @return string[] [ string $next, string $display ]
 	 */
 	private function makeNextCond( $dbw, $indexFields, $row ) {
@@ -131,28 +132,33 @@ class CleanupUsersWithNoId extends LoggedUpdateMaintenance {
 			return;
 		}
 
-		$primaryKey = (array)$primaryKey;
-		$pkFilter = array_flip( $primaryKey );
-		$this->output(
-			"Beginning cleanup of $table\n"
-		);
+		$dbw = $this->getDB( DB_PRIMARY );
+		if ( !$dbw->fieldExists( $table, $idField, __METHOD__ ) ||
+			!$dbw->fieldExists( $table, $nameField, __METHOD__ )
+		) {
+			$this->output( "Skipping $table, fields $idField and/or $nameField do not exist\n" );
+			return;
+		}
 
-		$dbw = $this->getDB( DB_MASTER );
+		$primaryKey = (array)$primaryKey;
+		$pkFilter = array_fill_keys( $primaryKey, true );
+		$this->output( "Beginning cleanup of $table\n" );
+
 		$next = '1=1';
 		$countAssigned = 0;
 		$countPrefixed = 0;
+		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
+		$userNameUtils = MediaWikiServices::getInstance()->getUserNameUtils();
 		while ( true ) {
 			// Fetch the rows needing update
-			$res = $dbw->select(
-				$table,
-				array_merge( $primaryKey, [ $idField, $nameField ], $orderby ),
-				array_merge( $conds, [ $next ] ),
-				__METHOD__,
-				[
-					'ORDER BY' => $orderby,
-					'LIMIT' => $this->mBatchSize,
-				]
-			);
+			$res = $dbw->newSelectQueryBuilder()
+				->select( array_merge( $primaryKey, [ $idField, $nameField ], $orderby ) )
+				->from( $table )
+				->where( array_merge( $conds, [ $next ] ) )
+				->orderBy( $orderby )
+				->limit( $this->mBatchSize )
+				->caller( __METHOD__ )
+				->fetchResultSet();
 			if ( !$res->numRows() ) {
 				break;
 			}
@@ -160,7 +166,7 @@ class CleanupUsersWithNoId extends LoggedUpdateMaintenance {
 			// Update the existing rows
 			foreach ( $res as $row ) {
 				$name = $row->$nameField;
-				if ( $row->$idField || !User::isUsableName( $name ) ) {
+				if ( $row->$idField || !$userNameUtils->isUsable( $name ) ) {
 					continue;
 				}
 
@@ -171,7 +177,7 @@ class CleanupUsersWithNoId extends LoggedUpdateMaintenance {
 						// See if any extension wants to create it.
 						if ( !isset( $this->triedCreations[$name] ) ) {
 							$this->triedCreations[$name] = true;
-							if ( !Hooks::run( 'ImportHandleUnknownUser', [ $name ] ) ) {
+							if ( !$this->getHookRunner()->onImportHandleUnknownUser( $name ) ) {
 								$id = User::idFromName( $name, User::READ_LATEST );
 							}
 						}
@@ -197,9 +203,10 @@ class CleanupUsersWithNoId extends LoggedUpdateMaintenance {
 				$counter += $dbw->affectedRows();
 			}
 
+			// @phan-suppress-next-line PhanTypeMismatchArgumentNullable,PhanPossiblyUndeclaredVariable row is set
 			list( $next, $display ) = $this->makeNextCond( $dbw, $orderby, $row );
 			$this->output( "... $display\n" );
-			wfWaitForSlaves();
+			$lbFactory->waitForReplication();
 		}
 
 		$this->output(

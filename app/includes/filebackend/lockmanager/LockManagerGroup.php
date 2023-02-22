@@ -20,9 +20,7 @@
  * @file
  * @ingroup LockManager
  */
-use MediaWiki\MediaWikiServices;
 use MediaWiki\Logger\LoggerFactory;
-use Wikimedia\Rdbms\LBFactory;
 
 /**
  * Class to handle file lock manager registration
@@ -34,9 +32,6 @@ class LockManagerGroup {
 	/** @var string domain (usually wiki ID) */
 	protected $domain;
 
-	/** @var LBFactory */
-	protected $lbFactory;
-
 	/** @var array Array of (name => ('class' => ..., 'config' => ..., 'instance' => ...)) */
 	protected $managers = [];
 
@@ -45,11 +40,9 @@ class LockManagerGroup {
 	 *
 	 * @param string $domain Domain (usually wiki ID)
 	 * @param array[] $lockManagerConfigs In format of $wgLockManagers
-	 * @param LBFactory $lbFactory
 	 */
-	public function __construct( $domain, array $lockManagerConfigs, LBFactory $lbFactory ) {
+	public function __construct( $domain, array $lockManagerConfigs ) {
 		$this->domain = $domain;
-		$this->lbFactory = $lbFactory;
 
 		foreach ( $lockManagerConfigs as $config ) {
 			$config['domain'] = $this->domain;
@@ -68,26 +61,6 @@ class LockManagerGroup {
 				'instance' => null
 			];
 		}
-	}
-
-	/**
-	 * @deprecated since 1.34, use LockManagerGroupFactory
-	 *
-	 * @param bool|string $domain Domain (usually wiki ID). Default: false.
-	 * @return LockManagerGroup
-	 */
-	public static function singleton( $domain = false ) {
-		return MediaWikiServices::getInstance()->getLockManagerGroupFactory()
-			->getLockManagerGroup( $domain );
-	}
-
-	/**
-	 * Destroy the singleton instances
-	 *
-	 * @deprecated since 1.34, use resetServiceForTesting() on LockManagerGroupFactory
-	 */
-	public static function destroySingletons() {
-		MediaWikiServices::getInstance()->resetServiceForTesting( 'LockManagerGroupFactory' );
 	}
 
 	/**
@@ -134,11 +107,13 @@ class LockManagerGroup {
 	 * Get the default lock manager configured for the site.
 	 * Returns NullLockManager if no lock manager could be found.
 	 *
-	 * XXX This looks unused, should we just get rid of it?
-	 *
+	 * @codeCoverageIgnore
+	 * @deprecated since 1.35, seemingly unused, just call get() and catch any exception instead
 	 * @return LockManager
 	 */
 	public function getDefault() {
+		wfDeprecated( __METHOD__, '1.35' );
+
 		return isset( $this->managers['default'] )
 			? $this->get( 'default' )
 			: new NullLockManager( [] );
@@ -149,12 +124,14 @@ class LockManagerGroup {
 	 * or at least some other effective configured lock manager.
 	 * Throws an exception if no lock manager could be found.
 	 *
-	 * XXX This looks unused, should we just get rid of it?
-	 *
+	 * @codeCoverageIgnore
+	 * @deprecated since 1.35, seemingly unused, just call get() and catch any exception instead
 	 * @return LockManager
 	 * @throws Exception
 	 */
 	public function getAny() {
+		wfDeprecated( __METHOD__, '1.35' );
+
 		return isset( $this->managers['default'] )
 			? $this->get( 'default' )
 			: $this->get( 'fsLockManager' );

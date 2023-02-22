@@ -26,15 +26,27 @@
 
 use Wikimedia\Rdbms\IResultWrapper;
 
+/**
+ * @newable
+ * @note marked as newable in 1.35 for lack of a better alternative,
+ *       but should probably become part of the TitleFactory service.
+ */
 class TitleArrayFromResult extends TitleArray implements Countable {
 	/** @var IResultWrapper */
 	public $res;
 
+	/** @var int */
 	public $key;
 
+	/** @var Title|false */
 	public $current;
 
-	function __construct( $res ) {
+	/**
+	 * @stable to call
+	 *
+	 * @param IResultWrapper $res
+	 */
+	public function __construct( $res ) {
 		$this->res = $res;
 		$this->key = 0;
 		$this->setCurrent( $this->res->current() );
@@ -55,25 +67,25 @@ class TitleArrayFromResult extends TitleArray implements Countable {
 	/**
 	 * @return int
 	 */
-	public function count() {
+	public function count(): int {
 		return $this->res->numRows();
 	}
 
-	function current() {
+	public function current(): Title {
 		return $this->current;
 	}
 
-	function key() {
+	public function key(): int {
 		return $this->key;
 	}
 
-	function next() {
-		$row = $this->res->next();
+	public function next(): void {
+		$row = $this->res->fetchObject();
 		$this->setCurrent( $row );
 		$this->key++;
 	}
 
-	function rewind() {
+	public function rewind(): void {
 		$this->res->rewind();
 		$this->key = 0;
 		$this->setCurrent( $this->res->current() );
@@ -82,7 +94,7 @@ class TitleArrayFromResult extends TitleArray implements Countable {
 	/**
 	 * @return bool
 	 */
-	function valid() {
+	public function valid(): bool {
 		return $this->current !== false;
 	}
 }

@@ -1,5 +1,7 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+
 /**
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -32,9 +34,7 @@ class MediaWikiSiteTest extends SiteTest {
 	 * @covers MediaWikiSite::normalizePageName
 	 */
 	public function testNormalizePageTitle() {
-		$this->setMwGlobals( [
-			'wgCapitalLinks' => true,
-		] );
+		$this->overrideConfigValue( MainConfigNames::CapitalLinks, true );
 
 		$site = new MediaWikiSite();
 		$site->setGlobalId( 'enwiki' );
@@ -103,7 +103,7 @@ class MediaWikiSiteTest extends SiteTest {
 		$site = new MediaWikiSite();
 		$site->setLinkPath( $path );
 
-		$this->assertContains( $path, $site->getPageUrl() );
-		$this->assertContains( $expected, $site->getPageUrl( $page ) );
+		$this->assertStringContainsString( $path, $site->getPageUrl() );
+		$this->assertStringContainsString( $expected, $site->getPageUrl( $page ) );
 	}
 }
