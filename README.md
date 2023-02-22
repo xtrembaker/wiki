@@ -1,8 +1,14 @@
 # Installation
 
 ## PHP package requirement:
-- imagemagick
-- php7.3-imagick
+- php8.1-mbstring
+- php8.1-xml
+- php8.1-imagick
+- php8.1-intl
+- php8.1-curl
+
+How to install those package:
+`sudo apt install {packageName}`
 
 ## How to find installed version
 
@@ -13,7 +19,7 @@ http://{domainName}/index.php/Spécial:Version
 Composer is not installed by default in the Mediawiki container, despite Mediawiki's using composer since the version 1.25.
 
 To install composer, you first need to know which composer version should be installed according to your Mediawiki version.
-Please find more information about composer'version need to be installed [here](https://www.mediawiki.org/wiki/Composer)
+Please find more information about composer's version need to be installed [here](https://www.mediawiki.org/wiki/Composer)
 
 Mediawiki <= 1.35.1 => composer v1
 Mediawiki >= 1.35.2 => composer v2
@@ -38,6 +44,7 @@ Run those command once the docker started:
 # Deployment
 
 WARNING !! The production file has never been done, so the PRODUCTION IS the STAGING
+WARNING !! While restarting apache2, sudo mode is required, so this part is not working and should be done manually (make sure to comment it in `config/deploy.rb` before deploying)
 
 Steps:
 - Make sure you’ve pushed the branch
@@ -89,7 +96,7 @@ Steps to follow:
 - Put the freshly downloaded backup into `docker/local/db`. Just put the .sql.gz file, Mediawiki will automatically unzip it when starting docker.
 - Follow the section "Utiliser les paquets d’archives" sur cette [page](https://www.mediawiki.org/wiki/Manual:Upgrading/fr), et lisez bien les différents points qui peuvent suivre cette partie
 - Don’t forget to copy [custom files](#custom-files) 
-- In the docker-compose.yml file, rename `app` co `app-version`, and upgrade the `image: mediawiki:{version}`
+- In the docker-compose.yml file, modify the volume named `app` to `app-{version}`, and upgrade the `image: mediawiki:{version}`
 - Start docker using `docker compose up` (without the detach mode it’s easier to see if any error occurred)
 - Go inside the docker running `docker compose exec mediawiki bash`
 - Install [required library](#installing-required-library) inside the docker

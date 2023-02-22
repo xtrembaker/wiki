@@ -13,13 +13,7 @@ services:
       - database
     volumes:
       - images:/var/www/html/images
-      # After initial setup, download LocalSettings.php to the same directory as
-      # this yaml and uncomment the following line and use compose to restart
-      # the mediawiki service
-      - ./app/vendor:/var/www/html/vendor
-      - ./app/extensions:/var/www/html/extensions
-      - ./app/LocalSettings.php:/var/www/html/LocalSettings.php
-      - ./app/.env:/var/www/html/.env
+      - ./app:/var/www/html
     networks:
       - wiki
 
