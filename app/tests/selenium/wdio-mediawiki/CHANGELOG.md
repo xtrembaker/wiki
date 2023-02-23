@@ -1,3 +1,44 @@
+## 2.2.0 / 2022-07-29
+
+* selenium: Default to larger window size (T314115)
+
+## 2.1.0 / 2022-05-19
+
+* Use @wdio/spec-reporter.
+
+## 2.0.0 / 2022-01-11
+
+The wdio-mediawiki library now requires WebdriverIO async mode.
+
+* Util: Added `getMWApiResponse()` and `isTargetNotWikitext()`.
+* CreateAccountPage: Added initial version.
+
+## 1.2.0 / 2021-01-11
+
+* Set default configuration to retry tests in a spec file once upon failure
+
+## 1.1.1 / 2021-05-26
+
+* Fix `Cannot find module 'dotenv'`.
+
+## 1.1.0 / 2021-05-21
+
+* Api: Update mwbot to version 2.0, as returned by `api.bot()`.
+* Added new `wdio-defaults.conf.js` entrypoint.
+* index: Changed `saveScreenshot()` filenames to use an ISO-formatted timestamp.
+
+## 1.0.0 / 2019-11-05
+
+The wdio-mediawiki library now requires webdriverio 5 and Node 10 (or later).
+
+* The global `username` and `password` config keys have been renamed to
+  `mwUser` and `mwPwd`. These are used as the defaults for `Api` and `LoginPage`
+  methods that require user credentials.
+* Api: The `api.edit()` and `api.delete()` methods were removed as they encouraged
+  an anti-pattern where each user action was preceded by its own API login sequence.
+  Use the `bot.edit()` and `bot.delete()` methods directly instead, and re-use the
+  `bot` object where possible. See [README](./README.md) for a usage example.
+
 ## 0.5.0 / 2019-09-18
 
 * Api: Added `bot()` method.

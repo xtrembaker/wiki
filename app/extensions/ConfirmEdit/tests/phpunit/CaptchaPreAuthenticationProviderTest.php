@@ -2,14 +2,24 @@
 
 use MediaWiki\Auth\AuthManager;
 use MediaWiki\Auth\UsernameAuthenticationRequest;
+use MediaWiki\Extension\ConfirmEdit\Auth\CaptchaAuthenticationRequest;
+use MediaWiki\Extension\ConfirmEdit\Auth\CaptchaPreAuthenticationProvider;
+use MediaWiki\Extension\ConfirmEdit\Hooks;
+use MediaWiki\Extension\ConfirmEdit\SimpleCaptcha\SimpleCaptcha;
+use MediaWiki\Extension\ConfirmEdit\Store\CaptchaHashStore;
+use MediaWiki\Extension\ConfirmEdit\Store\CaptchaStore;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Tests\Unit\Auth\AuthenticationProviderTestTrait;
 use Wikimedia\TestingAccessWrapper;
 
 /**
- * @covers CaptchaPreAuthenticationProvider
+ * @covers \MediaWiki\Extension\ConfirmEdit\Auth\CaptchaPreAuthenticationProvider
  * @group Database
  */
-class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
-	public function setUp() {
+class CaptchaPreAuthenticationProviderTest extends MediaWikiIntegrationTestCase {
+	use AuthenticationProviderTestTrait;
+
+	public function setUp(): void {
 		parent::setUp();
 		$this->setMwGlobals( [
 			'wgCaptchaClass' => SimpleCaptcha::class,
@@ -20,18 +30,17 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 		] );
 		CaptchaStore::unsetInstanceForTests();
 		CaptchaStore::get()->clearAll();
-		$services = \MediaWiki\MediaWikiServices::getInstance();
+		$services = MediaWikiServices::getInstance();
 		if ( method_exists( $services, 'getLocalClusterObjectCache' ) ) {
 			$this->setService( 'LocalClusterObjectCache', new HashBagOStuff() );
-		} else {
-			ObjectCache::$instances[__METHOD__] = new HashBagOStuff();
 		}
+		ObjectCache::$instances[__METHOD__] = new HashBagOStuff();
 	}
 
-	public function tearDown() {
+	public function tearDown(): void {
 		parent::tearDown();
 		// make sure $wgCaptcha resets between tests
-		TestingAccessWrapper::newFromClass( ConfirmEditHooks::class )->instanceCreated = false;
+		TestingAccessWrapper::newFromClass( Hooks::class )->instanceCreated = false;
 	}
 
 	/**
@@ -51,7 +60,7 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 		$request->setCookie( 'UserName', $username );
 
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 		$reqs = $provider->getAuthenticationRequests( $action, [ 'username' => $username ] );
 		if ( $needsCaptcha ) {
 			$this->assertCount( 1, $reqs );
@@ -83,7 +92,7 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 		$this->setTriggers( [ 'createaccount' ] );
 		$captcha = new SimpleCaptcha();
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 
 		$reqs = $provider->getAuthenticationRequests( AuthManager::ACTION_CREATE,
 			[ 'username' => 'Foo' ] );
@@ -102,21 +111,22 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 	public function testTestForAuthentication( $req, $isBadLoginTriggered,
 		$isBadLoginPerUserTriggered, $result
 	) {
-		$this->setMwHook( 'PingLimiter', function ( $user, $action, &$result ) {
+		$this->setTemporaryHook( 'PingLimiter', static function ( $user, $action, &$result ) {
 			$result = false;
 			return false;
 		} );
 		CaptchaStore::get()->store( '345', [ 'question' => '2+2', 'answer' => '4' ] );
-		$captcha = $this->getMock( SimpleCaptcha::class,
-			[ 'isBadLoginTriggered', 'isBadLoginPerUserTriggered' ] );
+		$captcha = $this->getMockBuilder( SimpleCaptcha::class )
+			->onlyMethods( [ 'isBadLoginTriggered', 'isBadLoginPerUserTriggered' ] )
+			->getMock();
 		$captcha->expects( $this->any() )->method( 'isBadLoginTriggered' )
 			->willReturn( $isBadLoginTriggered );
 		$captcha->expects( $this->any() )->method( 'isBadLoginPerUserTriggered' )
 			->willReturn( $isBadLoginPerUserTriggered );
 		$this->setMwGlobals( 'wgCaptcha', $captcha );
-		TestingAccessWrapper::newFromClass( ConfirmEditHooks::class )->instanceCreated = true;
+		TestingAccessWrapper::newFromClass( Hooks::class )->instanceCreated = true;
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 
 		$status = $provider->testForAuthentication( $req ? [ $req ] : [] );
 		$this->assertEquals( $result, $status->isGood() );
@@ -141,7 +151,7 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 	 * @dataProvider provideTestForAccountCreation
 	 */
 	public function testTestForAccountCreation( $req, $creator, $result, $disableTrigger = false ) {
-		$this->setMwHook( 'PingLimiter', function ( &$user, $action, &$result ) {
+		$this->setTemporaryHook( 'PingLimiter', static function ( $user, $action, &$result ) {
 			$result = false;
 			return false;
 		} );
@@ -149,7 +159,7 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 		CaptchaStore::get()->store( '345', [ 'question' => '2+2', 'answer' => '4' ] );
 		$user = User::newFromName( 'Foo' );
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 
 		$status = $provider->testForAccountCreation( $user, $creator, $req ? [ $req ] : [] );
 		$this->assertEquals( $result, $status->isGood() );
@@ -175,7 +185,7 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 		$user = User::newFromName( 'Foo' );
 		$anotherUser = User::newFromName( 'Bar' );
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 
 		$this->assertFalse( $captcha->isBadLoginTriggered() );
 		$this->assertFalse( $captcha->isBadLoginPerUserTriggered( $user ) );
@@ -197,7 +207,7 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 		$captcha = new SimpleCaptcha();
 		$user = User::newFromName( 'Foo' );
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 
 		$this->assertFalse( $captcha->isBadLoginTriggered() );
 		$this->assertFalse( $captcha->isBadLoginPerUserTriggered( $user ) );
@@ -222,20 +232,21 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 			]
 		);
 		$provider = new CaptchaPreAuthenticationProvider();
-		$provider->setManager( AuthManager::singleton() );
+		$this->initProvider( $provider, null, null, $this->getServiceContainer()->getAuthManager() );
 		$providerAccess = TestingAccessWrapper::newFromObject( $provider );
 
-		foreach ( $attempts as $attempt ) {
-			if ( !empty( $attempts[3] ) ) {
-				$this->setMwHook( 'PingLimiter', function ( &$user, $action, &$result ) {
+		$disablePingLimiter = false;
+		$this->setTemporaryHook( 'PingLimiter',
+			static function ( &$user, $action, &$result ) use ( &$disablePingLimiter ) {
+				if ( $disablePingLimiter ) {
 					$result = false;
 					return false;
-				} );
-			} else {
-				$this->setMwHook( 'PingLimiter', function () {
-				} );
+				}
+				return null;
 			}
-
+		);
+		foreach ( $attempts as $attempt ) {
+			$disablePingLimiter = !empty( $attempts[3] );
 			$captcha = new SimpleCaptcha();
 			CaptchaStore::get()->store( '345', [ 'question' => '7+7', 'answer' => '14' ] );
 			$success = $providerAccess->verifyCaptcha( $captcha, [ $attempts[0] ], $attempts[1] );
@@ -286,19 +297,10 @@ class CaptchaPreAuthenticationProviderTest extends MediaWikiTestCase {
 	protected function setTriggers( $triggers ) {
 		$types = [ 'edit', 'create', 'sendemail', 'addurl', 'createaccount', 'badlogin',
 			'badloginperuser' ];
-		$captchaTriggers = array_combine( $types, array_map( function ( $type ) use ( $triggers ) {
+		$captchaTriggers = array_combine( $types, array_map( static function ( $type ) use ( $triggers ) {
 			return in_array( $type, $triggers, true );
 		}, $types ) );
 		$this->setMwGlobals( 'wgCaptchaTriggers', $captchaTriggers );
 	}
 
-	/**
-	 * Set a $wgHooks handler for a given hook and remove all other handlers (though not ones
-	 * set via Hooks::register). The original state will be restored after the test.
-	 * @param string $hook Hook name
-	 * @param callable $callback Hook method
-	 */
-	protected function setMwHook( $hook, callable $callback ) {
-		$this->mergeMwGlobalArrayValue( 'wgHooks', [ $hook => $callback ] );
-	}
 }

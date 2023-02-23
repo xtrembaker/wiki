@@ -1,15 +1,12 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
-use Wikimedia\TestingAccessWrapper;
+use MediaWiki\MainConfigNames;
 
 /**
  * @group Search
  * @group Database
  */
 class SearchEnginePrefixTest extends MediaWikiLangTestCase {
-	private $originalHandlers;
-
 	/**
 	 * @var SearchEngine
 	 */
@@ -50,7 +47,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 		$this->insertPage( 'External' );
 	}
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 
 		if ( !$this->isWikitextNS( NS_MAIN ) ) {
@@ -58,36 +55,26 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 		}
 
 		// Avoid special pages from extensions interferring with the tests
-		$this->setMwGlobals( [
-			'wgSpecialPages' => [],
-			'wgHooks' => [],
+		$this->overrideConfigValues( [
+			MainConfigNames::SpecialPages => [],
+			MainConfigNames::Hooks => [],
 		] );
 
-		$this->search = MediaWikiServices::getInstance()->newSearchEngine();
+		$this->search = $this->getServiceContainer()->newSearchEngine();
 		$this->search->setNamespaces( [] );
-
-		$this->originalHandlers = TestingAccessWrapper::newFromClass( Hooks::class )->handlers;
-		TestingAccessWrapper::newFromClass( Hooks::class )->handlers = [];
-	}
-
-	public function tearDown() {
-		parent::tearDown();
-
-		TestingAccessWrapper::newFromClass( Hooks::class )->handlers = $this->originalHandlers;
 	}
 
 	protected function searchProvision( array $results = null ) {
 		if ( $results === null ) {
-			$this->setMwGlobals( 'wgHooks', [] );
+			$this->overrideConfigValue( MainConfigNames::Hooks, [] );
 		} else {
-			$this->setMwGlobals( 'wgHooks', [
-				'PrefixSearchBackend' => [
-					function ( $namespaces, $search, $limit, &$srchres ) use ( $results ) {
-						$srchres = $results;
-						return false;
-					}
-				],
-			] );
+			$this->setTemporaryHook(
+				'PrefixSearchBackend',
+				static function ( $namespaces, $search, $limit, &$srchres ) use ( $results ) {
+					$srchres = $results;
+					return false;
+				}
+			);
 		}
 	}
 
@@ -96,6 +83,11 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 			[ [
 				'Empty string',
 				'query' => '',
+				'results' => [],
+			] ],
+			[ [
+				'All invalid characters, effectively empty',
+				'query' => '[',
 				'results' => [],
 			] ],
 			[ [
@@ -110,6 +102,16 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 				'offsetresult' => [
 					'Sample Who',
 				],
+			] ],
+			[ [
+				'Some invalid characters',
+				'query' => '[[Sa]]',
+				'results' => [
+					'Sample',
+					'Sample Ban',
+					'Sample Eat',
+				],
+				'offsetresult' => [ 'Sample Who' ],
 			] ],
 			[ [
 				'Talk namespace prefix',
@@ -184,7 +186,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 	public function testSearch( array $case ) {
 		$this->search->setLimitOffset( 3 );
 		$results = $this->search->defaultPrefixSearch( $case['query'] );
-		$results = array_map( function ( Title $t ) {
+		$results = array_map( static function ( Title $t ) {
 			return $t->getPrefixedText();
 		}, $results );
 
@@ -202,7 +204,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 	public function testSearchWithOffset( array $case ) {
 		$this->search->setLimitOffset( 3, 1 );
 		$results = $this->search->defaultPrefixSearch( $case['query'] );
-		$results = array_map( function ( Title $t ) {
+		$results = array_map( static function ( Title $t ) {
 			return $t->getPrefixedText();
 		}, $results );
 
@@ -352,7 +354,7 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 		$search = $this->mockSearchWithResults( $case['provision'] );
 		$results = $search->completionSearch( $case['query'] );
 
-		$results = $results->map( function ( SearchSuggestion $s ) {
+		$results = $results->map( static function ( SearchSuggestion $s ) {
 			return $s->getText();
 		} );
 
@@ -391,13 +393,12 @@ class SearchEnginePrefixTest extends MediaWikiLangTestCase {
 
 	private function mockSearchWithResults( $titleStrings, $limit = 3 ) {
 		$search = $stub = $this->getMockBuilder( SearchEngine::class )
-			->setMethods( [ 'completionSearchBackend' ] )->getMock();
+			->onlyMethods( [ 'completionSearchBackend' ] )->getMock();
 
 		$return = SearchSuggestionSet::fromStrings( $titleStrings );
 
-		$search->expects( $this->any() )
-			->method( 'completionSearchBackend' )
-			->will( $this->returnValue( $return ) );
+		$search->method( 'completionSearchBackend' )
+			->willReturn( $return );
 
 		$search->setLimitOffset( $limit );
 		return $search;

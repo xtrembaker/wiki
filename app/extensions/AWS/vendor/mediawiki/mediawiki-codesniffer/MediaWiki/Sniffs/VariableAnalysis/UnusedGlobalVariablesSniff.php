@@ -14,8 +14,8 @@ class UnusedGlobalVariablesSniff implements Sniff {
 	/**
 	 * @inheritDoc
 	 */
-	public function register() {
-		return [ T_FUNCTION ];
+	public function register(): array {
+		return [ T_FUNCTION, T_CLOSURE ];
 	}
 
 	/**
@@ -29,43 +29,66 @@ class UnusedGlobalVariablesSniff implements Sniff {
 			// An interface or abstract function which doesn't have a body
 			return;
 		}
-		$scopeOpener = ++$tokens[$stackPtr]['scope_opener'];
+
+		$scopeOpener = $tokens[$stackPtr]['scope_opener'] + 1;
 		$scopeCloser = $tokens[$stackPtr]['scope_closer'];
 
 		$endOfGlobal = 0;
 		$globalVariables = [];
-		$otherVariables = [];
 		$matches = [];
-		$strVariables = [];
+		$delayedSkip = [];
 
 		for ( $i = $scopeOpener; $i < $scopeCloser; $i++ ) {
-			if ( $tokens[$i]['code'] === T_GLOBAL ) {
-				$endOfGlobal = $phpcsFile->findEndOfStatement( $i, T_COMMA );
-			} elseif ( $tokens[$i]['code'] === T_VARIABLE ) {
-				if ( $i < $endOfGlobal ) {
-					$globalVariables[] = [ $tokens[$i]['content'], $i ];
+			// Process a delayed skip
+			if ( isset( $delayedSkip[$i] ) ) {
+				$i = $delayedSkip[$i];
+				continue;
+			}
+			$code = $tokens[$i]['code'];
+			if ( ( $code === T_CLOSURE || $code === T_FUNCTION || $code === T_ANON_CLASS )
+				&& isset( $tokens[$i]['scope_closer'] )
+			) {
+				if ( $code === T_CLOSURE && isset( $tokens[$i]['parenthesis_closer'] ) ) {
+					// Cannot skip directly to the end of closure
+					// The use statement needs to be processed
+					$delayedSkip[$tokens[$i]['scope_opener']] = $tokens[$i]['scope_closer'];
+
+					// Skip the argument list of the closure
+					$i = $tokens[$i]['parenthesis_closer'];
 				} else {
-					$otherVariables[$tokens[$i]['content']] = null;
+					// Skip to the end of the inner function/anon class and continue
+					$i = $tokens[$i]['scope_closer'];
 				}
-			} elseif ( $tokens[$i]['code'] === T_DOUBLE_QUOTED_STRING
-				|| $tokens[$i]['code'] === T_HEREDOC
+				continue;
+			}
+
+			if ( $code === T_GLOBAL ) {
+				$endOfGlobal = $phpcsFile->findEndOfStatement( $i, T_COMMA );
+			} elseif ( $code === T_VARIABLE ) {
+				$variableName = $tokens[$i]['content'];
+				if ( $i < $endOfGlobal ) {
+					$globalVariables[$variableName] = $i;
+				} else {
+					unset( $globalVariables[$variableName] );
+				}
+			} elseif ( ( $code === T_DOUBLE_QUOTED_STRING || $code === T_HEREDOC )
+				// Avoid the regex below when there are no globals to look for anyway
+				&& $globalVariables
 			) {
 				preg_match_all( '/\${?(\w+)/', $tokens[$i]['content'], $matches );
-				$strVariables += array_flip( $matches[1] );
+				foreach ( $matches[1] as $variableName ) {
+					unset( $globalVariables[ '$' . $variableName ] );
+				}
 			}
 		}
 
-		foreach ( $globalVariables as $global ) {
-			if ( !array_key_exists( $global[0], $otherVariables )
-				&& !array_key_exists( ltrim( $global[0], '$' ), $strVariables )
-			) {
-				$phpcsFile->addWarning(
-					'Global %s is never used.',
-					$global[1],
-					'UnusedGlobal' . $global[0],
-					[ $global[0] ]
-				);
-			}
+		foreach ( $globalVariables as $variableName => $stackPtr ) {
+			$phpcsFile->addWarning(
+				'Global %s is never used.',
+				$stackPtr,
+				'UnusedGlobal' . $variableName,
+				[ $variableName ]
+			);
 		}
 	}
 }

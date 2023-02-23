@@ -22,6 +22,7 @@
  */
 
 use MediaWiki\MediaWikiServices;
+use Wikimedia\AtEase\AtEase;
 
 /**
  * Search engine hook for SQLite
@@ -61,9 +62,9 @@ class SearchSqlite extends SearchDatabase {
 		if ( preg_match_all( '/([-+<>~]?)(([' . $lc . ']+)(\*?)|"[^"]*")/',
 				$filteredText, $m, PREG_SET_ORDER ) ) {
 			foreach ( $m as $bits ) {
-				Wikimedia\suppressWarnings();
+				AtEase::suppressWarnings();
 				list( /* all */, $modifier, $term, $nonQuoted, $wildcard ) = $bits;
-				Wikimedia\restoreWarnings();
+				AtEase::restoreWarnings();
 
 				if ( $nonQuoted != '' ) {
 					$term = $nonQuoted;
@@ -79,8 +80,10 @@ class SearchSqlite extends SearchDatabase {
 
 				// Some languages such as Serbian store the input form in the search index,
 				// so we may need to search for matches in multiple writing system variants.
-				$convertedVariants = MediaWikiServices::getInstance()->getContentLanguage()->
-					autoConvertToAllVariants( $term );
+
+				$converter = MediaWikiServices::getInstance()->getLanguageConverterFactory()
+					->getLanguageConverter();
+				$convertedVariants = $converter->autoConvertToAllVariants( $term );
 				if ( is_array( $convertedVariants ) ) {
 					$variants = array_unique( array_values( $convertedVariants ) );
 				} else {
@@ -125,7 +128,7 @@ class SearchSqlite extends SearchDatabase {
 			}
 
 		} else {
-			wfDebug( __METHOD__ . ": Can't understand search query '{$filteredText}'\n" );
+			wfDebug( __METHOD__ . ": Can't understand search query '{$filteredText}'" );
 		}
 
 		$dbr = $this->lb->getConnectionRef( DB_REPLICA );
@@ -189,10 +192,10 @@ class SearchSqlite extends SearchDatabase {
 		$filteredTerm =
 			$this->filter( MediaWikiServices::getInstance()->getContentLanguage()->lc( $term ) );
 		$dbr = $this->lb->getConnectionRef( DB_REPLICA );
-		$resultSet = $dbr->query( $this->getQuery( $filteredTerm, $fulltext ) );
+		$resultSet = $dbr->query( $this->getQuery( $filteredTerm, $fulltext ), __METHOD__ );
 
 		$total = null;
-		$totalResult = $dbr->query( $this->getCountQuery( $filteredTerm, $fulltext ) );
+		$totalResult = $dbr->query( $this->getCountQuery( $filteredTerm, $fulltext ), __METHOD__ );
 		$row = $totalResult->fetchObject();
 		if ( $row ) {
 			$total = intval( $row->c );
@@ -207,11 +210,11 @@ class SearchSqlite extends SearchDatabase {
 	 * @return string
 	 */
 	private function queryNamespaces() {
-		if ( is_null( $this->namespaces ) ) {
+		if ( $this->namespaces === null ) {
 			return '';  # search all
 		}
 		if ( $this->namespaces === [] ) {
-			$namespaces = '0';
+			$namespaces = NS_MAIN;
 		} else {
 			$dbr = $this->lb->getConnectionRef( DB_REPLICA );
 			$namespaces = $dbr->makeList( $this->namespaces );
@@ -295,7 +298,7 @@ class SearchSqlite extends SearchDatabase {
 		}
 		// @todo find a method to do it in a single request,
 		// couldn't do it so far due to typelessness of FTS3 tables.
-		$dbw = $this->lb->getConnectionRef( DB_MASTER );
+		$dbw = $this->lb->getConnectionRef( DB_PRIMARY );
 		$dbw->delete( 'searchindex', [ 'rowid' => $id ], __METHOD__ );
 		$dbw->insert( 'searchindex',
 			[
@@ -317,7 +320,7 @@ class SearchSqlite extends SearchDatabase {
 			return;
 		}
 
-		$dbw = $this->lb->getConnectionRef( DB_MASTER );
+		$dbw = $this->lb->getConnectionRef( DB_PRIMARY );
 		$dbw->update( 'searchindex',
 			[ 'si_title' => $title ],
 			[ 'rowid' => $id ],

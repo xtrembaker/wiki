@@ -1,8 +1,38 @@
 List of changes between releases of Extension:AWS.
 
-== master branch (will become AWS 0.11.1 or 0.12.0, depending on magnitude of changes) ==
+== master branch (will become AWS 0.12.1 or 0.13.0, depending on magnitude of changes) ==
 
-No changes since AWS 0.11.0.
+* Added support for MediaWiki 1.39.
+* Added support for PHP 8.1.
+
+Minor features:
+* Added $wgAWSLocalCacheExcludeFileExtensions, which allows to exclude some files (e.g. audio)
+from the local cache.
+* Added support for path-style endpoints: $wgFileBackends['s3']['use_path_style_endpoint'] setting.
+* $wgAWSBucketDomain now supports values that start with http:// (to not use HTTPS).
+
+== AWS 0.12.0 ==
+
+Major features:
+* Results of doGetFileStat() are now cached, which greatly improves performance
+when editing a page with many images.
+
+Minor features:
+* $wgImgAuthPath can now override the path to /img_auth.php for private wikis.
+
+Bugfixes:
+* HTTP headers set by other extensions (like Content-Disposition) are no longer ignored
+when uploading new images.
+
+Warnings fixed:
+* Fixed harmless PHP warning in doGetLocalCopyMulti().
+* Replaced deprecated wfWikiId().
+* Replaced deprecated wfGetMainCache().
+
+== AWS 0.11.1 ==
+
+* Added support for MediaWiki 1.35.
+* Dropped support for MediaWiki 1.27-1.34 and PHP 5.6.
 
 == AWS 0.11.0 ==
 

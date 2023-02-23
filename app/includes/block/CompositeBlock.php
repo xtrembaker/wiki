@@ -22,7 +22,7 @@
 
 namespace MediaWiki\Block;
 
-use IContextSource;
+use MediaWiki\User\UserIdentity;
 use Title;
 
 /**
@@ -56,6 +56,7 @@ class CompositeBlock extends AbstractBlock {
 		$this->originalBlocks = $options[ 'originalBlocks' ];
 
 		$this->setHideName( $this->propHasValue( 'mHideName', true ) );
+		$this->isHardblock( $this->propHasValue( 'isHardblock', true ) );
 		$this->isSitewide( $this->propHasValue( 'isSitewide', true ) );
 		$this->isEmailBlocked( $this->propHasValue( 'mBlockEmail', true ) );
 		$this->isCreateAccountBlocked( $this->propHasValue( 'blockCreateAccount', true ) );
@@ -110,7 +111,7 @@ class CompositeBlock extends AbstractBlock {
 	/**
 	 * @inheritDoc
 	 */
-	public function getExpiry() {
+	public function getExpiry(): string {
 		$maxExpiry = null;
 		foreach ( $this->originalBlocks as $block ) {
 			$expiry = $block->getExpiry();
@@ -118,48 +119,18 @@ class CompositeBlock extends AbstractBlock {
 				$maxExpiry = $expiry;
 			}
 		}
-		return $maxExpiry;
-	}
-
-	/**
-	 * Get the IDs for the original blocks, ignoring any that are null
-	 *
-	 * @return int[]
-	 */
-	protected function getIds() {
-		$ids = [];
-		foreach ( $this->originalBlocks as $block ) {
-			$id = $block->getId();
-			if ( $id !== null ) {
-				$ids[] = $id;
-			}
-		}
-		return $ids;
+		return $maxExpiry ?? '';
 	}
 
 	/**
 	 * @inheritDoc
 	 */
-	public function getPermissionsError( IContextSource $context ) {
-		$params = $this->getBlockErrorParams( $context );
-
-		$ids = implode( ', ', array_map( function ( $id ) {
-			return '#' . $id;
-		}, $this->getIds() ) );
-		if ( $ids === '' ) {
-			$idsMsg = $context->msg( 'blockedtext-composite-no-ids' )->plain();
-		} else {
-			$idsMsg = $context->msg( 'blockedtext-composite-ids', [ $ids ] )->plain();
+	public function getIdentifier( $wikiId = self::LOCAL ) {
+		$identifier = [];
+		foreach ( $this->originalBlocks as $block ) {
+			$identifier[] = $block->getIdentifier( $wikiId );
 		}
-
-		// TODO: Clean up error messages params so we don't have to do this (T227174)
-		$params[ 4 ] = $idsMsg;
-
-		$msg = 'blockedtext-composite';
-
-		array_unshift( $params, $msg );
-
-		return $params;
+		return $identifier;
 	}
 
 	/**
@@ -223,4 +194,25 @@ class CompositeBlock extends AbstractBlock {
 		return $this->methodReturnsValue( __FUNCTION__, true );
 	}
 
+	/**
+	 * @inheritDoc
+	 */
+	public function getBy( $wikiId = self::LOCAL ): int {
+		$this->assertWiki( $wikiId );
+		return 0;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getByName() {
+		return '';
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getBlocker(): ?UserIdentity {
+		return null;
+	}
 }

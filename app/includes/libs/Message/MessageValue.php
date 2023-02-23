@@ -2,6 +2,8 @@
 
 namespace Wikimedia\Message;
 
+use Stringable;
+
 /**
  * Value object representing a message for i18n.
  *
@@ -10,6 +12,8 @@ namespace Wikimedia\Message;
  * IMessageFormatterFactory.
  *
  * MessageValues are pure value objects and are safely newable.
+ *
+ * @newable
  */
 class MessageValue {
 	/** @var string */
@@ -19,6 +23,8 @@ class MessageValue {
 	private $params;
 
 	/**
+	 * @stable to call
+	 *
 	 * @param string $key
 	 * @param (MessageParam|MessageValue|string|int|float)[] $params Values that are not instances
 	 *  of MessageParam are wrapped using ParamType::TEXT.
@@ -27,6 +33,16 @@ class MessageValue {
 		$this->key = $key;
 		$this->params = [];
 		$this->params( ...$params );
+	}
+
+	/**
+	 * Static constructor for easier chaining of `->params()` methods
+	 * @param string $key
+	 * @param (MessageParam|MessageValue|string|int|float)[] $params
+	 * @return MessageValue
+	 */
+	public static function new( $key, $params = [] ) {
+		return new MessageValue( $key, $params );
 	}
 
 	/**
@@ -51,7 +67,7 @@ class MessageValue {
 	 * Chainable mutator which adds text parameters and MessageParam parameters
 	 *
 	 * @param MessageParam|MessageValue|string|int|float ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function params( ...$values ) {
 		foreach ( $values as $value ) {
@@ -69,11 +85,24 @@ class MessageValue {
 	 *
 	 * @param string $type One of the ParamType constants
 	 * @param MessageValue|string|int|float ...$values Scalar values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function textParamsOfType( $type, ...$values ) {
 		foreach ( $values as $value ) {
 			$this->params[] = new ScalarParam( $type, $value );
+		}
+		return $this;
+	}
+
+	/**
+	 * Chainable mutator which adds object parameters
+	 *
+	 * @param Stringable ...$values stringable object values
+	 * @return $this
+	 */
+	public function objectParams( ...$values ) {
+		foreach ( $values as $value ) {
+			$this->params[] = new ScalarParam( ParamType::OBJECT, $value );
 		}
 		return $this;
 	}
@@ -84,7 +113,7 @@ class MessageValue {
 	 * @param string $listType One of the ListType constants
 	 * @param (MessageParam|MessageValue|string|int|float)[] ...$values Each value
 	 *  is an array of items suitable to pass as $params to ListParam::__construct()
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function listParamsOfType( $listType, ...$values ) {
 		foreach ( $values as $value ) {
@@ -97,7 +126,7 @@ class MessageValue {
 	 * Chainable mutator which adds parameters of type text (ParamType::TEXT).
 	 *
 	 * @param MessageValue|string|int|float ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function textParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::TEXT, ...$values );
@@ -107,7 +136,7 @@ class MessageValue {
 	 * Chainable mutator which adds numeric parameters (ParamType::NUM).
 	 *
 	 * @param int|float ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function numParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::NUM, ...$values );
@@ -121,7 +150,7 @@ class MessageValue {
 	 * more verbose.
 	 *
 	 * @param int|float ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function longDurationParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::DURATION_LONG, ...$values );
@@ -135,7 +164,7 @@ class MessageValue {
 	 * compact.
 	 *
 	 * @param int|float ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function shortDurationParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::DURATION_SHORT, ...$values );
@@ -146,17 +175,61 @@ class MessageValue {
 	 *
 	 * @param string ...$values Timestamp as accepted by the Wikimedia\Timestamp library,
 	 *  or "infinity"
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function expiryParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::EXPIRY, ...$values );
 	}
 
 	/**
+	 * Chainable mutator which adds parameters which are a date-time timestamp (ParamType::DATETIME).
+	 *
+	 * @since 1.36
+	 * @param string ...$values Timestamp as accepted by the Wikimedia\Timestamp library.
+	 * @return $this
+	 */
+	public function dateTimeParams( ...$values ) {
+		return $this->textParamsOfType( ParamType::DATETIME, ...$values );
+	}
+
+	/**
+	 * Chainable mutator which adds parameters which are a date timestamp (ParamType::DATE).
+	 *
+	 * @since 1.36
+	 * @param string ...$values Timestamp as accepted by the Wikimedia\Timestamp library.
+	 * @return $this
+	 */
+	public function dateParams( ...$values ) {
+		return $this->textParamsOfType( ParamType::DATE, ...$values );
+	}
+
+	/**
+	 * Chainable mutator which adds parameters which are a time timestamp (ParamType::TIME).
+	 *
+	 * @since 1.36
+	 * @param string ...$values Timestamp as accepted by the Wikimedia\Timestamp library.
+	 * @return $this
+	 */
+	public function timeParams( ...$values ) {
+		return $this->textParamsOfType( ParamType::TIME, ...$values );
+	}
+
+	/**
+	 * Chainable mutator which adds parameters which are a user group (ParamType::GROUP).
+	 *
+	 * @since 1.38
+	 * @param string ...$values User Groups
+	 * @return $this
+	 */
+	public function userGroupParams( ...$values ) {
+		return $this->textParamsOfType( ParamType::GROUP, ...$values );
+	}
+
+	/**
 	 * Chainable mutator which adds parameters which are a number of bytes (ParamType::SIZE).
 	 *
 	 * @param int ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function sizeParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::SIZE, ...$values );
@@ -167,7 +240,7 @@ class MessageValue {
 	 * second (ParamType::BITRATE).
 	 *
 	 * @param int|float ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function bitrateParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::BITRATE, ...$values );
@@ -181,7 +254,7 @@ class MessageValue {
 	 * documenting what that intended output format is.
 	 *
 	 * @param string ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function rawParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::RAW, ...$values );
@@ -195,7 +268,7 @@ class MessageValue {
 	 * so as to be represented as plain text rather than as any sort of markup.
 	 *
 	 * @param string ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function plaintextParams( ...$values ) {
 		return $this->textParamsOfType( ParamType::PLAINTEXT, ...$values );
@@ -209,7 +282,7 @@ class MessageValue {
 	 *
 	 * @param (MessageParam|MessageValue|string|int|float)[] ...$values Each value
 	 *  is an array of items suitable to pass as $params to ListParam::__construct()
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function commaListParams( ...$values ) {
 		return $this->listParamsOfType( ListType::COMMA, ...$values );
@@ -223,7 +296,7 @@ class MessageValue {
 	 *
 	 * @param (MessageParam|MessageValue|string|int|float)[] ...$values Each value
 	 *  is an array of items suitable to pass as $params to ListParam::__construct()
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function semicolonListParams( ...$values ) {
 		return $this->listParamsOfType( ListType::SEMICOLON, ...$values );
@@ -237,7 +310,7 @@ class MessageValue {
 	 *
 	 * @param (MessageParam|MessageValue|string|int|float)[] ...$values Each value
 	 *  is an array of items suitable to pass as $params to ListParam::__construct()
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function pipeListParams( ...$values ) {
 		return $this->listParamsOfType( ListType::PIPE, ...$values );
@@ -251,7 +324,7 @@ class MessageValue {
 	 * two elements joined with "and".
 	 *
 	 * @param (MessageParam|string)[] ...$values
-	 * @return MessageValue
+	 * @return $this
 	 */
 	public function textListParams( ...$values ) {
 		return $this->listParamsOfType( ListType::AND, ...$values );

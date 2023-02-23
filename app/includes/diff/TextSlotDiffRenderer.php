@@ -21,6 +21,7 @@
  * @ingroup DifferenceEngine
  */
 
+use MediaWiki\MediaWikiServices;
 use MediaWiki\Shell\Shell;
 use Wikimedia\Assert\Assert;
 
@@ -37,13 +38,16 @@ use Wikimedia\Assert\Assert;
 class TextSlotDiffRenderer extends SlotDiffRenderer {
 
 	/** Use the PHP diff implementation (DiffEngine). */
-	const ENGINE_PHP = 'php';
+	public const ENGINE_PHP = 'php';
 
 	/** Use the wikidiff2 PHP module. */
-	const ENGINE_WIKIDIFF2 = 'wikidiff2';
+	public const ENGINE_WIKIDIFF2 = 'wikidiff2';
+
+	/** Use the wikidiff2 PHP module. */
+	public const ENGINE_WIKIDIFF2_INLINE = 'wikidiff2inline';
 
 	/** Use an external executable. */
-	const ENGINE_EXTERNAL = 'external';
+	public const ENGINE_EXTERNAL = 'external';
 
 	/** @var IBufferingStatsdDataFactory|null */
 	private $statsdDataFactory;
@@ -54,8 +58,16 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 	/** @var string One of the ENGINE_* constants. */
 	private $engine = self::ENGINE_PHP;
 
-	/** @var string Path to an executable to be used as the diff engine. */
+	/** @var string|null Path to an executable to be used as the diff engine. */
 	private $externalEngine;
+
+	/** @inheritDoc */
+	public function getExtraCacheKeys() {
+		// Tell DifferenceEngine this is a different variant from the standard wikidiff2 variant
+		return $this->engine === self::ENGINE_WIKIDIFF2_INLINE ? [
+			phpversion( 'wikidiff2' ), 'inline'
+		] : [];
+	}
 
 	/**
 	 * Convenience helper to use getTextDiff without an instance.
@@ -65,16 +77,24 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 	 */
 	public static function diff( $oldText, $newText ) {
 		/** @var TextSlotDiffRenderer $slotDiffRenderer */
-		$slotDiffRenderer = ContentHandler::getForModelID( CONTENT_MODEL_TEXT )
+		$slotDiffRenderer = MediaWikiServices::getInstance()
+			->getContentHandlerFactory()
+			->getContentHandler( CONTENT_MODEL_TEXT )
 			->getSlotDiffRenderer( RequestContext::getMain() );
 		'@phan-var TextSlotDiffRenderer $slotDiffRenderer';
 		return $slotDiffRenderer->getTextDiff( $oldText, $newText );
 	}
 
+	/**
+	 * @param IBufferingStatsdDataFactory $statsdDataFactory
+	 */
 	public function setStatsdDataFactory( IBufferingStatsdDataFactory $statsdDataFactory ) {
 		$this->statsdDataFactory = $statsdDataFactory;
 	}
 
+	/**
+	 * @param Language $language
+	 */
 	public function setLanguage( Language $language ) {
 		$this->language = $language;
 	}
@@ -82,17 +102,18 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 	/**
 	 * Set which diff engine to use.
 	 * @param string $type One of the ENGINE_* constants.
-	 * @param string|null $executable Path to an external exectable, only when type is ENGINE_EXTERNAL.
+	 * @param string|null $executable Path to an external executable, only when type is ENGINE_EXTERNAL.
 	 */
 	public function setEngine( $type, $executable = null ) {
-		$engines = [ self::ENGINE_PHP, self::ENGINE_WIKIDIFF2, self::ENGINE_EXTERNAL ];
+		$engines = [ self::ENGINE_PHP, self::ENGINE_WIKIDIFF2, self::ENGINE_EXTERNAL,
+			self::ENGINE_WIKIDIFF2_INLINE ];
 		Assert::parameter( in_array( $type, $engines, true ), '$type',
 			'must be one of the TextSlotDiffRenderer::ENGINE_* constants' );
 		if ( $type === self::ENGINE_EXTERNAL ) {
 			Assert::parameter( is_string( $executable ) && is_executable( $executable ), '$executable',
 				'must be a path to a valid executable' );
 		} else {
-			Assert::parameter( is_null( $executable ), '$executable',
+			Assert::parameter( $executable === null, '$executable',
 				'must not be set unless $type is ENGINE_EXTERNAL' );
 		}
 		$this->engine = $type;
@@ -115,10 +136,7 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 	 * @param string $newText
 	 * @return string HTML, one or more <tr> tags.
 	 */
-	public function getTextDiff( $oldText, $newText ) {
-		Assert::parameterType( 'string', $oldText, '$oldText' );
-		Assert::parameterType( 'string', $newText, '$newText' );
-
+	public function getTextDiff( string $oldText, string $newText ) {
 		$diff = function () use ( $oldText, $newText ) {
 			$time = microtime( true );
 
@@ -144,8 +162,9 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 		/**
 		 * @param Status $status
 		 * @throws FatalError
+		 * @return never
 		 */
-		$error = function ( $status ) {
+		$error = static function ( $status ) {
 			throw new FatalError( $status->getWikiText() );
 		};
 
@@ -171,7 +190,7 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 	 */
 	protected function getTextDiffInternal( $oldText, $newText ) {
 		// TODO move most of this into three parallel implementations of a text diff generator
-		// class, choose which one to use via dependecy injection
+		// class, choose which one to use via dependency injection
 
 		$oldText = str_replace( "\r\n", "\n", $oldText );
 		$newText = str_replace( "\r\n", "\n", $newText );
@@ -209,11 +228,11 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 
 			$tempFile1 = fopen( $tempName1, "w" );
 			if ( !$tempFile1 ) {
-				return false;
+				throw new Exception( "Could not create temporary file $tempName1 for external diffing" );
 			}
 			$tempFile2 = fopen( $tempName2, "w" );
 			if ( !$tempFile2 ) {
-				return false;
+				throw new Exception( "Could not create temporary file $tempName2 for external diffing" );
 			}
 			fwrite( $tempFile1, $oldText );
 			fwrite( $tempFile2, $newText );
@@ -225,7 +244,7 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 			$exitCode = $result->getExitCode();
 			if ( $exitCode !== 0 ) {
 				throw new Exception( "External diff command returned code {$exitCode}. Stderr: "
-									 . wfEscapeWikiText( $result->getStderr() )
+					. wfEscapeWikiText( $result->getStderr() )
 				);
 			}
 			$difftext = $result->getStdout();
@@ -248,6 +267,12 @@ class TextSlotDiffRenderer extends SlotDiffRenderer {
 			}
 
 			return $difftext;
+		} elseif ( $this->engine === self::ENGINE_WIKIDIFF2_INLINE ) {
+			// Note wikidiff2_inline_diff returns an element sans table.
+			// Due to the way other diffs work (return a table with before and after), we need to wrap
+			// the output in a row that spans the 4 columns that are expected, so that our diff appears in
+			// the correct place!
+			return '<tr><td colspan="4">' . wikidiff2_inline_diff( $oldText, $newText, 2 ) . '</td></tr>';
 		}
 		throw new LogicException( 'Invalid engine: ' . $this->engine );
 	}

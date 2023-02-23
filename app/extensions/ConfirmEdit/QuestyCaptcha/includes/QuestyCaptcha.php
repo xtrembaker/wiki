@@ -9,6 +9,9 @@
  */
 
 use MediaWiki\Auth\AuthenticationRequest;
+use MediaWiki\Extension\ConfirmEdit\Auth\CaptchaAuthenticationRequest;
+use MediaWiki\Extension\ConfirmEdit\SimpleCaptcha\SimpleCaptcha;
+use MediaWiki\Extension\ConfirmEdit\Store\CaptchaStore;
 
 class QuestyCaptcha extends SimpleCaptcha {
 	// used for questycaptcha-edit, questycaptcha-addurl, questycaptcha-badlogin,
@@ -87,13 +90,14 @@ class QuestyCaptcha extends SimpleCaptcha {
 					'required',
 					'autocomplete' => 'off',
 					// tab in before the edit textarea
-					'tabindex' => $tabIndex ] ) .
-				"</p>\n" .
+					'tabindex' => $tabIndex ]
+				) . "</p>\n" .
 				Xml::element( 'input', [
 					'type'  => 'hidden',
 					'name'  => 'wpCaptchaId',
 					'id'    => 'wpCaptchaId',
-					'value' => $index ] )
+					'value' => $index ]
+				)
 		];
 	}
 

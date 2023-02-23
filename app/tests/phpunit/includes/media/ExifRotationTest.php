@@ -1,4 +1,7 @@
 <?php
+
+use MediaWiki\MainConfigNames;
+
 /**
  * Tests related to auto rotation.
  *
@@ -12,20 +15,21 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 	/** @var BitmapHandler */
 	private $handler;
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 		$this->checkPHPExtension( 'exif' );
 
 		$this->handler = new BitmapHandler();
 
-		$this->setMwGlobals( [
-			'wgShowEXIF' => true,
-			'wgEnableAutoRotation' => true,
+		$this->overrideConfigValues( [
+			MainConfigNames::ShowEXIF => true,
+			MainConfigNames::EnableAutoRotation => true,
 		] );
 	}
 
 	/**
 	 * Mark this test as creating thumbnail files.
+	 * @inheritDoc
 	 */
 	protected function createsThumbnails() {
 		return true;
@@ -51,9 +55,11 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 	 * @dataProvider provideFiles
 	 */
 	public function testMetadataAutoRotate( $name, $type, $info ) {
-		$this->setMwGlobals( 'wgEnableAutoRotation', null );
-		$this->setMwGlobals( 'wgUseImageMagick', true );
-		$this->setMwGlobals( 'wgUseImageResize', true );
+		$this->overrideConfigValues( [
+			MainConfigNames::EnableAutoRotation => null,
+			MainConfigNames::UseImageMagick => true,
+			MainConfigNames::UseImageResize => true,
+		] );
 
 		$file = $this->dataFile( $name, $type );
 		$this->assertEquals( $info['width'], $file->getWidth(), "$name: width check" );
@@ -61,7 +67,6 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 	}
 
 	/**
-	 *
 	 * @dataProvider provideFiles
 	 */
 	public function testRotationRendering( $name, $type, $info, $thumbs ) {
@@ -146,7 +151,7 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 	 * @dataProvider provideFilesNoAutoRotate
 	 */
 	public function testMetadataNoAutoRotate( $name, $type, $info ) {
-		$this->setMwGlobals( 'wgEnableAutoRotation', false );
+		$this->overrideConfigValue( MainConfigNames::EnableAutoRotation, false );
 
 		$file = $this->dataFile( $name, $type );
 		$this->assertEquals( $info['width'], $file->getWidth(), "$name: width check" );
@@ -158,8 +163,10 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 	 * @dataProvider provideFilesNoAutoRotate
 	 */
 	public function testMetadataAutoRotateUnsupported( $name, $type, $info ) {
-		$this->setMwGlobals( 'wgEnableAutoRotation', null );
-		$this->setMwGlobals( 'wgUseImageResize', false );
+		$this->overrideConfigValues( [
+			MainConfigNames::EnableAutoRotation => null,
+			MainConfigNames::UseImageResize => false,
+		] );
 
 		$file = $this->dataFile( $name, $type );
 		$this->assertEquals( $info['width'], $file->getWidth(), "$name: width check" );
@@ -167,11 +174,10 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 	}
 
 	/**
-	 *
 	 * @dataProvider provideFilesNoAutoRotate
 	 */
 	public function testRotationRenderingNoAutoRotate( $name, $type, $info, $thumbs ) {
-		$this->setMwGlobals( 'wgEnableAutoRotation', false );
+		$this->overrideConfigValue( MainConfigNames::EnableAutoRotation, false );
 
 		foreach ( $thumbs as $size => $out ) {
 			if ( preg_match( '/^(\d+)px$/', $size, $matches ) ) {
@@ -251,8 +257,8 @@ class ExifRotationTest extends MediaWikiMediaTestCase {
 		];
 	}
 
-	const TEST_WIDTH = 100;
-	const TEST_HEIGHT = 200;
+	private const TEST_WIDTH = 100;
+	private const TEST_HEIGHT = 200;
 
 	/**
 	 * @dataProvider provideBitmapExtractPreRotationDimensions

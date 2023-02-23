@@ -41,15 +41,58 @@
 	 *  - {@link jQuery.plugin.textSelection#scrollToCaretPosition scrollToCaretPosition}
 	 *  - {@link jQuery.plugin.textSelection#register register}
 	 *  - {@link jQuery.plugin.textSelection#unregister unregister}
-	 * @param {Mixed} [options] Options to pass to the command
+	 * @param {Mixed} [commandOptions] Options to pass to the command
 	 * @return {Mixed} Depending on the command
 	 */
-	$.fn.textSelection = function ( command, options ) {
-		var fn,
-			alternateFn,
-			retval;
+	$.fn.textSelection = function ( command, commandOptions ) {
+		// Checks if you can try to use insertText (it might still fail).
+		function supportsInsertText() {
+			return $( this ).data( 'jquery.textSelection' ) === undefined &&
+				typeof document.execCommand === 'function' &&
+				typeof document.queryCommandSupported === 'function' &&
+				document.queryCommandSupported( 'insertText' );
+		}
 
-		fn = {
+		/**
+		 * Insert text into textarea or contenteditable.
+		 *
+		 * @ignore
+		 * @param {HTMLElement} field Field to select.
+		 * @param {string} content Text to insert.
+		 * @param {Function} fallback To execute as a fallback.
+		 */
+		function execInsertText( field, content, fallback ) {
+			// try to insert text
+			var pasted = true;
+			if ( !supportsInsertText() ) {
+				pasted = false;
+			} else {
+				field.focus();
+				try {
+					if (
+						// Ensure the field was focused, otherwise we can't use execCommand() to change it.
+						// focus() can fail if e.g. the field is disabled, or its container is inert.
+						document.activeElement !== field ||
+						// Try to insert
+						!document.execCommand( 'insertText', false, content )
+					) {
+						pasted = false;
+					}
+				} catch ( e ) {
+					pasted = false;
+				}
+			}
+			// fallback
+			if ( !pasted ) {
+				if ( typeof fallback === 'function' ) {
+					fallback.call( field, content );
+				} else {
+					throw new Error( 'paste unsuccessful, execCommand not supported' );
+				}
+			}
+		}
+
+		var fn = {
 			/**
 			 * Get the contents of the textarea.
 			 *
@@ -71,7 +114,10 @@
 			setContents: function ( content ) {
 				return this.each( function () {
 					var scrollTop = this.scrollTop;
-					$( this ).val( content );
+					this.select();
+					execInsertText( this, content, function () {
+						$( this ).val( content );
+					} );
 					// Setting this.value may scroll the textarea, restore the scroll position
 					this.scrollTop = scrollTop;
 				} );
@@ -84,16 +130,16 @@
 			 * @return {string}
 			 */
 			getSelection: function () {
-				var retval,
-					el = this.get( 0 );
+				var el = this.get( 0 );
 
+				var val;
 				if ( !el ) {
-					retval = '';
+					val = '';
 				} else {
-					retval = el.value.substring( el.selectionStart, el.selectionEnd );
+					val = el.value.slice( el.selectionStart, el.selectionEnd );
 				}
 
-				return retval;
+				return val;
 			},
 
 			/**
@@ -106,18 +152,18 @@
 			 */
 			replaceSelection: function ( value ) {
 				return this.each( function () {
-					var allText, currSelection, startPos, endPos;
+					execInsertText( this, value, function () {
+						var allText = $( this ).textSelection( 'getContents' );
+						var currSelection = $( this ).textSelection( 'getCaretPosition', { startAndEnd: true } );
+						var startPos = currSelection[ 0 ];
+						var endPos = currSelection[ 1 ];
 
-					allText = $( this ).textSelection( 'getContents' );
-					currSelection = $( this ).textSelection( 'getCaretPosition', { startAndEnd: true } );
-					startPos = currSelection[ 0 ];
-					endPos = currSelection[ 1 ];
-
-					$( this ).textSelection( 'setContents', allText.slice( 0, startPos ) + value +
-						allText.slice( endPos ) );
-					$( this ).textSelection( 'setSelection', {
-						start: startPos,
-						end: startPos + value.length
+						$( this ).textSelection( 'setContents', allText.slice( 0, startPos ) + value +
+							allText.slice( endPos ) );
+						$( this ).textSelection( 'setSelection', {
+							start: startPos,
+							end: startPos + value.length
+						} );
 					} );
 				} );
 			},
@@ -147,15 +193,14 @@
 			 */
 			encapsulateSelection: function ( options ) {
 				return this.each( function () {
-					var selText, allText, currSelection, insertText,
-						combiningCharSelectionBug = false,
-						isSample, startPos, endPos,
+					var selText, isSample,
 						pre = options.pre,
 						post = options.post;
 
 					/**
-					 * @ignore
 					 * Check if the selected text is the same as the insert text
+					 *
+					 * @ignore
 					 */
 					function checkSelectedText() {
 						if ( !selText ) {
@@ -178,27 +223,26 @@
 					}
 
 					/**
-					 * @ignore
 					 * Do the splitlines stuff.
 					 *
 					 * Wrap each line of the selected text with pre and post
 					 *
-					 * @param {string} selText Selected text
-					 * @param {string} pre Text before
-					 * @param {string} post Text after
+					 * @ignore
+					 * @param {string} text Selected text
+					 * @param {string} preText Text before
+					 * @param {string} postText Text after
 					 * @return {string} Wrapped text
 					 */
-					function doSplitLines( selText, pre, post ) {
-						var i,
-							insertText = '',
-							selTextArr = selText.split( '\n' );
-						for ( i = 0; i < selTextArr.length; i++ ) {
-							insertText += pre + selTextArr[ i ] + post;
+					function doSplitLines( text, preText, postText ) {
+						var insText = '',
+							selTextArr = text.split( '\n' );
+						for ( var i = 0; i < selTextArr.length; i++ ) {
+							insText += preText + selTextArr[ i ] + postText;
 							if ( i !== selTextArr.length - 1 ) {
-								insertText += '\n';
+								insText += '\n';
 							}
 						}
-						return insertText;
+						return insText;
 					}
 
 					isSample = false;
@@ -208,11 +252,12 @@
 					}
 
 					selText = $( this ).textSelection( 'getSelection' );
-					allText = $( this ).textSelection( 'getContents' );
-					currSelection = $( this ).textSelection( 'getCaretPosition', { startAndEnd: true } );
-					startPos = currSelection[ 0 ];
-					endPos = currSelection[ 1 ];
+					var allText = $( this ).textSelection( 'getContents' );
+					var currSelection = $( this ).textSelection( 'getCaretPosition', { startAndEnd: true } );
+					var startPos = currSelection[ 0 ];
+					var endPos = currSelection[ 1 ];
 					checkSelectedText();
+					var combiningCharSelectionBug = false;
 					if (
 						options.selectionStart !== undefined &&
 						endPos - startPos !== options.selectionEnd - options.selectionStart
@@ -226,7 +271,7 @@
 						// Minimal test case: https://jsfiddle.net/z4q7a2ko/
 					}
 
-					insertText = pre + selText + post;
+					var insertText = pre + selText + post;
 					if ( options.splitlines ) {
 						insertText = doSplitLines( selText, pre, post );
 					}
@@ -322,13 +367,11 @@
 			 */
 			scrollToCaretPosition: function ( options ) {
 				return this.each( function () {
-					var
-						clientHeight = this.clientHeight,
+					var clientHeight = this.clientHeight,
 						origValue = this.value,
 						origSelectionStart = this.selectionStart,
 						origSelectionEnd = this.selectionEnd,
-						origScrollTop = this.scrollTop,
-						calcScrollTop;
+						origScrollTop = this.scrollTop;
 
 					// Delete all text after the selection and scroll the textarea to the end.
 					// This ensures the selection is visible (aligned to the bottom of the textarea).
@@ -337,7 +380,7 @@
 					this.scrollTop = this.scrollHeight;
 					// Chrome likes to adjust scroll position when changing value, so save and re-set later.
 					// Note that this is not equal to scrollHeight, it's scrollHeight minus clientHeight.
-					calcScrollTop = this.scrollTop;
+					var calcScrollTop = this.scrollTop;
 					this.value = origValue;
 					this.selectionStart = origSelectionStart;
 					this.selectionEnd = origSelectionEnd;
@@ -377,7 +420,7 @@
 		 * @private
 		 */
 
-		alternateFn = $( this ).data( 'jquery.textSelection' );
+		var alternateFn = $( this ).data( 'jquery.textSelection' );
 
 		// Apply defaults
 		switch ( command ) {
@@ -386,7 +429,7 @@
 			// case 'getSelection': // no params
 			// case 'replaceSelection': // no params with defaults
 			case 'encapsulateSelection':
-				options = $.extend( {
+				commandOptions = $.extend( {
 					pre: '',
 					peri: '',
 					post: '',
@@ -396,32 +439,32 @@
 					splitlines: false,
 					selectionStart: undefined,
 					selectionEnd: undefined
-				}, options );
+				}, commandOptions );
 				break;
 			case 'getCaretPosition':
-				options = $.extend( {
+				commandOptions = $.extend( {
 					startAndEnd: false
-				}, options );
+				}, commandOptions );
 				break;
 			case 'setSelection':
-				options = $.extend( {
+				commandOptions = $.extend( {
 					start: undefined,
 					end: undefined
-				}, options );
-				if ( options.end === undefined ) {
-					options.end = options.start;
+				}, commandOptions );
+				if ( commandOptions.end === undefined ) {
+					commandOptions.end = commandOptions.start;
 				}
 				break;
 			case 'scrollToCaretPosition':
-				options = $.extend( {
+				commandOptions = $.extend( {
 					force: false
-				}, options );
+				}, commandOptions );
 				break;
 			case 'register':
 				if ( alternateFn ) {
 					throw new Error( 'Another textSelection API was already registered' );
 				}
-				$( this ).data( 'jquery.textSelection', options );
+				$( this ).data( 'jquery.textSelection', commandOptions );
 				// No need to update alternateFn as this command only stores the options.
 				// A command that uses it will set it again.
 				return;
@@ -430,7 +473,7 @@
 				return;
 		}
 
-		retval = ( alternateFn && alternateFn[ command ] || fn[ command ] ).call( this, options );
+		var retval = ( alternateFn && alternateFn[ command ] || fn[ command ] ).call( this, commandOptions );
 
 		return retval;
 	};

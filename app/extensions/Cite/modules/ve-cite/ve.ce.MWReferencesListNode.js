@@ -10,7 +10,7 @@
  *
  * @class
  * @extends ve.ce.LeafNode
- * @mixins ve.ce.FocusableNode
+ * @mixin ve.ce.FocusableNode
  *
  * @constructor
  * @param {ve.dm.MWReferencesListNode} model Model to observe
@@ -91,14 +91,18 @@ ve.ce.MWReferencesListNode.prototype.onSetup = function () {
  * @method
  */
 ve.ce.MWReferencesListNode.prototype.onTeardown = function () {
+	// Parent method
+	ve.ce.MWReferencesListNode.super.prototype.onTeardown.call( this );
+
+	if ( !this.listNode ) {
+		return;
+	}
+
 	this.internalList.disconnect( this, { update: 'onInternalListUpdate' } );
 	this.listNode.disconnect( this, { update: 'onListNodeUpdate' } );
 
 	this.internalList = null;
 	this.listNode = null;
-
-	// Parent method
-	ve.ce.MWReferencesListNode.super.prototype.onTeardown.call( this );
 };
 
 /**
@@ -154,28 +158,40 @@ ve.ce.MWReferencesListNode.prototype.onListNodeUpdate = function () {
  * Update the references list.
  */
 ve.ce.MWReferencesListNode.prototype.update = function () {
-	var i, j, iLen, jLen, index, firstNode, key, keyedNodes, modelNode, refPreview,
-		$li, $refSpan, $link, internalList, refGroup, listGroup, nodes,
-		model = this.getModel();
+	var model = this.getModel();
 
 	// Check the node hasn't been destroyed, as this method is debounced.
 	if ( !model ) {
 		return;
 	}
 
-	internalList = model.getDocument().internalList;
-	refGroup = model.getAttribute( 'refGroup' );
-	listGroup = model.getAttribute( 'listGroup' );
-	nodes = internalList.getNodeGroup( listGroup );
+	var internalList = model.getDocument().internalList;
+	var refGroup = model.getAttribute( 'refGroup' );
+	var listGroup = model.getAttribute( 'listGroup' );
+	var nodes = internalList.getNodeGroup( listGroup );
+
+	var emptyText;
+	if ( refGroup !== '' ) {
+		emptyText = ve.msg( 'cite-ve-referenceslist-isempty', refGroup );
+	} else {
+		emptyText = ve.msg( 'cite-ve-referenceslist-isempty-default' );
+	}
 
 	// Just use Parsoid-provided DOM for first rendering
 	// NB: Technically this.modified could be reset to false if this
 	// node is re-attached, but that is an unlikely edge case.
 	if ( !this.modified && model.getElement().originalDomElementsHash ) {
-		this.$originalRefList = $( model.getStore().value(
+		// Create a copy when importing to the main document, as extensions may
+		// modify DOM nodes in the main doc.
+		this.$originalRefList = $( ve.copyDomElements( model.getStore().value(
 			model.getElement().originalDomElementsHash
-		) );
-		this.$element.append( this.$originalRefList );
+		), document ) );
+		if ( !nodes || !nodes.indexOrder.length ) {
+			this.$refmsg.text( emptyText );
+			this.$element.append( this.$refmsg );
+		} else {
+			this.$element.append( this.$originalRefList );
+		}
 		return;
 	}
 
@@ -193,19 +209,15 @@ ve.ce.MWReferencesListNode.prototype.update = function () {
 	}
 
 	if ( !nodes || !nodes.indexOrder.length ) {
-		if ( refGroup !== '' ) {
-			this.$refmsg.text( ve.msg( 'cite-ve-referenceslist-isempty', refGroup ) );
-		} else {
-			this.$refmsg.text( ve.msg( 'cite-ve-referenceslist-isempty-default' ) );
-		}
+		this.$refmsg.text( emptyText );
 		this.$element.append( this.$refmsg );
 	} else {
-		for ( i = 0, iLen = nodes.indexOrder.length; i < iLen; i++ ) {
-			index = nodes.indexOrder[ i ];
-			firstNode = nodes.firstNodes[ index ];
+		for ( var i = 0, iLen = nodes.indexOrder.length; i < iLen; i++ ) {
+			var index = nodes.indexOrder[ i ];
+			var firstNode = nodes.firstNodes[ index ];
 
-			key = internalList.keys[ index ];
-			keyedNodes = nodes.keyedNodes[ key ];
+			var key = internalList.keys[ index ];
+			var keyedNodes = nodes.keyedNodes[ key ];
 			keyedNodes = keyedNodes.filter( function ( node ) {
 				// Exclude placeholder references
 				if ( node.getAttribute( 'placeholder' ) ) {
@@ -225,36 +237,13 @@ ve.ce.MWReferencesListNode.prototype.update = function () {
 				continue;
 			}
 
-			$li = $( '<li>' );
-
-			if ( keyedNodes.length > 1 ) {
-				$refSpan = $( '<span>' ).attr( 'rel', 'mw:referencedBy' );
-				for ( j = 0, jLen = keyedNodes.length; j < jLen; j++ ) {
-					$link = $( '<a>' ).append(
-						$( '<span>' ).addClass( 'mw-linkback-text' )
-							.text( ( j + 1 ) + ' ' )
-					);
-					if ( refGroup !== '' ) {
-						$link.attr( 'data-mw-group', refGroup );
-					}
-					$refSpan.append( $link );
-				}
-				$li.append( $refSpan );
-			} else {
-				$link = $( '<a>' ).attr( 'rel', 'mw:referencedBy' ).append(
-					$( '<span>' ).addClass( 'mw-linkback-text' )
-						.text( '↑ ' )
-				);
-				if ( refGroup !== '' ) {
-					$link.attr( 'data-mw-group', refGroup );
-				}
-				$li.append( $link );
-			}
+			var $li = $( '<li>' )
+				.append( this.renderBacklinks( keyedNodes, refGroup ) );
 
 			// Generate reference HTML from first item in key
-			modelNode = internalList.getItemNode( firstNode.getAttribute( 'listIndex' ) );
+			var modelNode = internalList.getItemNode( firstNode.getAttribute( 'listIndex' ) );
 			if ( modelNode && modelNode.length ) {
-				refPreview = new ve.ui.MWPreviewElement( modelNode, { useView: true } );
+				var refPreview = new ve.ui.MWPreviewElement( modelNode, { useView: true } );
 				$li.append(
 					$( '<span>' )
 						.addClass( 'reference-text' )
@@ -286,6 +275,42 @@ ve.ce.MWReferencesListNode.prototype.updateClasses = function () {
 	this.$element
 		.toggleClass( 'mw-references-wrap', isResponsive )
 		.toggleClass( 'mw-references-columns', isResponsive && this.$reflist.children().length > 10 );
+};
+
+/**
+ * Build markers for backlinks
+ *
+ * @param {ve.dm.Node[]} keyedNodes A list of ref nodes linked to a reference list item
+ * @param {string} refGroup Reference group name
+ * @return {jQuery} Element containing backlinks
+ */
+ve.ce.MWReferencesListNode.prototype.renderBacklinks = function ( keyedNodes, refGroup ) {
+	var $link;
+	if ( keyedNodes.length > 1 ) {
+		// named reference with multiple usages
+		var $refSpan = $( '<span>' ).attr( 'rel', 'mw:referencedBy' );
+		for ( var j = 0, jLen = keyedNodes.length; j < jLen; j++ ) {
+			$link = $( '<a>' ).append(
+				$( '<span>' ).addClass( 'mw-linkback-text' )
+					.text( ( j + 1 ) + ' ' )
+			);
+			if ( refGroup !== '' ) {
+				$link.attr( 'data-mw-group', refGroup );
+			}
+			$refSpan.append( $link );
+		}
+		return $refSpan;
+	} else {
+		// solo reference
+		$link = $( '<a>' ).attr( 'rel', 'mw:referencedBy' ).append(
+			$( '<span>' ).addClass( 'mw-linkback-text' )
+				.text( '↑ ' )
+		);
+		if ( refGroup !== '' ) {
+			$link.attr( 'data-mw-group', refGroup );
+		}
+		return $link;
+	}
 };
 
 /* Registration */

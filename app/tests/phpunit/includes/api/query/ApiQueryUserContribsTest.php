@@ -18,12 +18,15 @@ class ApiQueryUserContribsTest extends ApiTestCase {
 			User::newFromName( 'IW>' . __CLASS__, false ),
 		];
 
-		$title = Title::newFromText( __CLASS__ );
-		$page = WikiPage::factory( $title );
+		$title = Title::makeTitle( NS_MAIN, 'ApiQueryUserContribsTest' );
 		for ( $i = 0; $i < 3; $i++ ) {
 			foreach ( array_reverse( $users ) as $user ) {
-				$status = $page->doEditContent(
-					ContentHandler::makeContent( "Test revision $user #$i", $title ), 'Test edit', 0, false, $user
+				$status = $this->editPage(
+					$title,
+					"Test revision $user #$i",
+					'Test edit',
+					NS_MAIN,
+					$user
 				);
 				if ( !$status->isOK() ) {
 					$this->fail( "Failed to edit $title: " . $status->getWikiText( false, false, 'en' ) );
@@ -39,20 +42,15 @@ class ApiQueryUserContribsTest extends ApiTestCase {
 	 * @param int $revs Number of revisions to expect
 	 */
 	public function testSorting( $params, $reverse, $revs ) {
-		// FIXME: fails under sqlite
-		$this->markTestSkippedIfDbType( 'sqlite' );
-
 		if ( isset( $params['ucuserids'] ) ) {
-			$params['ucuserids'] = implode( '|', array_map( 'User::idFromName', $params['ucuserids'] ) );
+			$params['ucuserids'] = implode( '|', array_map( [ User::class, 'idFromName' ], $params['ucuserids'] ) );
 		}
 		if ( isset( $params['ucuser'] ) ) {
 			$params['ucuser'] = implode( '|', $params['ucuser'] );
 		}
 
-		$sort = 'rsort';
 		if ( $reverse ) {
 			$params['ucdir'] = 'newer';
-			$sort = 'sort';
 		}
 
 		$params += [
@@ -75,7 +73,7 @@ class ApiQueryUserContribsTest extends ApiTestCase {
 		$this->assertSame( $revs, $count, 'Expected number of revisions' );
 		foreach ( $ids as $user => $revids ) {
 			$sorted = $revids;
-			call_user_func_array( $sort, [ &$sorted ] );
+			$reverse ? sort( $sorted ) : rsort( $sorted );
 			$this->assertSame( $sorted, $revids, "IDs for $user are sorted" );
 		}
 
@@ -117,6 +115,7 @@ class ApiQueryUserContribsTest extends ApiTestCase {
 			yield "User IDs, $name" => [ [ 'ucuserids' => $users ], $reverse, 9 ];
 			yield "Users by prefix, $name" => [ [ 'ucuserprefix' => __CLASS__ ], $reverse, 9 ];
 			yield "IPs by prefix, $name" => [ [ 'ucuserprefix' => '192.168.2.' ], $reverse, 9 ];
+			yield "IPs by range, $name" => [ [ 'uciprange' => '192.168.2.0/24' ], $reverse, 9 ];
 		}
 	}
 

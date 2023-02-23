@@ -1,7 +1,5 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
-
 /**
  * @group Database
  * @group Cache
@@ -11,20 +9,22 @@ class GenderCacheTest extends MediaWikiLangTestCase {
 	/** @var string[] User key => username */
 	private static $nameMap;
 
-	function addDBDataOnce() {
+	public function addDBDataOnce() {
 		// ensure the correct default gender
 		$this->mergeMwGlobalArrayValue( 'wgDefaultUserOptions', [ 'gender' => 'unknown' ] );
 
+		$userOptionsManager = $this->getServiceContainer()->getUserOptionsManager();
+
 		$male = $this->getMutableTestUser()->getUser();
-		$male->setOption( 'gender', 'male' );
+		$userOptionsManager->setOption( $male, 'gender', 'male' );
 		$male->saveSettings();
 
 		$female = $this->getMutableTestUser()->getUser();
-		$female->setOption( 'gender', 'female' );
+		$userOptionsManager->setOption( $female, 'gender', 'female' );
 		$female->saveSettings();
 
 		$default = $this->getMutableTestUser()->getUser();
-		$default->setOption( 'gender', null );
+		$userOptionsManager->setOption( $default, 'gender', null );
 		$default->saveSettings();
 
 		self::$nameMap = [
@@ -41,10 +41,10 @@ class GenderCacheTest extends MediaWikiLangTestCase {
 	 * @covers GenderCache::getGenderOf
 	 */
 	public function testUserName( $userKey, $expectedGender ) {
-		$genderCache = MediaWikiServices::getInstance()->getGenderCache();
+		$genderCache = $this->getServiceContainer()->getGenderCache();
 		$username = self::$nameMap[$userKey] ?? $userKey;
 		$gender = $genderCache->getGenderOf( $username );
-		$this->assertEquals( $gender, $expectedGender, "GenderCache normal" );
+		$this->assertEquals( $expectedGender, $gender, "GenderCache normal" );
 	}
 
 	/**
@@ -55,9 +55,9 @@ class GenderCacheTest extends MediaWikiLangTestCase {
 	 */
 	public function testUserObjects( $userKey, $expectedGender ) {
 		$username = self::$nameMap[$userKey] ?? $userKey;
-		$genderCache = MediaWikiServices::getInstance()->getGenderCache();
+		$genderCache = $this->getServiceContainer()->getGenderCache();
 		$gender = $genderCache->getGenderOf( $username );
-		$this->assertEquals( $gender, $expectedGender, "GenderCache normal" );
+		$this->assertEquals( $expectedGender, $gender, "GenderCache normal" );
 	}
 
 	public static function provideUserGenders() {
@@ -81,8 +81,27 @@ class GenderCacheTest extends MediaWikiLangTestCase {
 	 */
 	public function testStripSubpages( $userKey, $expectedGender ) {
 		$username = self::$nameMap[$userKey] ?? $userKey;
-		$genderCache = MediaWikiServices::getInstance()->getGenderCache();
+		$genderCache = $this->getServiceContainer()->getGenderCache();
 		$gender = $genderCache->getGenderOf( "$username/subpage" );
-		$this->assertEquals( $gender, $expectedGender, "GenderCache must strip of subpages" );
+		$this->assertEquals( $expectedGender, $gender, "GenderCache must strip of subpages" );
+	}
+
+	/**
+	 * GenderCache must work without database (like Installer)
+	 * @coversNothing
+	 */
+	public function testWithoutDB() {
+		$this->overrideMwServices();
+
+		$services = $this->getServiceContainer();
+		$services->disableService( 'DBLoadBalancer' );
+		$services->disableService( 'DBLoadBalancerFactory' );
+
+		// Make sure the disable works
+		$this->assertTrue( $services->isServiceDisabled( 'DBLoadBalancer' ) );
+
+		// Test, if it is possible to create the gender cache
+		$genderCache = $services->getGenderCache();
+		$this->assertInstanceOf( GenderCache::class, $genderCache );
 	}
 }

@@ -26,6 +26,7 @@ use Wikimedia\Rdbms\ILoadBalancer;
 
 /**
  * Base search engine base class for database-backed searches
+ * @stable to extend
  * @ingroup Search
  * @since 1.23
  */
@@ -46,7 +47,7 @@ abstract class SearchDatabase extends SearchEngine {
 	public function __construct( ILoadBalancer $lb ) {
 		$this->lb = $lb;
 		// @TODO: remove this deprecated field in 1.35
-		$this->db = $lb->getLazyConnectionRef( DB_REPLICA ); // b/c
+		$this->db = $lb->getConnectionRef( DB_REPLICA ); // b/c
 	}
 
 	/**

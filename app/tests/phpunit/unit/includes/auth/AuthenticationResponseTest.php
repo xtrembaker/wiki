@@ -11,7 +11,7 @@ class AuthenticationResponseTest extends \MediaWikiUnitTestCase {
 	 * @dataProvider provideConstructors
 	 * @param string $constructor
 	 * @param array $args
-	 * @param array|Exception $expect
+	 * @param array|\Exception $expect
 	 */
 	public function testConstructors( $constructor, $args, $expect ) {
 		if ( is_array( $expect ) ) {
@@ -20,11 +20,11 @@ class AuthenticationResponseTest extends \MediaWikiUnitTestCase {
 			foreach ( $expect as $field => $value ) {
 				$res->$field = $value;
 			}
-			$ret = call_user_func_array( "MediaWiki\\Auth\\AuthenticationResponse::$constructor", $args );
+			$ret = AuthenticationResponse::$constructor( ...$args );
 			$this->assertEquals( $res, $ret );
 		} else {
 			try {
-				call_user_func_array( "MediaWiki\\Auth\\AuthenticationResponse::$constructor", $args );
+				AuthenticationResponse::$constructor( ...$args );
 				$this->fail( 'Expected exception not thrown' );
 			} catch ( \Exception $ex ) {
 				$this->assertEquals( $expect, $ex );
@@ -53,6 +53,7 @@ class AuthenticationResponseTest extends \MediaWikiUnitTestCase {
 				'status' => AuthenticationResponse::FAIL,
 				'message' => $msg,
 				'messageType' => 'error',
+				'failReasons' => []
 			] ],
 
 			[ 'newRestart', [ $msg ], [

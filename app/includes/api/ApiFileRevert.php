@@ -20,6 +20,8 @@
  * @file
  */
 
+use Wikimedia\ParamValidator\ParamValidator;
+
 /**
  * @ingroup API
  */
@@ -32,6 +34,23 @@ class ApiFileRevert extends ApiBase {
 
 	/** @var array */
 	protected $params;
+
+	/** @var RepoGroup */
+	private $repoGroup;
+
+	/**
+	 * @param ApiMain $main
+	 * @param string $action
+	 * @param RepoGroup $repoGroup
+	 */
+	public function __construct(
+		ApiMain $main,
+		$action,
+		RepoGroup $repoGroup
+	) {
+		parent::__construct( $main, $action );
+		$this->repoGroup = $repoGroup;
+	}
 
 	public function execute() {
 		$this->useTransactionalTimeLimit();
@@ -51,7 +70,7 @@ class ApiFileRevert extends ApiBase {
 			0,
 			false,
 			false,
-			$this->getUser()
+			$this->getAuthority()
 		);
 
 		if ( $status->isGood() ) {
@@ -73,12 +92,12 @@ class ApiFileRevert extends ApiBase {
 	protected function validateParameters() {
 		// Validate the input title
 		$title = Title::makeTitleSafe( NS_FILE, $this->params['filename'] );
-		if ( is_null( $title ) ) {
+		if ( $title === null ) {
 			$this->dieWithError(
 				[ 'apierror-invalidtitle', wfEscapeWikiText( $this->params['filename'] ) ]
 			);
 		}
-		$localRepo = RepoGroup::singleton()->getLocalRepo();
+		$localRepo = $this->repoGroup->getLocalRepo();
 
 		// Check if the file really exists
 		$this->file = $localRepo->newFile( $title );
@@ -88,6 +107,7 @@ class ApiFileRevert extends ApiBase {
 
 		// Check if the archivename is valid for this file
 		$this->archiveName = $this->params['archivename'];
+		// @phan-suppress-next-line PhanTypeMismatchArgumentNullable T240141
 		$oldFile = $localRepo->newFromArchiveName( $title, $this->archiveName );
 		if ( !$oldFile->exists() ) {
 			$this->dieWithError( 'filerevert-badversion' );
@@ -105,15 +125,15 @@ class ApiFileRevert extends ApiBase {
 	public function getAllowedParams() {
 		return [
 			'filename' => [
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true,
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_REQUIRED => true,
 			],
 			'comment' => [
-				ApiBase::PARAM_DFLT => '',
+				ParamValidator::PARAM_DEFAULT => '',
 			],
 			'archivename' => [
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true,
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_REQUIRED => true,
 			],
 		];
 	}

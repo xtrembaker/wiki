@@ -25,11 +25,10 @@
  * @author Daniel Kinzler
  */
 
-use MediaWiki\MediaWikiServices;
-
 /**
  * Content for JavaScript pages.
  *
+ * @newable
  * @ingroup Content
  */
 class JavaScriptContent extends TextContent {
@@ -40,44 +39,12 @@ class JavaScriptContent extends TextContent {
 	private $redirectTarget = false;
 
 	/**
+	 * @stable to call
 	 * @param string $text JavaScript code.
 	 * @param string $modelId the content model name
 	 */
 	public function __construct( $text, $modelId = CONTENT_MODEL_JAVASCRIPT ) {
 		parent::__construct( $text, $modelId );
-	}
-
-	/**
-	 * Returns a Content object with pre-save transformations applied using
-	 * Parser::preSaveTransform().
-	 *
-	 * @param Title $title
-	 * @param User $user
-	 * @param ParserOptions $popts
-	 *
-	 * @return JavaScriptContent
-	 */
-	public function preSaveTransform( Title $title, User $user, ParserOptions $popts ) {
-		// @todo Make pre-save transformation optional for script pages
-		// See T34858
-
-		$text = $this->getText();
-		$pst = MediaWikiServices::getInstance()->getParser()
-			->preSaveTransform( $text, $title, $user, $popts );
-
-		return new static( $pst );
-	}
-
-	/**
-	 * @return string JavaScript wrapped in a <pre> tag.
-	 */
-	protected function getHtml() {
-		$html = "";
-		$html .= "<pre class=\"mw-code mw-js\" dir=\"ltr\">\n";
-		$html .= htmlspecialchars( $this->getText() );
-		$html .= "\n</pre>\n";
-
-		return $html;
 	}
 
 	/**
@@ -92,6 +59,7 @@ class JavaScriptContent extends TextContent {
 			return $this;
 		}
 
+		// @phan-suppress-next-line PhanTypeMismatchReturnSuperType False positive
 		return $this->getContentHandler()->makeRedirectContent( $target );
 	}
 
@@ -106,8 +74,7 @@ class JavaScriptContent extends TextContent {
 		$text = $this->getText();
 		if ( strpos( $text, '/* #REDIRECT */' ) === 0 ) {
 			// Extract the title from the url
-			preg_match( '/title=(.*?)\\\\u0026action=raw/', $text, $matches );
-			if ( isset( $matches[1] ) ) {
+			if ( preg_match( '/title=(.*?)\\\\u0026action=raw/', $text, $matches ) ) {
 				$title = Title::newFromText( urldecode( $matches[1] ) );
 				if ( $title ) {
 					// Have a title, check that the current content equals what

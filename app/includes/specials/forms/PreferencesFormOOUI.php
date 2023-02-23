@@ -24,7 +24,7 @@
  * @since 1.32
  */
 class PreferencesFormOOUI extends OOUIHTMLForm {
-	// Override default value from HTMLForm
+	/** @var bool Override default value from HTMLForm */
 	protected $mSubSectionBeforeFields = false;
 
 	/** @var User|null */
@@ -97,7 +97,7 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 	 * @param string $html
 	 * @return string
 	 */
-	function wrapForm( $html ) {
+	public function wrapForm( $html ) {
 		$html = Xml::tags( 'div', [ 'id' => 'preferences' ], $html );
 
 		return parent::wrapForm( $html );
@@ -106,7 +106,7 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 	/**
 	 * @return string
 	 */
-	function getButtons() {
+	public function getButtons() {
 		if ( !$this->areOptionsEditable() && !$this->isPrivateInfoEditable() ) {
 			return '';
 		}
@@ -114,17 +114,6 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 		$html = parent::getButtons();
 
 		if ( $this->areOptionsEditable() ) {
-			$t = $this->getTitle()->getSubpage( 'reset' );
-
-			$html .= new OOUI\ButtonWidget( [
-				'infusable' => true,
-				'id' => 'mw-prefs-restoreprefs',
-				'label' => $this->msg( 'restoreprefs' )->text(),
-				'href' => $t->getLinkURL(),
-				'flags' => [ 'destructive' ],
-				'framed' => false,
-			] );
-
 			$html = Xml::tags( 'div', [ 'class' => 'mw-prefs-buttons' ], $html );
 		}
 
@@ -137,11 +126,9 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 	 * @param array $data
 	 * @return array
 	 */
-	function filterDataForSubmit( $data ) {
+	public function filterDataForSubmit( $data ) {
 		foreach ( $this->mFlatFields as $fieldname => $field ) {
 			if ( $field instanceof HTMLNestedFilterable ) {
-				// @phan-suppress-next-next-line PhanUndeclaredProperty All HTMLForm fields have mParams,
-				// but the instanceof confuses phan, which doesn't support intersections
 				$info = $field->mParams;
 				$prefix = $info['prefix'] ?? $fieldname;
 				foreach ( $field->filterDataForSubmit( $data[$fieldname] ) as $key => $value ) {
@@ -167,7 +154,7 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 	 * Get the whole body of the form.
 	 * @return string
 	 */
-	function getBody() {
+	public function getBody() {
 		$tabPanels = [];
 		foreach ( $this->mFieldTree as $key => $val ) {
 			if ( !is_array( $val ) ) {
@@ -178,7 +165,7 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 			$content =
 				$this->getHeaderText( $key ) .
 				$this->displaySection(
-					$this->mFieldTree[$key],
+					$val,
 					"",
 					"mw-prefsection-$key-"
 				) .
@@ -210,12 +197,15 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 		] );
 		$indexLayout->addTabPanels( $tabPanels );
 
-		return new OOUI\PanelLayout( [
+		$header = $this->formatFormHeader();
+		$form = new OOUI\PanelLayout( [
 			'framed' => true,
 			'expanded' => false,
 			'classes' => [ 'mw-prefs-tabs-wrapper' ],
 			'content' => $indexLayout
 		] );
+
+		return $header . $form;
 	}
 
 	/**
@@ -224,9 +214,9 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 	 * @param string $key
 	 * @return string
 	 */
-	function getLegend( $key ) {
+	public function getLegend( $key ) {
 		$legend = parent::getLegend( $key );
-		Hooks::run( 'PreferencesGetLegend', [ $this, $key, &$legend ] );
+		$this->getHookRunner()->onPreferencesGetLegend( $this, $key, $legend );
 		return $legend;
 	}
 
@@ -234,7 +224,7 @@ class PreferencesFormOOUI extends OOUIHTMLForm {
 	 * Get the keys of each top level preference section.
 	 * @return string[] List of section keys
 	 */
-	function getPreferenceSections() {
+	public function getPreferenceSections() {
 		return array_keys( array_filter( $this->mFieldTree, 'is_array' ) );
 	}
 }

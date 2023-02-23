@@ -20,8 +20,6 @@ use Phan\Parse\ParseVisitor;
 * Checks for function-likes that have unnecessary branches to equivalent return statements.
 *
 * This does not handle returning variables, and is only run for functions inferred to be pure.
-*
-* @phan-file-suppress PhanAccessPropertyInternal
 */
 class RedundantReturnVisitor
 {
@@ -71,9 +69,11 @@ class RedundantReturnVisitor
             // Nodes that can't contain return statements.
             case ast\AST_CALL:
             case ast\AST_PROP:
+            case ast\AST_NULLSAFE_PROP:
             case ast\AST_STATIC_PROP:
             case ast\AST_STATIC_CALL:
             case ast\AST_METHOD_CALL:
+            case ast\AST_NULLSAFE_METHOD_CALL:
             case ast\AST_UNARY_OP:
             case ast\AST_BINARY_OP:
             case ast\AST_ASSIGN:
@@ -124,7 +124,7 @@ class RedundantReturnVisitor
             if ($stmts !== $this->stmts || !($exit_status & BlockExitStatusChecker::STATUS_PROCEED)) {
                 return $possible_return_nodes;
             }
-            // This is the function body, and there's one code path where it will not return a value.
+            // This is the function body, and there's one code path where it will proceed and not return a value.
             $line = $this->stmts->lineno;
             $possible_return_nodes[] = new Node(ast\AST_RETURN, 0, [
                 'expr' => new Node(ast\AST_CONST, 0, [
@@ -134,7 +134,6 @@ class RedundantReturnVisitor
         }
         // There are 2 or more possible returned statements. Check if all returned expressions are the same.
 
-        // @phan-suppress-next-line PhanPartialTypeMismatchArgument can't understand count() assertions
         if (\count($groups) > 2 && $kind !== ast\AST_SWITCH_LIST) {
             // e.g. warn about the last two groups of returns being the same, for examples such as the following:
             //
@@ -166,7 +165,7 @@ class RedundantReturnVisitor
         $remaining_returns = $possible_return_nodes;
         $last_return = \array_pop($remaining_returns);
         $last_expr = $last_return->children['expr'];
-        if (!ParseVisitor::isConstExpr($last_expr)) {
+        if (!ParseVisitor::isConstExpr($last_expr, ParseVisitor::CONSTANT_EXPRESSION_FORBID_NEW_EXPRESSION)) {
             return;
         }
         $last_hash = ASTHasher::hash($last_expr);
@@ -174,7 +173,8 @@ class RedundantReturnVisitor
         $last_value = null;
         foreach ($remaining_returns as $return) {
             $expr = $return->children['expr'];
-            if (!ParseVisitor::isConstExpr($expr)) {
+            // TODO: Also warn about `new MyClass(constant arguments)` without warning about compatibility with php 8.1?
+            if (!ParseVisitor::isConstExpr($expr, ParseVisitor::CONSTANT_EXPRESSION_FORBID_NEW_EXPRESSION)) {
                 return;
             }
             if (ASTHasher::hash($expr) === $last_hash) {

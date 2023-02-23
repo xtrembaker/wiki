@@ -1,5 +1,8 @@
 <?php
 
+use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\TestSuite;
+
 /**
  * This is the subclass for Lua library tests. It will automatically run all
  * tests against LuaSandbox and LuaStandalone.
@@ -9,14 +12,17 @@
  * - getTestModules(): Add a mapping from $moduleName to the file containing
  *   the code.
  */
-abstract class Scribunto_LuaEngineUnitTestBase extends \PHPUnit\Framework\TestCase {
+abstract class Scribunto_LuaEngineUnitTestBase extends TestCase {
 	use MediaWikiCoversValidator;
-	use PHPUnit4And6Compat;
 	use Scribunto_LuaEngineTestHelper;
 
+	/** @var string|null */
 	private static $staticEngineName = null;
+	/** @var string|null */
 	private $engineName = null;
+	/** @var Scribunto_LuaEngine|null */
 	private $engine = null;
+	/** @var Scribunto_LuaDataProvider|null */
 	private $luaDataProvider = null;
 
 	/**
@@ -35,7 +41,7 @@ abstract class Scribunto_LuaEngineUnitTestBase extends \PHPUnit\Framework\TestCa
 	 * Class to use for the data provider
 	 * @var string
 	 */
-	protected static $dataProviderClass = 'Scribunto_LuaDataProvider';
+	protected static $dataProviderClass = Scribunto_LuaDataProvider::class;
 
 	/**
 	 * Tests to skip. Associative array mapping test name to skip reason.
@@ -43,6 +49,12 @@ abstract class Scribunto_LuaEngineUnitTestBase extends \PHPUnit\Framework\TestCa
 	 */
 	protected $skipTests = [];
 
+	/**
+	 * @param string|null $name
+	 * @param array $data
+	 * @param string $dataName
+	 * @param string|null $engineName Engine to test with
+	 */
 	public function __construct(
 		$name = null, array $data = [], $dataName = '', $engineName = null
 	) {
@@ -53,11 +65,16 @@ abstract class Scribunto_LuaEngineUnitTestBase extends \PHPUnit\Framework\TestCa
 		parent::__construct( $name, $data, $dataName );
 	}
 
+	/**
+	 * Create a PHPUnit test suite to run the test against all engines
+	 * @param string $className Test class name
+	 * @return TestSuite
+	 */
 	public static function suite( $className ) {
 		return self::makeSuite( $className );
 	}
 
-	protected function tearDown() {
+	protected function tearDown(): void {
 		if ( $this->luaDataProvider ) {
 			$this->luaDataProvider->destroy();
 			$this->luaDataProvider = null;
@@ -69,7 +86,7 @@ abstract class Scribunto_LuaEngineUnitTestBase extends \PHPUnit\Framework\TestCa
 		parent::tearDown();
 	}
 
-	public function toString() {
+	public function toString(): string {
 		// When running tests written in Lua, return a nicer representation in
 		// the failure message.
 		if ( $this->luaTestName ) {
@@ -78,6 +95,10 @@ abstract class Scribunto_LuaEngineUnitTestBase extends \PHPUnit\Framework\TestCa
 		return $this->engineName . ': ' . parent::toString();
 	}
 
+	/**
+	 * Modules that should exist
+	 * @return string[] Mapping module names to files
+	 */
 	protected function getTestModules() {
 		return [
 			'TestFramework' => __DIR__ . '/TestFramework.lua',

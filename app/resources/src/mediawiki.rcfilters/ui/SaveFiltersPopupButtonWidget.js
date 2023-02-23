@@ -142,16 +142,17 @@ SaveFiltersPopupButtonWidget.prototype.onPopupReady = function () {
 
 /**
  * Respond to "set as default" checkbox change
+ *
  * @param {boolean} checked State of the checkbox
  */
 SaveFiltersPopupButtonWidget.prototype.onSetAsDefaultChange = function ( checked ) {
-	var messageKey = checked ?
-		'rcfilters-savedqueries-apply-and-setdefault-label' :
-		'rcfilters-savedqueries-apply-label';
-
 	this.applyButton
 		.setIcon( checked ? 'pushPin' : null )
-		.setLabel( mw.msg( messageKey ) );
+		.setLabel( mw.msg(
+			checked ?
+				'rcfilters-savedqueries-apply-and-setdefault-label' :
+				'rcfilters-savedqueries-apply-label'
+		) );
 };
 
 /**
@@ -174,7 +175,7 @@ SaveFiltersPopupButtonWidget.prototype.onApplyButtonClick = function () {
 SaveFiltersPopupButtonWidget.prototype.apply = function () {
 	var label = this.input.getValue().trim();
 
-	// This condition is more for sanity-check, since the
+	// This condition is more for double-checking, since the
 	// apply button should be disabled if the label is empty
 	if ( label ) {
 		this.controller.saveCurrentQuery( label, this.setAsDefaultCheckbox.isSelected() );

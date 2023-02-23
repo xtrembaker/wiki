@@ -18,7 +18,7 @@
  * @file
  */
 
-use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 
 /**
@@ -27,9 +27,6 @@ use MediaWiki\MediaWikiServices;
  * @ingroup HTTP
  */
 class Http {
-	/** @deprecated since 1.34, just use the default engine */
-	public static $httpEngine = null;
-
 	/**
 	 * Perform an HTTP request
 	 *
@@ -128,28 +125,23 @@ class Http {
 	public static function getProxy() {
 		wfDeprecated( __METHOD__, '1.34' );
 
-		global $wgHTTPProxy;
-		return (string)$wgHTTPProxy;
+		$httpProxy = MediaWikiServices::getInstance()->getMainConfig()->get(
+			MainConfigNames::HTTPProxy );
+		return (string)$httpProxy;
 	}
 
 	/**
 	 * Get a configured MultiHttpClient
 	 *
-	 * @deprecated since 1.34, construct it directly
+	 * @deprecated since 1.34, use MediaWikiServices::getHttpRequestFactory()->createMultiClient()
 	 * @param array $options
 	 * @return MultiHttpClient
 	 */
 	public static function createMultiClient( array $options = [] ) {
 		wfDeprecated( __METHOD__, '1.34' );
-
-		global $wgHTTPConnectTimeout, $wgHTTPTimeout, $wgHTTPProxy;
-
-		return new MultiHttpClient( $options + [
-			'connTimeout' => $wgHTTPConnectTimeout,
-			'reqTimeout' => $wgHTTPTimeout,
-			'userAgent' => self::userAgent(),
-			'proxy' => $wgHTTPProxy,
-			'logger' => LoggerFactory::getInstance( 'http' )
-		] );
+		$httpProxy = MediaWikiServices::getInstance()->getMainConfig()->get(
+			MainConfigNames::HTTPProxy );
+		return MediaWikiServices::getInstance()->getHttpRequestFactory()
+			->createMultiClient( $options + [ 'proxy' => $httpProxy ] );
 	}
 }

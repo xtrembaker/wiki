@@ -16,13 +16,12 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Database
  */
-
 namespace Wikimedia\Rdbms;
 
 /**
  * Exception class for replica DB wait errors
+ * @newable
  * @ingroup Database
  */
 class DBReplicationWaitError extends DBExpectedError {

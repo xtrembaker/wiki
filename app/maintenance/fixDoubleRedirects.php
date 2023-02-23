@@ -25,6 +25,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -72,7 +74,8 @@ class FixDoubleRedirects extends Maintenance {
 			'rd_from = pa.page_id',
 			'rd_namespace = pb.page_namespace',
 			'rd_title = pb.page_title',
-			'rd_interwiki IS NULL OR rd_interwiki = ' . $dbr->addQuotes( '' ), // T42352
+			// T42352
+			'rd_interwiki IS NULL OR rd_interwiki = ' . $dbr->addQuotes( '' ),
 			'pb.page_is_redirect' => 1,
 		];
 
@@ -112,8 +115,7 @@ class FixDoubleRedirects extends Maintenance {
 				}
 			} else {
 				$jobs[] = $job;
-				// @todo FIXME: Hardcoded constant 10000 copied from DoubleRedirectJob class
-				if ( count( $jobs ) > 10000 ) {
+				if ( count( $jobs ) > DoubleRedirectJob::MAX_DR_JOBS_COUNTER ) {
 					$this->queueJobs( $jobs, $dryrun );
 					$jobs = [];
 				}
@@ -132,7 +134,7 @@ class FixDoubleRedirects extends Maintenance {
 
 	protected function queueJobs( $jobs, $dryrun = false ) {
 		$this->output( "Queuing batch of " . count( $jobs ) . " double redirects.\n" );
-		JobQueueGroup::singleton()->push( $dryrun ? [] : $jobs );
+		MediaWikiServices::getInstance()->getJobQueueGroup()->push( $dryrun ? [] : $jobs );
 	}
 }
 

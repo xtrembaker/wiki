@@ -25,15 +25,10 @@ namespace MediaWiki\Revision;
 /**
  * Exception throw when trying to access undefined fields on an incomplete RevisionRecord.
  *
+ * @newable
  * @since 1.31
  * @since 1.32 Renamed from MediaWiki\Storage\IncompleteRevisionException
  */
 class IncompleteRevisionException extends RevisionAccessException {
 
 }
-
-/**
- * Retain the old class name for backwards compatibility.
- * @deprecated since 1.32
- */
-class_alias( IncompleteRevisionException::class, 'MediaWiki\Storage\IncompleteRevisionException' );

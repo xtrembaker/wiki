@@ -10,16 +10,13 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 	 */
 	public function testMediaWikiCheck( $coreVersion, $constraint, $expected ) {
 		$checker = new VersionChecker( $coreVersion, '7.0.0', [] );
-		$this->assertEquals( $expected, !(bool)$checker->checkArray( [
-			'FakeExtension' => [
-				'MediaWiki' => $constraint,
-			],
-		] ) );
+		$extDependencies = [ 'FakeExtension' => [ 'MediaWiki' => $constraint ] ];
+		$this->assertSame( $expected, $checker->checkArray( $extDependencies ) === [] );
 	}
 
 	public static function provideMediaWikiCheck() {
 		return [
-			// [ $wgVersion, constraint, expected ]
+			// [ MediaWiki version, constraint, expected ]
 			[ '1.25alpha', '>= 1.26', false ],
 			[ '1.25.0', '>= 1.26', false ],
 			[ '1.26alpha', '>= 1.26', true ],
@@ -46,13 +43,8 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 	 */
 	public function testPhpValidCheck( $phpVersion, $constraint, $expected ) {
 		$checker = new VersionChecker( '1.0.0', $phpVersion, [] );
-		$this->assertEquals( $expected, !(bool)$checker->checkArray( [
-			'FakeExtension' => [
-				'platform' => [
-					'php' => $constraint,
-				],
-			],
-		] ) );
+		$extDependencies = [ 'FakeExtension' => [ 'platform' => [ 'php' => $constraint ] ] ];
+		$this->assertSame( $expected, $checker->checkArray( $extDependencies ) === [] );
 	}
 
 	public static function providePhpValidCheck() {
@@ -64,11 +56,9 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 		];
 	}
 
-	/**
-	 * @expectedException UnexpectedValueException
-	 */
 	public function testPhpInvalidConstraint() {
 		$checker = new VersionChecker( '1.0.0', '7.0.0', [] );
+		$this->expectException( UnexpectedValueException::class );
 		$checker->checkArray( [
 			'FakeExtension' => [
 				'platform' => [
@@ -80,10 +70,10 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 
 	/**
 	 * @dataProvider providePhpInvalidVersion
-	 * @expectedException UnexpectedValueException
 	 */
 	public function testPhpInvalidVersion( $phpVersion ) {
-		 $checker = new VersionChecker( '1.0.0', $phpVersion, [] );
+		$this->expectException( UnexpectedValueException::class );
+		$checker = new VersionChecker( '1.0.0', $phpVersion, [] );
 	}
 
 	public static function providePhpInvalidVersion() {
@@ -187,7 +177,6 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 					[
 						'incompatible' => 'FakeExtension',
 						'type' => 'incompatible-extensions',
-						// phpcs:ignore Generic.Files.LineLength.TooLong
 						'msg' => 'FakeExtension is not compatible with the current installed version of FakeDependency (1.0.0), it requires: 2.0.0.',
 					],
 				],
@@ -224,7 +213,6 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 					[
 						'missing' => 'phpMissingExtension',
 						'type' => 'missing-phpExtension',
-						// phpcs:ignore Generic.Files.LineLength.TooLong
 						'msg' => 'FakeExtension requires phpMissingExtension PHP extension to be installed.',
 					],
 				],
@@ -285,7 +273,6 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 					[
 						'missing' => 'missingAbilityWithMessage',
 						'type' => 'missing-ability',
-						// phpcs:ignore Generic.Files.LineLength.TooLong
 						'msg' => 'FakeExtension requires "missingAbilityWithMessage" ability: Missing.',
 					],
 				],
@@ -340,7 +327,7 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 				],
 			] );
 
-		$this->setExpectedException( UnexpectedValueException::class );
+		$this->expectException( UnexpectedValueException::class );
 		$checker->checkArray( [
 			'FakeExtension' => [
 				'FakeDependency' => 'not really valid',
@@ -415,7 +402,7 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 	/**
 	 * @dataProvider provideInvalidDependency
 	 */
-	public function testInvalidDependency( $depencency, $type ) {
+	public function testInvalidDependency( $dependency, $type ) {
 		$checker = new VersionChecker(
 			'1.0.0',
 			'7.0.0',
@@ -425,19 +412,16 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 				'missingAbility' => false,
 			]
 		);
-		$this->setExpectedException(
-			UnexpectedValueException::class,
-			"Dependency type $type unknown in FakeExtension"
-		);
-		$checker->checkArray( $depencency );
+		$this->expectException( UnexpectedValueException::class );
+		$this->expectExceptionMessage( "Dependency type $type unknown in FakeExtension" );
+		$checker->checkArray( $dependency );
 	}
 
 	public function testInvalidPhpExtensionConstraint() {
 		$checker = new VersionChecker( '1.0.0', '7.0.0', [ 'phpLoadedExtension' ] );
-		$this->setExpectedException(
-			UnexpectedValueException::class,
-			'Version constraints for PHP extensions are not supported in FakeExtension'
-		);
+		$this->expectException( UnexpectedValueException::class );
+		$this->expectExceptionMessage(
+			'Version constraints for PHP extensions are not supported in FakeExtension' );
 		$checker->checkArray( [
 			'FakeExtension' => [
 				'platform' => [
@@ -452,10 +436,9 @@ class VersionCheckerTest extends MediaWikiUnitTestCase {
 	 */
 	public function testInvalidAbilityType( $value ) {
 		$checker = new VersionChecker( '1.0.0', '7.0.0', [], [ 'presentAbility' => true ] );
-		$this->setExpectedException(
-			UnexpectedValueException::class,
-			'Only booleans are allowed to to indicate the presence of abilities in FakeExtension'
-		);
+		$this->expectException( UnexpectedValueException::class );
+		$this->expectExceptionMessage(
+			'Only booleans are allowed to to indicate the presence of abilities in FakeExtension' );
 		$checker->checkArray( [
 			'FakeExtension' => [
 				'platform' => [

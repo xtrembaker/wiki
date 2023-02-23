@@ -24,6 +24,8 @@
 namespace MediaWiki\Session;
 
 use BotPassword;
+use MediaWiki\MainConfigNames;
+use MediaWiki\Permissions\GrantsInfo;
 use User;
 use WebRequest;
 
@@ -32,14 +34,17 @@ use WebRequest;
  * @since 1.27
  */
 class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
+	/** @var GrantsInfo */
+	private $grantsInfo;
 
 	/**
+	 * @param GrantsInfo $grantsInfo
 	 * @param array $params Keys include:
 	 *  - priority: (required) Set the priority
 	 *  - sessionCookieName: Session cookie name. Default is '_BPsession'.
 	 *  - sessionCookieOptions: Options to pass to WebResponse::setCookie().
 	 */
-	public function __construct( array $params = [] ) {
+	public function __construct( GrantsInfo $grantsInfo, array $params = [] ) {
 		if ( !isset( $params['sessionCookieName'] ) ) {
 			$params['sessionCookieName'] = '_BPsession';
 		}
@@ -55,16 +60,18 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 		}
 
 		$this->priority = $params['priority'];
+
+		$this->grantsInfo = $grantsInfo;
 	}
 
 	public function provideSessionInfo( WebRequest $request ) {
-		// Only relevant for the API
-		if ( !defined( 'MW_API' ) ) {
+		// Only relevant for the (Action or REST) API
+		if ( !defined( 'MW_API' ) && !defined( 'MW_REST_API' ) ) {
 			return null;
 		}
 
 		// Enabled?
-		if ( !$this->config->get( 'EnableBotPasswords' ) ) {
+		if ( !$this->getConfig()->get( MainConfigNames::EnableBotPasswords ) ) {
 			return null;
 		}
 
@@ -104,7 +111,7 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 				'centralId' => $bp->getUserCentralId(),
 				'appId' => $bp->getAppId(),
 				'token' => $bp->getToken(),
-				'rights' => \MWGrants::getGrantRights( $bp->getGrants() ),
+				'rights' => $this->grantsInfo->getGrantRights( $bp->getGrants() ),
 			],
 		] );
 		$session = $this->getManager()->getSessionFromInfo( $info, $request );
@@ -112,6 +119,10 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 		return $session;
 	}
 
+	/**
+	 * @inheritDoc
+	 * @phan-param array &$metadata
+	 */
 	public function refreshSessionInfo( SessionInfo $info, WebRequest $request, &$metadata ) {
 		$missingKeys = array_diff(
 			[ 'centralId', 'appId', 'token' ],
@@ -119,7 +130,7 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 		);
 		if ( $missingKeys ) {
 			$this->logger->info( 'Session "{session}": Missing metadata: {missing}', [
-				'session' => $info,
+				'session' => $info->__toString(),
 				'missing' => implode( ', ', $missingKeys ),
 			] );
 			return false;
@@ -130,7 +141,7 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 			$this->logger->info(
 				'Session "{session}": No BotPassword for {centralId} {appId}',
 				[
-					'session' => $info,
+					'session' => $info->__toString(),
 					'centralId' => $metadata['centralId'],
 					'appId' => $metadata['appId'],
 			] );
@@ -139,7 +150,7 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 
 		if ( !hash_equals( $metadata['token'], $bp->getToken() ) ) {
 			$this->logger->info( 'Session "{session}": BotPassword token check failed', [
-				'session' => $info,
+				'session' => $info->__toString(),
 				'centralId' => $metadata['centralId'],
 				'appId' => $metadata['appId'],
 			] );
@@ -151,7 +162,7 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 			$this->logger->info(
 				'Session "{session}": Restrictions check failed',
 				[
-					'session' => $info,
+					'session' => $info->__toString(),
 					'restrictions' => $status->getValue(),
 					'centralId' => $metadata['centralId'],
 					'appId' => $metadata['appId'],
@@ -160,7 +171,7 @@ class BotPasswordSessionProvider extends ImmutableSessionProviderWithCookie {
 		}
 
 		// Update saved rights
-		$metadata['rights'] = \MWGrants::getGrantRights( $bp->getGrants() );
+		$metadata['rights'] = $this->grantsInfo->getGrantRights( $bp->getGrants() );
 
 		return true;
 	}

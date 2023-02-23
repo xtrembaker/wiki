@@ -3,9 +3,9 @@
 /**
  * @covers QuestyCaptcha
  */
-class QuestyCaptchaTest extends MediaWikiTestCase {
+class QuestyCaptchaTest extends MediaWikiIntegrationTestCase {
 
-	public function setUp() {
+	public function setUp(): void {
 		parent::setUp();
 
 		$this->mergeMwGlobalArrayValue(

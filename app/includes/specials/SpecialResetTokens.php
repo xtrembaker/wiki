@@ -21,6 +21,8 @@
  * @ingroup SpecialPage
  */
 
+use MediaWiki\MainConfigNames;
+
 /**
  * Let users reset tokens like the watchlist token.
  *
@@ -38,6 +40,10 @@ class SpecialResetTokens extends FormSpecialPage {
 		return true;
 	}
 
+	public function requiresUnblock() {
+		return false;
+	}
+
 	/**
 	 * Returns the token information list for this page after running
 	 * the hook and filtering out disabled preferences.
@@ -49,10 +55,10 @@ class SpecialResetTokens extends FormSpecialPage {
 			$tokens = [
 				[ 'preference' => 'watchlisttoken', 'label-message' => 'resettokens-watchlist-token' ],
 			];
-			Hooks::run( 'SpecialResetTokensTokens', [ &$tokens ] );
+			$this->getHookRunner()->onSpecialResetTokensTokens( $tokens );
 
-			$hiddenPrefs = $this->getConfig()->get( 'HiddenPrefs' );
-			$tokens = array_filter( $tokens, function ( $tok ) use ( $hiddenPrefs ) {
+			$hiddenPrefs = $this->getConfig()->get( MainConfigNames::HiddenPrefs );
+			$tokens = array_filter( $tokens, static function ( $tok ) use ( $hiddenPrefs ) {
 				return !in_array( $tok['preference'], $hiddenPrefs );
 			} );
 
@@ -65,7 +71,7 @@ class SpecialResetTokens extends FormSpecialPage {
 	public function execute( $par ) {
 		// This is a preferences page, so no user JS for y'all.
 		$this->getOutput()->disallowUserJs();
-		$this->requireLogin();
+		$this->requireNamedUser();
 
 		parent::execute( $par );
 

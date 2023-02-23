@@ -24,8 +24,8 @@
  * @ingroup Maintenance
  */
 
-use MediaWiki\MediaWikiServices;
 use MediaWiki\Extension\OATHAuth\Hook\LoadExtensionSchemaUpdates\UpdateTables;
+use MediaWiki\MediaWikiServices;
 
 if ( getenv( 'MW_INSTALL_PATH' ) ) {
 	$IP = getenv( 'MW_INSTALL_PATH' );
@@ -45,10 +45,10 @@ class UpdateTOTPToMultipleKeys extends Maintenance {
 		global $wgOATHAuthDatabase;
 		$lb = MediaWikiServices::getInstance()->getDBLoadBalancerFactory()
 			->getMainLB( $wgOATHAuthDatabase );
-		$dbw = $lb->getConnectionRef( DB_MASTER, [], $wgOATHAuthDatabase );
+		$dbw = $lb->getConnectionRef( DB_PRIMARY, [], $wgOATHAuthDatabase );
 
 		if ( !UpdateTables::switchTOTPToMultipleKeys( $dbw ) ) {
-			$this->error( "Failed to update TOTP keys.\n", 1 );
+			$this->fatalError( "Failed to update TOTP keys.\n" );
 		}
 		$this->output( "Done.\n" );
 	}

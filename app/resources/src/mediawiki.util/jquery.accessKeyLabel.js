@@ -4,93 +4,82 @@
  * @class jQuery.plugin.accessKeyLabel
  */
 
-// Cached access key modifiers for used browser
-var cachedAccessKeyModifiers,
+// Whether to use 'test-' instead of correct prefix (for unit tests)
+var testMode = false;
 
-	// Whether to use 'test-' instead of correct prefix (used for testing)
-	useTestPrefix = false,
-
-	// tag names which can have a label tag
-	// https://developer.mozilla.org/en-US/docs/Web/Guide/HTML/Content_categories#Form-associated_content
-	labelable = 'button, input, textarea, keygen, meter, output, progress, select';
+var cachedModifiers;
 
 /**
  * Find the modifier keys that need to be pressed together with the accesskey to trigger the input.
  *
- * The result is dependant on the ua paramater or the current platform.
+ * The result is dependent on the ua paramater or the current platform.
  * For browsers that support accessKeyLabel, #getAccessKeyLabel never calls here.
  * Valid key values that are returned can be: ctrl, alt, option, shift, esc
  *
  * @private
- * @param {Object} [ua] An object with a 'userAgent' and 'platform' property.
- * @return {Array} Array with 1 or more of the string values, in this order: ctrl, option, alt, shift, esc
+ * @param {Object|undefined} [nav] A Navigator object with `userAgent` and `platform` properties.
+ * @return {string} Label with dash-separated segments in this order: ctrl, option, alt, shift, esc
  */
-function getAccessKeyModifiers( ua ) {
-	var profile, accessKeyModifiers;
-
-	// use cached prefix if possible
-	if ( !ua && cachedAccessKeyModifiers ) {
-		return cachedAccessKeyModifiers;
+function getAccessKeyModifiers( nav ) {
+	if ( !nav && cachedModifiers ) {
+		return cachedModifiers;
 	}
 
-	profile = $.client.profile( ua );
+	var profile = $.client.profile( nav );
+	var accessKeyModifiers;
 
 	switch ( profile.name ) {
-		case 'chrome':
+		// Historical: Opera 8-13 used shift-esc- (Presto engine, no longer supported).
+		// Opera 15+ (Blink engine) matches Chromium.
+		// Historical: Konqueror 3-4 (WebKit) behaved the same as Safari (no longer supported).
+		// Konqueror 18+ (QtWebEngine/Chromium engine) is profiled as 'chrome',
+		// and matches Chromium behaviour.
 		case 'opera':
-			if ( profile.name === 'opera' && profile.versionNumber < 15 ) {
-				accessKeyModifiers = [ 'shift', 'esc' ];
-			} else if ( profile.platform === 'mac' ) {
-				accessKeyModifiers = [ 'ctrl', 'option' ];
+		case 'chrome':
+			if ( profile.platform === 'mac' ) {
+				// Chromium on macOS
+				accessKeyModifiers = 'ctrl-option';
 			} else {
-				// Chrome/Opera on Windows or Linux
+				// Chromium on Windows or Linux
 				// (both alt- and alt-shift work, but alt with E, D, F etc does not
-				// work since they are browser shortcuts)
-				accessKeyModifiers = [ 'alt', 'shift' ];
+				// work since they are native browser shortcuts as well, so advertise
+				// alt-shift- instead)
+				accessKeyModifiers = 'alt-shift';
 			}
 			break;
+		// Historical: Firefox 1.x used alt- (no longer supported).
 		case 'firefox':
 		case 'iceweasel':
-			if ( profile.versionBase < 2 ) {
-				// Before v2, Firefox used alt, though it was rebindable in about:config
-				accessKeyModifiers = [ 'alt' ];
-			} else {
-				if ( profile.platform === 'mac' ) {
-					if ( profile.versionNumber < 14 ) {
-						accessKeyModifiers = [ 'ctrl' ];
-					} else {
-						accessKeyModifiers = [ 'ctrl', 'option' ];
-					}
+			if ( profile.platform === 'mac' ) {
+				if ( profile.versionNumber < 14 ) {
+					accessKeyModifiers = 'ctrl';
 				} else {
-					accessKeyModifiers = [ 'alt', 'shift' ];
+					// Firefox 14+ on macOS
+					accessKeyModifiers = 'ctrl-option';
 				}
+			} else {
+				// Firefox 2+ on Windows or Linux
+				accessKeyModifiers = 'alt-shift';
 			}
 			break;
+		// Historical: Safari <= 3 on Windows used alt- (no longer supported).
+		// Historical: Safari <= 3 on macOS used ctrl- (no longer supported).
 		case 'safari':
-		case 'konqueror':
-			if ( profile.platform === 'win' ) {
-				accessKeyModifiers = [ 'alt' ];
-			} else {
-				if ( profile.layoutVersion > 526 ) {
-					// Non-Windows Safari with webkit_version > 526
-					accessKeyModifiers = [ 'ctrl', profile.platform === 'mac' ? 'option' : 'alt' ];
-				} else {
-					accessKeyModifiers = [ 'ctrl' ];
-				}
-			}
+			// Safari 4+ (WebKit 526+) on macOS
+			accessKeyModifiers = 'ctrl-option';
 			break;
 		case 'msie':
 		case 'edge':
-			accessKeyModifiers = [ 'alt' ];
+			accessKeyModifiers = 'alt';
 			break;
 		default:
-			accessKeyModifiers = profile.platform === 'mac' ? [ 'ctrl' ] : [ 'alt' ];
+			accessKeyModifiers = profile.platform === 'mac' ? 'ctrl' : 'alt';
 			break;
 	}
 
-	// cache modifiers
-	if ( !ua ) {
-		cachedAccessKeyModifiers = accessKeyModifiers;
+	if ( !nav ) {
+		// If not for a custom UA string, cache and re-use
+		cachedModifiers = accessKeyModifiers;
 	}
 	return accessKeyModifiers;
 }
@@ -112,10 +101,10 @@ function getAccessKeyLabel( element ) {
 	}
 	// use accessKeyLabel if possible
 	// https://html.spec.whatwg.org/multipage/interaction.html#dom-accesskeylabel
-	if ( !useTestPrefix && element.accessKeyLabel ) {
+	if ( !testMode && element.accessKeyLabel ) {
 		return element.accessKeyLabel;
 	}
-	return ( useTestPrefix ? 'test' : getAccessKeyModifiers().join( '-' ) ) + '-' + element.accessKey;
+	return ( testMode ? 'test' : getAccessKeyModifiers() ) + '-' + element.accessKey;
 }
 
 /**
@@ -127,19 +116,17 @@ function getAccessKeyLabel( element ) {
  * @param {HTMLElement} titleElement Element with the title to update (may be the same as `element`)
  */
 function updateTooltipOnElement( element, titleElement ) {
-	var oldTitle, parts, regexp, newTitle, accessKeyLabel,
-		separatorMsg = mw.message( 'word-separator' ).plain();
-
-	oldTitle = titleElement.title;
+	var oldTitle = titleElement.title;
 	if ( !oldTitle ) {
 		// don't add a title if the element didn't have one before
 		return;
 	}
 
-	parts = ( separatorMsg + mw.message( 'brackets' ).plain() ).split( '$1' );
-	regexp = new RegExp( parts.map( mw.util.escapeRegExp ).join( '.*?' ) + '$' );
-	newTitle = oldTitle.replace( regexp, '' );
-	accessKeyLabel = getAccessKeyLabel( element );
+	var separatorMsg = mw.message( 'word-separator' ).plain();
+	var parts = ( separatorMsg + mw.message( 'brackets' ).plain() ).split( '$1' );
+	var regexp = new RegExp( parts.map( mw.util.escapeRegExp ).join( '.*?' ) + '$' );
+	var newTitle = oldTitle.replace( regexp, '' );
+	var accessKeyLabel = getAccessKeyLabel( element );
 
 	if ( accessKeyLabel ) {
 		// Should be build the same as in Linker::titleAttrib
@@ -150,6 +137,10 @@ function updateTooltipOnElement( element, titleElement ) {
 	}
 }
 
+// HTML elements that can have an associated label
+// https://developer.mozilla.org/en-US/docs/Web/Guide/HTML/Content_categories#Form-associated_content
+var labelable = 'button, input, textarea, keygen, meter, output, progress, select';
+
 /**
  * Update the title for an element to show the correct access key label.
  *
@@ -157,23 +148,22 @@ function updateTooltipOnElement( element, titleElement ) {
  * @param {HTMLElement} element Element with the accesskey
  */
 function updateTooltip( element ) {
-	var id, $element, $label, $labelParent;
 	updateTooltipOnElement( element, element );
 
 	// update associated label if there is one
-	$element = $( element );
+	var $element = $( element );
 	if ( $element.is( labelable ) ) {
 		// Search it using 'for' attribute
-		id = element.id.replace( /"/g, '\\"' );
+		var id = element.id.replace( /"/g, '\\"' );
 		if ( id ) {
-			$label = $( 'label[for="' + id + '"]' );
+			var $label = $( 'label[for="' + id + '"]' );
 			if ( $label.length === 1 ) {
 				updateTooltipOnElement( element, $label[ 0 ] );
 			}
 		}
 
 		// Search it as parent, because the form control can also be inside the label element itself
-		$labelParent = $element.parents( 'label' );
+		var $labelParent = $element.parents( 'label' );
 		if ( $labelParent.length === 1 ) {
 			updateTooltipOnElement( element, $labelParent[ 0 ] );
 		}
@@ -193,14 +183,6 @@ $.fn.updateTooltipAccessKeys = function () {
 };
 
 /**
- * getAccessKeyModifiers
- *
- * @method updateTooltipAccessKeys_getAccessKeyModifiers
- * @inheritdoc #getAccessKeyModifiers
- */
-$.fn.updateTooltipAccessKeys.getAccessKeyModifiers = getAccessKeyModifiers;
-
-/**
  * getAccessKeyLabel
  *
  * @method updateTooltipAccessKeys_getAccessKeyLabel
@@ -212,12 +194,11 @@ $.fn.updateTooltipAccessKeys.getAccessKeyLabel = getAccessKeyLabel;
  * getAccessKeyPrefix
  *
  * @method updateTooltipAccessKeys_getAccessKeyPrefix
- * @deprecated since 1.27 Use #getAccessKeyModifiers
- * @param {Object} [ua] An object with a 'userAgent' and 'platform' property.
+ * @param {Object} [nav] An object with a 'userAgent' and 'platform' property.
  * @return {string}
  */
-$.fn.updateTooltipAccessKeys.getAccessKeyPrefix = function ( ua ) {
-	return getAccessKeyModifiers( ua ).join( '-' ) + '-';
+$.fn.updateTooltipAccessKeys.getAccessKeyPrefix = function ( nav ) {
+	return getAccessKeyModifiers( nav ) + '-';
 };
 
 /**
@@ -227,7 +208,7 @@ $.fn.updateTooltipAccessKeys.getAccessKeyPrefix = function ( ua ) {
  * @param {boolean} mode New mode
  */
 $.fn.updateTooltipAccessKeys.setTestMode = function ( mode ) {
-	useTestPrefix = mode;
+	testMode = mode;
 };
 
 /**

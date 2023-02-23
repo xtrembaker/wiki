@@ -2,7 +2,7 @@
 
 namespace MediaWiki\Session;
 
-use MediaWikiTestCase;
+use MediaWikiIntegrationTestCase;
 use User;
 
 /**
@@ -10,7 +10,7 @@ use User;
  * @group Database
  * @covers MediaWiki\Session\UserInfo
  */
-class UserInfoTest extends MediaWikiTestCase {
+class UserInfoTest extends MediaWikiIntegrationTestCase {
 
 	public function testNewAnonymous() {
 		$userinfo = UserInfo::newAnonymous();
@@ -26,7 +26,7 @@ class UserInfoTest extends MediaWikiTestCase {
 	}
 
 	public function testNewFromId() {
-		$id = wfGetDB( DB_MASTER )->selectField( 'user', 'MAX(user_id)' ) + 1;
+		$id = wfGetDB( DB_PRIMARY )->selectField( 'user', 'MAX(user_id)' ) + 1;
 		try {
 			UserInfo::newFromId( $id );
 			$this->fail( 'Expected exception not thrown' );
@@ -96,7 +96,7 @@ class UserInfoTest extends MediaWikiTestCase {
 
 		// User name that does not exist should still be non-anon
 		$user = User::newFromName( 'DoesNotExist' );
-		$this->assertSame( 0, $user->getId(), 'sanity check' );
+		$this->assertSame( 0, $user->getId(), 'User id is 0' );
 		$userinfo = UserInfo::newFromName( $user->getName() );
 		$this->assertFalse( $userinfo->isAnon() );
 		$this->assertFalse( $userinfo->isVerified() );
@@ -151,7 +151,7 @@ class UserInfoTest extends MediaWikiTestCase {
 
 		// User name that does not exist should still be non-anon
 		$user = User::newFromName( 'DoesNotExist' );
-		$this->assertSame( 0, $user->getId(), 'sanity check' );
+		$this->assertSame( 0, $user->getId() );
 		$userinfo = UserInfo::newFromUser( $user );
 		$this->assertFalse( $userinfo->isAnon() );
 		$this->assertFalse( $userinfo->isVerified() );

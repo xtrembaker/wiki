@@ -15,7 +15,7 @@
 ** Common styles across desktop and mobile
 */
 
-div#column-content {
+#column-content {
 	width: 100%;
 	margin: 0;
 	padding: 0;
@@ -40,11 +40,17 @@ div#column-content {
 
 /* Font size:
 ** We take advantage of keyword scaling- browsers won't go below 9px
+** See "Note 1" at https://www.w3.org/TR/CSS2/fonts.html#value-def-absolute-size
 ** More at http://www.w3.org/2003/07/30-font-size
 ** http://style.cleverchimp.com/font_size_intervals/altintervals.html
+** https://web.archive.org/web/20180201141931/http://style.cleverchimp.com/font_size_intervals/altintervals.html
+** This affects users whose browser font size setting is < 14.4px,
+** making #globalWrapper's font-size 11.43px at minimum.
+** Gadgets have their own monobook-specific css rule to set the font-size similar to #globalWrapper.
 */
 body {
-	font: x-small sans-serif;
+	font-family: sans-serif;
+	font-size: x-small; // Typical: 16px * 0.625 == 10px.
 	background: @background url( images/headbg.jpg ) 0 0 no-repeat;
 	// stylelint-disable value-list-comma-newline-after
 	/* @embed */
@@ -53,15 +59,13 @@ body {
 		@background url( images/headbg-gradient.svg ) 0 0 repeat-x;
 	// stylelint-enable value-list-comma-newline-after
 	color: @text-color;
-	margin: 0;
-	padding: 0;
 	direction: ltr; /* Needed for RTL flipping */
 	unicode-bidi: embed;
 }
 
 /* scale back up to a sane default */
-div#globalWrapper {
-	font-size: 127%;
+#globalWrapper {
+	font-size: 127%; // Typical: x-small * 127% == 12.7px;
 	width: 100%;
 	margin: 0;
 	padding: 0;
@@ -70,19 +74,6 @@ div#globalWrapper {
 }
 
 /* general styles */
-a {
-	color: @link;
-}
-
-a:visited {
-	color: @link-visited;
-}
-
-a.new,
-#p-personal a.new {
-	color: @link-new;
-}
-
 ul {
 	list-style-type: square;
 	.list-style-image( 'images/bullet.svg' );
@@ -93,13 +84,14 @@ pre,
 	line-height: 1.1em;
 }
 
-#firstHeading {
+.firstHeading {
+	margin-top: 0.4em;
+	margin-bottom: 0.1em;
 	padding-top: 0;
 	overflow: visible;
 }
 
 .mw-indicators {
-	float: right;
 	line-height: 1.5em;
 	font-size: 95%;
 }
@@ -107,8 +99,6 @@ pre,
 .mw-indicator {
 	display: -moz-inline-block;
 	display: inline-block;
-	zoom: 1;
-	*display: inline; /* stylelint-disable-line declaration-block-no-duplicate-properties */
 }
 
 .mw-jump-link:not( :focus ) {
@@ -184,12 +174,30 @@ table.rimage {
 	color: @text-color;
 	border-collapse: collapse;
 
-	/* allows .pBody styles to wrap around content added via BaseTemplateAfterPortlet hook */
+	/* allows .pBody styles to wrap around content added via SkinAfterPortlet hook */
 	&:after {
 		content: '';
 		clear: both;
 		display: block;
 	}
+}
+
+/* Set `text-transform` only on languages where capitalization is not significant.
+** Translates to all, which don't carry `.monobook-capitalize-all-nouns` at `body`.
+*/
+body:not( .monobook-capitalize-all-nouns ) {
+	.portlet h3,
+	#p-personal ul,
+	#p-cactions ul li a {
+		text-transform: lowercase;
+	}
+}
+
+/* Don't lowercase username */
+li#pt-userpage,
+/* Sometimes people don't want personal tools to be lowercase! */
+.no-text-transform {
+	text-transform: none;
 }
 
 /*
@@ -219,7 +227,7 @@ li#pt-anonuserpage {
 /*
 ** footer
 */
-#footer {
+.mw-footer {
 	background-color: @content-background;
 	border-top: 1px solid @orange-border;
 	border-bottom: 1px solid @orange-border;
@@ -354,4 +362,24 @@ div.mw-lag-warn-high {
 /* Tooltips are outside of the normal body code, so this helps make the size of the text sensible */
 .tipsy {
 	font-size: 127%;
+}
+
+// Directionality styles previously provided by the deprecated`legacy` feature (T287410)
+// for HTML elements which do not carry dir HTML attributes.
+// These have been copied across to MonoBook to minimize disruption caused by T287701.
+// If you are reading this comment in 2022, please consider checking usage in wikitext and
+// removing them both.
+.mw-content-ltr {
+	/* @noflip */
+	direction: ltr;
+}
+
+.mw-content-rtl {
+	/* @noflip */
+	direction: rtl;
+}
+
+// MonoBook makes use of Skin::getClear, must provide its own style following T287410.
+.visualClear {
+	clear: both;
 }

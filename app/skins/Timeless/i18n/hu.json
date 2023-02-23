@@ -1,10 +1,10 @@
 {
 	"@metadata": {
 		"authors": [
-			"Máté",
-			"Wolf Rex",
 			"Dj",
-			"Tacsipacsi"
+			"Máté",
+			"Tacsipacsi",
+			"Wolf Rex"
 		]
 	},
 	"timeless-desc": "Egy időtlen felület Brandon Harris Winter prototípusa és a Wikimédia Alapítvány számos stílusa alapján",
@@ -25,5 +25,7 @@
 	"timeless-pagetools": "Lapműveletek",
 	"timeless-languages": "Nyelvek",
 	"timeless-projects": "További projektek",
-	"timeless.js": "/* A Timeless felület használói számára betöltendő JavaScriptek */"
+	"timeless.js": "/* A Timeless felület használói számára betöltendő JavaScriptek */",
+	"timeless-view-history": "Laptörténet",
+	"timeless-action-undelete": "{{PLURAL:$1|Egy|$1}} szerkesztés helyreállítása"
 }

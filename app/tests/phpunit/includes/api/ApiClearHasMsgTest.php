@@ -12,13 +12,15 @@ class ApiClearHasMsgTest extends ApiTestCase {
 	 */
 	public function testClearFlag() {
 		$user = self::$users['sysop']->getUser();
-		$user->setNewtalk( true );
-		$this->assertTrue( $user->getNewtalk(), 'sanity check' );
+		$talkPageNotificationManager = $this->getServiceContainer()
+			->getTalkPageNotificationManager();
+		$talkPageNotificationManager->setUserHasNewMessages( $user );
+		$this->assertTrue( $talkPageNotificationManager->userHasNewMessages( $user ) );
 
 		$data = $this->doApiRequest( [ 'action' => 'clearhasmsg' ], [] );
 
 		$this->assertEquals( 'success', $data[0]['clearhasmsg'] );
-		$this->assertFalse( $user->getNewtalk() );
+		$this->assertFalse( $talkPageNotificationManager->userHasNewMessages( $user ) );
 	}
 
 }

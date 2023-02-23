@@ -1,120 +1,98 @@
 <?php
 
 use MediaWiki\Config\ServiceOptions;
+use MediaWiki\Interwiki\InterwikiLookup;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
-use MediaWiki\Page\MovePageFactory;
-use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\SlotRecord;
+use MediaWiki\Tests\Rest\Handler\MediaTestTrait;
+use MediaWiki\Tests\Unit\DummyServicesTrait;
 use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\LoadBalancer;
 
 /**
+ * @covers MovePage
  * @group Database
  */
-class MovePageTest extends MediaWikiTestCase {
-	/**
-	 * The only files that exist are 'File:Existent.jpg', 'File:Existent2.jpg', and
-	 * 'File:Existent-file-no-page.jpg'. Calling unexpected methods causes a test failure.
-	 *
-	 * @return RepoGroup
-	 */
-	private function getMockRepoGroup() : RepoGroup {
-		$mockExistentFile = $this->createMock( LocalFile::class );
-		$mockExistentFile->method( 'exists' )->willReturn( true );
-		$mockExistentFile->method( 'getMimeType' )->willReturn( 'image/jpeg' );
-		$mockExistentFile->expects( $this->never() )
-			->method( $this->anythingBut( 'exists', 'load', 'getMimeType', '__destruct' ) );
-
-		$mockNonexistentFile = $this->createMock( LocalFile::class );
-		$mockNonexistentFile->method( 'exists' )->willReturn( false );
-		$mockNonexistentFile->expects( $this->never() )
-			->method( $this->anythingBut( 'exists', 'load', '__destruct' ) );
-
-		$mockLocalRepo = $this->createMock( LocalRepo::class );
-		$mockLocalRepo->method( 'newFile' )->will( $this->returnCallback(
-			function ( Title $title ) use ( $mockExistentFile, $mockNonexistentFile ) {
-				if ( in_array( $title->getPrefixedText(),
-					[ 'File:Existent.jpg', 'File:Existent2.jpg', 'File:Existent-file-no-page.jpg' ]
-				) ) {
-					return $mockExistentFile;
-				}
-				return $mockNonexistentFile;
-			}
-		) );
-		$mockLocalRepo->expects( $this->never() )
-			->method( $this->anythingBut( 'newFile', '__destruct' ) );
-
-		$mockRepoGroup = $this->createMock( RepoGroup::class );
-		$mockRepoGroup->method( 'getLocalRepo' )->willReturn( $mockLocalRepo );
-		$mockRepoGroup->expects( $this->never() )
-			->method( $this->anythingBut( 'getLocalRepo', '__destruct' ) );
-
-		return $mockRepoGroup;
-	}
+class MovePageTest extends MediaWikiIntegrationTestCase {
+	use DummyServicesTrait;
+	use MediaTestTrait;
 
 	/**
-	 * @param LinkTarget $old
-	 * @param LinkTarget $new
-	 * @param array $params Valid keys are: db, options, nsInfo, wiStore, repoGroup.
+	 * @param Title $old
+	 * @param Title $new
+	 * @param array $params Valid keys are: db, options, nsInfo, wiStore, repoGroup, contentHandlerFactory.
 	 *   options is an indexed array that will overwrite our defaults, not a ServiceOptions, so it
 	 *   need not contain all keys.
 	 * @return MovePage
 	 */
-	private function newMovePage( $old, $new, array $params = [] ) : MovePage {
-		$mockLB = $this->createMock( LoadBalancer::class );
-		$mockLB->method( 'getConnection' )
+	private function newMovePageWithMocks( $old, $new, array $params = [] ): MovePage {
+		$mockLB = $this->createNoOpMock( LoadBalancer::class, [ 'getConnectionRef' ] );
+		$mockLB->method( 'getConnectionRef' )
 			->willReturn( $params['db'] ?? $this->createNoOpMock( IDatabase::class ) );
-		$mockLB->expects( $this->never() )
-			->method( $this->anythingBut( 'getConnection', '__destruct' ) );
 
-		$mockNsInfo = $this->createMock( NamespaceInfo::class );
-		$mockNsInfo->method( 'isMovable' )->will( $this->returnCallback(
-			function ( $ns ) {
-				return $ns >= 0;
-			}
-		) );
-		$mockNsInfo->expects( $this->never() )
-			->method( $this->anythingBut( 'isMovable', '__destruct' ) );
+		// If we don't use a manual mock for something specific, get a full
+		// NamespaceInfo service from DummyServicesTrait::getDummyNamespaceInfo
+		$nsInfo = $params['nsInfo'] ?? $this->getDummyNamespaceInfo();
 
 		return new MovePage(
 			$old,
 			$new,
 			new ServiceOptions(
-				MovePageFactory::$constructorOptions,
+				MovePage::CONSTRUCTOR_OPTIONS,
 				$params['options'] ?? [],
 				[
 					'CategoryCollation' => 'uppercase',
-					'ContentHandlerUseDB' => true,
+					'MaximumMovedPages' => 100,
 				]
 			),
 			$mockLB,
-			$params['nsInfo'] ?? $mockNsInfo,
-			$params['wiStore'] ?? $this->createNoOpMock( WatchedItemStore::class ),
-			$params['permMgr'] ?? $this->createNoOpMock( PermissionManager::class ),
-			$params['repoGroup'] ?? $this->getMockRepoGroup()
+			$nsInfo,
+			$params['wiStore'] ?? $this->createMock( WatchedItemStore::class ),
+			$params['repoGroup'] ?? $this->makeMockRepoGroup(
+				[ 'Existent.jpg', 'Existent2.jpg', 'Existent-file-no-page.jpg' ]
+			),
+			$params['contentHandlerFactory']
+				?? $this->getServiceContainer()->getContentHandlerFactory(),
+			$this->getServiceContainer()->getRevisionStore(),
+			$this->getServiceContainer()->getSpamChecker(),
+			$this->getServiceContainer()->getHookContainer(),
+			$this->getServiceContainer()->getWikiPageFactory(),
+			$this->getServiceContainer()->getUserFactory(),
+			$this->getServiceContainer()->getUserEditTracker(),
+			$this->getServiceContainer()->getMovePageFactory(),
+			$this->getServiceContainer()->getCollationFactory(),
+			$this->getServiceContainer()->getPageUpdaterFactory(),
+			$this->getServiceContainer()->getRestrictionStore()
 		);
 	}
 
-	public function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
+
+		// To avoid problems with namespace localization
+		$this->overrideConfigValue( MainConfigNames::LanguageCode, 'en' );
 
 		// Ensure we have some pages that are guaranteed to exist or not
 		$this->getExistingTestPage( 'Existent' );
 		$this->getExistingTestPage( 'Existent2' );
 		$this->getExistingTestPage( 'File:Existent.jpg' );
 		$this->getExistingTestPage( 'File:Existent2.jpg' );
+		$this->getExistingTestPage( 'File:Non-file.jpg' );
 		$this->getExistingTestPage( 'MediaWiki:Existent.js' );
 		$this->getExistingTestPage( 'Hooked in place' );
-		$this->getNonExistingTestPage( 'Nonexistent' );
-		$this->getNonExistingTestPage( 'Nonexistent2' );
-		$this->getNonExistingTestPage( 'File:Nonexistent.jpg' );
-		$this->getNonExistingTestPage( 'File:Nonexistent.png' );
-		$this->getNonExistingTestPage( 'File:Existent-file-no-page.jpg' );
-		$this->getNonExistingTestPage( 'MediaWiki:Nonexistent' );
-		$this->getNonExistingTestPage( 'No content allowed' );
+		$this->getNonexistingTestPage( 'Nonexistent' );
+		$this->getNonexistingTestPage( 'Nonexistent2' );
+		$this->getNonexistingTestPage( 'File:Nonexistent.jpg' );
+		$this->getNonexistingTestPage( 'File:Nonexistent.png' );
+		$this->getNonexistingTestPage( 'File:Existent-file-no-page.jpg' );
+		$this->getNonexistingTestPage( 'MediaWiki:Nonexistent' );
+		$this->getNonexistingTestPage( 'No content allowed' );
 
 		// Set a couple of hooks for specific pages
 		$this->setTemporaryHook( 'ContentModelCanBeUsedOn',
-			function ( $modelId, Title $title, &$ok ) {
+			static function ( $modelId, Title $title, &$ok ) {
 				if ( $title->getPrefixedText() === 'No content allowed' ) {
 					$ok = false;
 				}
@@ -122,7 +100,7 @@ class MovePageTest extends MediaWikiTestCase {
 		);
 
 		$this->setTemporaryHook( 'TitleIsMovable',
-			function ( Title $title, &$result ) {
+			static function ( Title $title, &$result ) {
 				if ( strtolower( $title->getPrefixedText() ) === 'hooked in place' ) {
 					$result = false;
 				}
@@ -135,34 +113,11 @@ class MovePageTest extends MediaWikiTestCase {
 	}
 
 	/**
-	 * @covers MovePage::__construct
-	 */
-	public function testConstructorDefaults() {
-		$services = MediaWikiServices::getInstance();
-
-		$obj1 = new MovePage( Title::newFromText( 'A' ), Title::newFromText( 'B' ) );
-		$obj2 = new MovePage(
-			Title::newFromText( 'A' ),
-			Title::newFromText( 'B' ),
-			new ServiceOptions( MovePageFactory::$constructorOptions, $services->getMainConfig() ),
-			$services->getDBLoadBalancer(),
-			$services->getNamespaceInfo(),
-			$services->getWatchedItemStore(),
-			$services->getPermissionManager(),
-			$services->getRepoGroup(),
-			$services->getTitleFormatter()
-		);
-
-		$this->assertEquals( $obj2, $obj1 );
-	}
-
-	/**
 	 * @dataProvider provideIsValidMove
 	 * @covers MovePage::isValidMove
 	 * @covers MovePage::isValidMoveTarget
 	 * @covers MovePage::isValidFileMove
 	 * @covers MovePage::__construct
-	 * @covers Title::isValidMoveOperation
 	 *
 	 * @param string|Title $old
 	 * @param string|Title $new
@@ -172,39 +127,43 @@ class MovePageTest extends MediaWikiTestCase {
 	public function testIsValidMove(
 		$old, $new, array $expectedErrors, array $extraOptions = []
 	) {
+		$iwLookup = $this->createMock( InterwikiLookup::class );
+		$iwLookup->method( 'isValidInterwiki' )
+			->willReturn( true );
+
+		$this->setService(
+			'InterwikiLookup',
+			$iwLookup
+		);
+
 		if ( is_string( $old ) ) {
 			$old = Title::newFromText( $old );
 		}
 		if ( is_string( $new ) ) {
 			$new = Title::newFromText( $new );
 		}
-		// Can't test MovePage with a null target, only isValidMoveOperation
-		if ( $new ) {
-			$mp = $this->newMovePage( $old, $new, [ 'options' => $extraOptions ] );
-			$this->assertSame( $expectedErrors, $mp->isValidMove()->getErrorsArray() );
-		}
-
-		foreach ( $extraOptions as $key => $val ) {
-			$this->setMwGlobals( "wg$key", $val );
-		}
-		$this->setService( 'RepoGroup', $this->getMockRepoGroup() );
-		// This returns true instead of an array if there are no errors
-		$this->hideDeprecated( 'Title::isValidMoveOperation' );
-		$this->assertSame( $expectedErrors ?: true, $old->isValidMoveOperation( $new, false ) );
+		$mp = $this->newMovePageWithMocks( $old, $new, [ 'options' => $extraOptions ] );
+		$this->assertSame( $expectedErrors, $mp->isValidMove()->getErrorsArray() );
 	}
 
 	public static function provideIsValidMove() {
-		global $wgMultiContentRevisionSchemaMigrationStage;
 		$ret = [
+			'Valid move with redirect' => [
+				'Existent',
+				'Nonexistent',
+				[],
+				[ 'createRedirect' => true ]
+			],
+			'Valid move without redirect' => [
+				'Existent',
+				'Nonexistent',
+				[],
+				[ 'createRedirect' => false ]
+			],
 			'Self move' => [
 				'Existent',
 				'Existent',
 				[ [ 'selfmove' ] ],
-			],
-			'Move to null' => [
-				'Existent',
-				null,
-				[ [ 'badtitletext' ] ],
 			],
 			'Move from empty name' => [
 				Title::makeTitle( NS_MAIN, '' ),
@@ -238,7 +197,7 @@ class MovePageTest extends MediaWikiTestCase {
 			'Move over existing' => [
 				'Existent',
 				'Existent2',
-				[ [ 'articleexists' ] ],
+				[ [ 'articleexists', 'Existent2' ] ],
 			],
 			'Move from another wiki' => [
 				Title::makeTitle( NS_MAIN, 'Test', '', 'otherwiki' ),
@@ -270,14 +229,15 @@ class MovePageTest extends MediaWikiTestCase {
 			'Aborted by hook' => [
 				'Hooked in place',
 				'Nonexistent',
-				// @todo Error is wrong
-				[ [ 'immobile-source-namespace', '' ] ],
+				[ [ 'immobile-source-namespace', '(Main)' ] ],
 			],
 			'Doubly aborted by hook' => [
 				'Hooked in place',
 				'Hooked In Place',
-				// @todo Both errors are wrong
-				[ [ 'immobile-source-namespace', '' ], [ 'immobile-target-namespace', '' ] ],
+				[
+					[ 'immobile-source-namespace', '(Main)' ],
+					[ 'immobile-target-namespace', '(Main)' ]
+				],
 			],
 			'Non-file to file' =>
 				[ 'Existent', 'File:Nonexistent.jpg', [ [ 'nonfile-cannot-move-to-file' ] ] ],
@@ -294,7 +254,7 @@ class MovePageTest extends MediaWikiTestCase {
 			'Existing file to existing file' => [
 				'File:Existent.jpg',
 				'File:Existent2.jpg',
-				[ [ 'articleexists' ] ],
+				[ [ 'articleexists', 'File:Existent2.jpg' ] ],
 			],
 			'Existing file to existing file with no page' => [
 				'File:Existent.jpg',
@@ -312,22 +272,17 @@ class MovePageTest extends MediaWikiTestCase {
 				'File:Nonexistent.png',
 				[ [ 'imagetypemismatch' ] ],
 			],
+			'Non-file page in the File namespace' => [
+				'File:Non-file.jpg',
+				'File:Non-file-new.png',
+				[],
+			],
 		];
-		if ( $wgMultiContentRevisionSchemaMigrationStage === SCHEMA_COMPAT_OLD ) {
-			// ContentHandlerUseDB = false only works with the old schema
-			$ret['Move to different content model (ContentHandlerUseDB false)'] = [
-				'MediaWiki:Existent.js',
-				'MediaWiki:Nonexistent',
-				[ [ 'bad-target-model', 'JavaScript', 'wikitext' ] ],
-				[ 'ContentHandlerUseDB' => false ],
-			];
-		}
 		return $ret;
 	}
 
 	/**
-	 * @dataProvider provideMove
-	 * @covers MovePage::move
+	 * @dataProvider provideIsValidMove
 	 *
 	 * @param string $old Old name
 	 * @param string $new New name
@@ -335,6 +290,15 @@ class MovePageTest extends MediaWikiTestCase {
 	 * @param array $extraOptions
 	 */
 	public function testMove( $old, $new, array $expectedErrors, array $extraOptions = [] ) {
+		$iwLookup = $this->createMock( InterwikiLookup::class );
+		$iwLookup->method( 'isValidInterwiki' )
+			->willReturn( true );
+
+		$this->setService(
+			'InterwikiLookup',
+			$iwLookup
+		);
+
 		if ( is_string( $old ) ) {
 			$old = Title::newFromText( $old );
 		}
@@ -342,53 +306,36 @@ class MovePageTest extends MediaWikiTestCase {
 			$new = Title::newFromText( $new );
 		}
 
+		$createRedirect = $extraOptions['createRedirect'] ?? true;
+		unset( $extraOptions['createRedirect'] );
 		$params = [ 'options' => $extraOptions ];
-		if ( $expectedErrors === [] ) {
-			$this->markTestIncomplete( 'Checking actual moves has not yet been implemented' );
-		}
 
-		$obj = $this->newMovePage( $old, $new, $params );
-		$status = $obj->move( $this->getTestUser()->getUser() );
-		$this->assertSame( $expectedErrors, $status->getErrorsArray() );
-	}
+		if ( $expectedErrors ) {
+			$obj = $this->newMovePageWithMocks( $old, $new, $params );
+			$status = $obj->move( $this->getTestUser()->getUser() );
+			$this->assertSame( $expectedErrors, $status->getErrorsArray() );
+		} else {
+			$oldPageId = $old->getArticleID();
+			$status = $this->getServiceContainer()
+				->getMovePageFactory()
+				->newMovePage( $old, $new )
+				->move( $this->getTestUser()->getUser(), 'move reason', $createRedirect );
+			$this->assertStatusOK( $status );
+			$this->assertMoved( $old, $new, $oldPageId, $createRedirect );
 
-	public static function provideMove() {
-		$ret = [];
-		foreach ( self::provideIsValidMove() as $name => $arr ) {
-			list( $old, $new, $expectedErrors, $extraOptions ) = array_pad( $arr, 4, [] );
-			if ( !$new ) {
-				// Not supported by testMove
-				continue;
+			[
+				'nullRevision' => $nullRevision,
+				'redirectRevision' => $redirectRevision
+			] = $status->getValue();
+			$this->assertInstanceOf( RevisionRecord::class, $nullRevision );
+			$this->assertSame( $oldPageId, $nullRevision->getPageId() );
+			if ( $createRedirect ) {
+				$this->assertInstanceOf( RevisionRecord::class, $redirectRevision );
+				$this->assertSame( $old->getArticleID( Title::READ_LATEST ), $redirectRevision->getPageId() );
+			} else {
+				$this->assertNull( $redirectRevision );
 			}
-			$ret[$name] = $arr;
 		}
-		return $ret;
-	}
-
-	/**
-	 * Integration test to catch regressions like T74870. Taken and modified
-	 * from SemanticMediaWiki
-	 *
-	 * @covers Title::moveTo
-	 * @covers MovePage::move
-	 */
-	public function testTitleMoveCompleteIntegrationTest() {
-		$this->hideDeprecated( 'Title::moveTo' );
-
-		$oldTitle = Title::newFromText( 'Help:Some title' );
-		WikiPage::factory( $oldTitle )->doEditContent( new WikitextContent( 'foo' ), 'bar' );
-		$newTitle = Title::newFromText( 'Help:Some other title' );
-		$this->assertNull(
-			WikiPage::factory( $newTitle )->getRevision()
-		);
-
-		$this->assertTrue( $oldTitle->moveTo( $newTitle, false, 'test1', true ) );
-		$this->assertNotNull(
-			WikiPage::factory( $oldTitle )->getRevision()
-		);
-		$this->assertNotNull(
-			WikiPage::factory( $newTitle )->getRevision()
-		);
 	}
 
 	/**
@@ -398,18 +345,22 @@ class MovePageTest extends MediaWikiTestCase {
 	public function testMoveAbortedByTitleMoveHook() {
 		$error = 'Preventing move operation with TitleMove hook.';
 		$this->setTemporaryHook( 'TitleMove',
-			function ( $old, $new, $user, $reason, $status ) use ( $error ) {
+			static function ( $old, $new, $user, $reason, $status ) use ( $error ) {
 				$status->fatal( $error );
 			}
 		);
 
 		$oldTitle = Title::newFromText( 'Some old title' );
-		WikiPage::factory( $oldTitle )->doEditContent( new WikitextContent( 'foo' ), 'bar' );
+		WikiPage::factory( $oldTitle )->doUserEditContent(
+			new WikitextContent( 'foo' ),
+			$this->getTestSysop()->getUser(),
+			'bar'
+		);
 		$newTitle = Title::newFromText( 'A brand new title' );
-		$mp = $this->newMovePage( $oldTitle, $newTitle );
+		$mp = $this->newMovePageWithMocks( $oldTitle, $newTitle );
 		$user = User::newFromName( 'TitleMove tester' );
 		$status = $mp->move( $user, 'Reason', true );
-		$this->assertTrue( $status->hasMessage( $error ) );
+		$this->assertStatusError( $error, $status );
 	}
 
 	/**
@@ -433,10 +384,12 @@ class MovePageTest extends MediaWikiTestCase {
 
 		$oldTitle = Title::newFromText( "Talk:$name" );
 		$newTitle = Title::newFromText( "Talk:$name 2" );
-		$mp = new MovePage( $oldTitle, $newTitle );
-		$status = $mp->moveSubpages( $this->getTestUser()->getUser(), 'Reason', true );
+		$status = $this->getServiceContainer()
+			->getMovePageFactory()
+			->newMovePage( $oldTitle, $newTitle )
+			->moveSubpages( $this->getTestUser()->getUser(), 'Reason', true );
 
-		$this->assertTrue( $status->isGood(),
+		$this->assertStatusGood( $status,
 			"Moving subpages from Talk:{$name} to Talk:{$name} 2 was not completely successful." );
 		foreach ( $subPages as $page ) {
 			$this->assertMoved( $page, str_replace( $name, "$name 2", $page ), $ids[$page] );
@@ -464,10 +417,12 @@ class MovePageTest extends MediaWikiTestCase {
 
 		$oldTitle = Title::newFromText( "Talk:$name" );
 		$newTitle = Title::newFromText( "Talk:$name 2" );
-		$mp = new MovePage( $oldTitle, $newTitle );
-		$status = $mp->moveSubpagesIfAllowed( $this->getTestUser()->getUser(), 'Reason', true );
+		$status = $this->getServiceContainer()
+			->getMovePageFactory()
+			->newMovePage( $oldTitle, $newTitle )
+			->moveSubpagesIfAllowed( $this->getTestUser()->getUser(), 'Reason', true );
 
-		$this->assertTrue( $status->isGood(),
+		$this->assertStatusGood( $status,
 			"Moving subpages from Talk:{$name} to Talk:{$name} 2 was not completely successful." );
 		foreach ( $subPages as $page ) {
 			$this->assertMoved( $page, str_replace( $name, "$name 2", $page ), $ids[$page] );
@@ -481,26 +436,24 @@ class MovePageTest extends MediaWikiTestCase {
 	 * @return int ID of created page
 	 */
 	protected function createPage( $name ) {
-		return $this->editPage( $name, 'Content' )->value['revision']->getPage();
+		return $this->editPage( $name, 'Content' )->value['revision-record']->getPageId();
 	}
 
 	/**
 	 * @param string $from Prefixed name of source
-	 * @param string $to Prefixed name of destination
-	 * @param string $id Page id of the page to move
-	 * @param array|string|null $opts Options: 'noredirect' to expect no redirect
+	 * @param string|Title $to Prefixed name of destination
+	 * @param string|Title $id Page id of the page to move
+	 * @param bool $createRedirect
 	 */
-	protected function assertMoved( $from, $to, $id, $opts = null ) {
-		$opts = (array)$opts;
-
+	protected function assertMoved( $from, $to, $id, bool $createRedirect = true ) {
 		Title::clearCaches();
-		$fromTitle = Title::newFromText( $from );
-		$toTitle = Title::newFromText( $to );
+		$fromTitle = $from instanceof Title ? $from : Title::newFromText( $from );
+		$toTitle = $to instanceof Title ? $to : Title::newFromText( $to );
 
 		$this->assertTrue( $toTitle->exists(),
 			"Destination {$toTitle->getPrefixedText()} does not exist" );
 
-		if ( in_array( 'noredirect', $opts ) ) {
+		if ( !$createRedirect ) {
 			$this->assertFalse( $fromTitle->exists(),
 				"Source {$fromTitle->getPrefixedText()} exists" );
 		} else {
@@ -509,10 +462,106 @@ class MovePageTest extends MediaWikiTestCase {
 			$this->assertTrue( $fromTitle->isRedirect(),
 				"Source {$fromTitle->getPrefixedText()} is not a redirect" );
 
-			$target = Revision::newFromTitle( $fromTitle )->getContent()->getRedirectTarget();
+			$target = $this->getServiceContainer()
+				->getRevisionLookup()
+				->getRevisionByTitle( $fromTitle )
+				->getContent( SlotRecord::MAIN )
+				->getRedirectTarget();
 			$this->assertSame( $toTitle->getPrefixedText(), $target->getPrefixedText() );
 		}
 
 		$this->assertSame( $id, $toTitle->getArticleID() );
 	}
+
+	/**
+	 * Test redirect handling
+	 *
+	 * @covers MovePage::isValidMove
+	 */
+	public function testRedirects() {
+		$this->editPage( 'ExistentRedirect', '#REDIRECT [[Existent]]' );
+		$mp = $this->newMovePageWithMocks(
+			Title::newFromText( 'Existent' ),
+			Title::newFromText( 'ExistentRedirect' )
+		);
+		$this->assertSame(
+			[],
+			$mp->isValidMove()->getErrorsArray(),
+			'Can move over normal redirect'
+		);
+
+		$this->editPage( 'ExistentRedirect3', '#REDIRECT [[Existent]]' );
+		$mp = $this->newMovePageWithMocks(
+			Title::newFromText( 'Existent2' ),
+			Title::newFromText( 'ExistentRedirect3' )
+		);
+		$this->assertSame(
+			[ [ 'redirectexists', 'ExistentRedirect3' ] ],
+			$mp->isValidMove()->getErrorsArray(),
+			'Cannot move over redirect with a different target'
+		);
+
+		$this->editPage( 'ExistentRedirect3', '#REDIRECT [[Existent2]]' );
+		$mp = $this->newMovePageWithMocks(
+			Title::newFromText( 'Existent' ),
+			Title::newFromText( 'ExistentRedirect3' )
+		);
+		$this->assertSame(
+			[ [ 'articleexists', 'ExistentRedirect3' ] ],
+			$mp->isValidMove()->getErrorsArray(),
+			'Multi-revision redirects count as articles'
+		);
+	}
+
+	/**
+	 * Assert that links tables are updated after cross namespace page move (T299275).
+	 */
+	public function testCrossNamespaceLinksUpdate() {
+		$title = Title::makeTitle( NS_TEMPLATE, 'Test' );
+		$this->getExistingTestPage( $title );
+
+		$wikitext = "[[Test]], [[Image:Existent.jpg]], {{Test}}";
+
+		$old = Title::makeTitle( NS_USER, __METHOD__ );
+		$this->editPage( $old, $wikitext );
+		$pageId = $old->getId();
+
+		// do a cross-namespace move
+		$new = Title::makeTitle( NS_PROJECT, __METHOD__ );
+		$obj = $this->newMovePageWithMocks( $old, $new, [ 'db' => $this->db ] );
+		$status = $obj->move( $this->getTestUser()->getUser() );
+
+		// sanity checks
+		$this->assertStatusOK( $status );
+		$this->assertSame( $pageId, $new->getId() );
+		$this->assertNotSame( $pageId, $old->getId() );
+
+		// ensure links tables where updated
+		$this->assertSelect(
+			'pagelinks',
+			[ 'pl_namespace', 'pl_title', 'pl_from_namespace' ],
+			[ 'pl_from' => $pageId ],
+			[
+				[ NS_MAIN, 'Test', NS_PROJECT ]
+			]
+		);
+		$targetId = MediaWikiServices::getInstance()->getLinkTargetLookup()->getLinkTargetId( $title );
+		$this->assertSelect(
+			'templatelinks',
+			[ 'tl_target_id', 'tl_from_namespace' ],
+			[ 'tl_from' => $pageId ],
+			[
+				[ $targetId, NS_PROJECT ]
+			]
+		);
+		$this->assertSelect(
+			'imagelinks',
+			[ 'il_to', 'il_from_namespace' ],
+			[ 'il_from' => $pageId ],
+			[
+				[ 'Existent.jpg', NS_PROJECT ]
+			]
+		);
+	}
+
 }

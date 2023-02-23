@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Extraction of SVG image metadata.
  *
@@ -25,18 +26,22 @@
  * @license GPL-2.0-or-later
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use Wikimedia\AtEase\AtEase;
+
 /**
  * @ingroup Media
  */
 class SVGReader {
-	const DEFAULT_WIDTH = 512;
-	const DEFAULT_HEIGHT = 512;
-	const NS_SVG = 'http://www.w3.org/2000/svg';
-	const LANG_PREFIX_MATCH = 1;
-	const LANG_FULL_MATCH = 2;
+	private const DEFAULT_WIDTH = 512;
+	private const DEFAULT_HEIGHT = 512;
+	private const NS_SVG = 'http://www.w3.org/2000/svg';
+	public const LANG_PREFIX_MATCH = 1;
+	public const LANG_FULL_MATCH = 2;
 
-	/** @var null|XMLReader */
-	private $reader = null;
+	/** @var XMLReader */
+	private $reader;
 
 	/** @var bool */
 	private $mDebug = false;
@@ -51,8 +56,9 @@ class SVGReader {
 	 * @param string $source URI from which to read
 	 * @throws MWException|Exception
 	 */
-	function __construct( $source ) {
-		global $wgSVGMetadataCutoff;
+	public function __construct( $source ) {
+		$svgMetadataCutoff = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::SVGMetadataCutoff );
 		$this->reader = new XMLReader();
 
 		// Don't use $file->getSize() since file object passed to SVGHandler::getMetadata is bogus.
@@ -61,9 +67,9 @@ class SVGReader {
 			throw new MWException( "Error getting filesize of SVG." );
 		}
 
-		if ( $size > $wgSVGMetadataCutoff ) {
-			$this->debug( "SVG is $size bytes, which is bigger than $wgSVGMetadataCutoff. Truncating." );
-			$contents = file_get_contents( $source, false, null, 0, $wgSVGMetadataCutoff );
+		if ( $size > $svgMetadataCutoff ) {
+			$this->debug( "SVG is $size bytes, which is bigger than {$svgMetadataCutoff}. Truncating." );
+			$contents = file_get_contents( $source, false, null, 0, $svgMetadataCutoff );
 			if ( $contents === false ) {
 				throw new MWException( 'Error reading SVG file.' );
 			}
@@ -80,7 +86,8 @@ class SVGReader {
 		// libxml_disable_entity_loader() to avoid arbitrary local file
 		// inclusion, or even arbitrary code execution if the expect
 		// extension is installed (T48859).
-		$oldDisable = libxml_disable_entity_loader( true );
+		// phpcs:ignore Generic.PHP.NoSilencedErrors -- suppress deprecation per T268847
+		$oldDisable = @libxml_disable_entity_loader( true );
 		$this->reader->setParserProperty( XMLReader::SUBST_ENTITIES, true );
 
 		$this->metadata['width'] = self::DEFAULT_WIDTH;
@@ -95,18 +102,17 @@ class SVGReader {
 		// Because we cut off the end of the svg making an invalid one. Complicated
 		// try catch thing to make sure warnings get restored. Seems like there should
 		// be a better way.
-		Wikimedia\suppressWarnings();
+		AtEase::suppressWarnings();
 		try {
 			$this->read();
 		} catch ( Exception $e ) {
 			// Note, if this happens, the width/height will be taken to be 0x0.
 			// Should we consider it the default 512x512 instead?
-			Wikimedia\restoreWarnings();
-			libxml_disable_entity_loader( $oldDisable );
 			throw $e;
+		} finally {
+			libxml_disable_entity_loader( $oldDisable );
+			AtEase::restoreWarnings();
 		}
-		Wikimedia\restoreWarnings();
-		libxml_disable_entity_loader( $oldDisable );
 	}
 
 	/**
@@ -182,7 +188,7 @@ class SVGReader {
 	 * Read a textelement from an element
 	 *
 	 * @param string $name Name of the element that we are reading from
-	 * @param string $metafield Field that we will fill with the result
+	 * @param string|null $metafield Field that we will fill with the result
 	 */
 	private function readField( $name, $metafield = null ) {
 		$this->debug( "Read field $metafield" );
@@ -206,7 +212,7 @@ class SVGReader {
 	/**
 	 * Read an XML snippet from an element
 	 *
-	 * @param string $metafield Field that we will fill with the result
+	 * @param string|null $metafield Field that we will fill with the result
 	 * @throws MWException
 	 */
 	private function readXml( $metafield = null ) {
@@ -245,12 +251,12 @@ class SVGReader {
 				&& $this->reader->nodeType == XMLReader::ELEMENT
 			) {
 				$sysLang = $this->reader->getAttribute( 'systemLanguage' );
-				if ( !is_null( $sysLang ) && $sysLang !== '' ) {
+				if ( $sysLang !== null && $sysLang !== '' ) {
 					// See https://www.w3.org/TR/SVG/struct.html#SystemLanguageAttribute
 					$langList = explode( ',', $sysLang );
 					foreach ( $langList as $langItem ) {
 						$langItem = trim( $langItem );
-						if ( Language::isWellFormedLanguageTag( $langItem ) ) {
+						if ( LanguageCode::isWellFormedLanguageTag( $langItem ) ) {
 							$this->languages[$langItem] = self::LANG_FULL_MATCH;
 						}
 						// Note, the standard says that any prefix should work,
@@ -263,7 +269,7 @@ class SVGReader {
 						// Intentionally checking both !false and > 0 at the same time.
 						if ( $dash ) {
 							$itemPrefix = substr( $langItem, 0, $dash );
-							if ( Language::isWellFormedLanguageTag( $itemPrefix ) ) {
+							if ( LanguageCode::isWellFormedLanguageTag( $itemPrefix ) ) {
 								$this->languagePrefixes[$itemPrefix] = self::LANG_PREFIX_MATCH;
 							}
 						}
@@ -291,7 +297,7 @@ class SVGReader {
 
 	private function debug( $data ) {
 		if ( $this->mDebug ) {
-			wfDebug( "SVGReader: $data\n" );
+			wfDebug( "SVGReader: $data" );
 		}
 	}
 
@@ -309,7 +315,7 @@ class SVGReader {
 
 		if ( $this->reader->getAttribute( 'viewBox' ) ) {
 			// min-x min-y width height
-			$viewBox = preg_split( '/\s*[\s,]\s*/', trim( $this->reader->getAttribute( 'viewBox' ) ) );
+			$viewBox = preg_split( '/\s*[\s,]\s*/', trim( $this->reader->getAttribute( 'viewBox' ) ?? '' ) );
 			if ( count( $viewBox ) == 4 ) {
 				$viewWidth = $this->scaleSVGUnit( $viewBox[2] );
 				$viewHeight = $this->scaleSVGUnit( $viewBox[3] );
@@ -320,11 +326,11 @@ class SVGReader {
 			}
 		}
 		if ( $this->reader->getAttribute( 'width' ) ) {
-			$width = $this->scaleSVGUnit( $this->reader->getAttribute( 'width' ), $defaultWidth );
+			$width = $this->scaleSVGUnit( $this->reader->getAttribute( 'width' ) ?? '', $defaultWidth );
 			$this->metadata['originalWidth'] = $this->reader->getAttribute( 'width' );
 		}
 		if ( $this->reader->getAttribute( 'height' ) ) {
-			$height = $this->scaleSVGUnit( $this->reader->getAttribute( 'height' ), $defaultHeight );
+			$height = $this->scaleSVGUnit( $this->reader->getAttribute( 'height' ) ?? '', $defaultHeight );
 			$this->metadata['originalHeight'] = $this->reader->getAttribute( 'height' );
 		}
 
@@ -351,7 +357,7 @@ class SVGReader {
 	 * @param float|int $viewportSize Optional scale for percentage units...
 	 * @return float Length in pixels
 	 */
-	static function scaleSVGUnit( $length, $viewportSize = 512 ) {
+	public static function scaleSVGUnit( $length, $viewportSize = 512 ) {
 		static $unitLength = [
 			'px' => 1.0,
 			'pt' => 1.25,

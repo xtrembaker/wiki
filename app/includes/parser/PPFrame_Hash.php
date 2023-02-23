@@ -40,36 +40,53 @@ class PPFrame_Hash implements PPFrame {
 	 * @var Title
 	 */
 	public $title;
+
+	/**
+	 * @var (string|false)[]
+	 */
 	public $titleCache;
 
 	/**
 	 * Hashtable listing templates which are disallowed for expansion in this frame,
 	 * having been encountered previously in parent frames.
+	 * @var true[]
 	 */
 	public $loopCheckHash;
 
 	/**
 	 * Recursion depth of this frame, top = 0
 	 * Note that this is NOT the same as expansion depth in expand()
+	 * @var int
 	 */
 	public $depth;
 
+	/** @var bool */
 	private $volatile = false;
+	/** @var int|null */
 	private $ttl = null;
 
 	/**
 	 * @var array
 	 */
 	protected $childExpansionCache;
+	/**
+	 * @var int
+	 */
+	private $maxPPNodeCount;
+	/**
+	 * @var int
+	 */
+	private $maxPPExpandDepth;
 
 	/**
-	 * Construct a new preprocessor frame.
 	 * @param Preprocessor $preprocessor The parent preprocessor
 	 */
 	public function __construct( $preprocessor ) {
 		$this->preprocessor = $preprocessor;
 		$this->parser = $preprocessor->parser;
 		$this->title = $this->parser->getTitle();
+		$this->maxPPNodeCount = $this->parser->getOptions()->getMaxPPNodeCount();
+		$this->maxPPExpandDepth = $this->parser->getOptions()->getMaxPPExpandDepth();
 		$this->titleCache = [ $this->title ? $this->title->getPrefixedDBkey() : false ];
 		$this->loopCheckHash = [];
 		$this->depth = 0;
@@ -80,8 +97,8 @@ class PPFrame_Hash implements PPFrame {
 	 * Create a new child frame
 	 * $args is optionally a multi-root PPNode or array containing the template arguments
 	 *
-	 * @param array|bool|PPNode_Hash_Array $args
-	 * @param Title|bool $title
+	 * @param array|false|PPNode_Hash_Array $args
+	 * @param Title|false $title
 	 * @param int $indexOffset
 	 * @throws MWException
 	 * @return PPTemplateFrame_Hash
@@ -104,10 +121,12 @@ class PPFrame_Hash implements PPFrame {
 					// Numbered parameter
 					$index = $bits['index'] - $indexOffset;
 					if ( isset( $namedArgs[$index] ) || isset( $numberedArgs[$index] ) ) {
-						$this->parser->getOutput()->addWarning( wfMessage( 'duplicate-args-warning',
-							wfEscapeWikiText( $this->title ),
-							wfEscapeWikiText( $title ),
-							wfEscapeWikiText( $index ) )->text() );
+						$this->parser->getOutput()->addWarningMsg(
+							'duplicate-args-warning',
+							Message::plaintextParam( (string)$this->title ),
+							Message::plaintextParam( (string)$title ),
+							Message::numParam( $index )
+						);
 						$this->parser->addTrackingCategory( 'duplicate-args-category' );
 					}
 					$numberedArgs[$index] = $bits['value'];
@@ -116,10 +135,12 @@ class PPFrame_Hash implements PPFrame {
 					// Named parameter
 					$name = trim( $this->expand( $bits['name'], PPFrame::STRIP_COMMENTS ) );
 					if ( isset( $namedArgs[$name] ) || isset( $numberedArgs[$name] ) ) {
-						$this->parser->getOutput()->addWarning( wfMessage( 'duplicate-args-warning',
-							wfEscapeWikiText( $this->title ),
-							wfEscapeWikiText( $title ),
-							wfEscapeWikiText( $name ) )->text() );
+						$this->parser->getOutput()->addWarningMsg(
+							'duplicate-args-warning',
+							Message::plaintextParam( (string)$this->title ),
+							Message::plaintextParam( (string)$title ),
+							Message::plaintextParam( $name )
+						);
 						$this->parser->addTrackingCategory( 'duplicate-args-category' );
 					}
 					$namedArgs[$name] = $bits['value'];
@@ -127,6 +148,7 @@ class PPFrame_Hash implements PPFrame {
 				}
 			}
 		}
+		// @phan-suppress-next-line SecurityCheck-XSS taint track for keys in named args, false positive
 		return new PPTemplateFrame_Hash( $this->preprocessor, $this, $numberedArgs, $namedArgs, $title );
 	}
 
@@ -154,17 +176,17 @@ class PPFrame_Hash implements PPFrame {
 			return $root;
 		}
 
-		if ( ++$this->parser->mPPNodeCount > $this->parser->mOptions->getMaxPPNodeCount() ) {
+		if ( ++$this->parser->mPPNodeCount > $this->maxPPNodeCount ) {
 			$this->parser->limitationWarn( 'node-count-exceeded',
 					$this->parser->mPPNodeCount,
-					$this->parser->mOptions->getMaxPPNodeCount()
+					$this->maxPPNodeCount
 			);
 			return '<span class="error">Node-count limit exceeded</span>';
 		}
-		if ( $expansionDepth > $this->parser->mOptions->getMaxPPExpandDepth() ) {
+		if ( $expansionDepth > $this->maxPPExpandDepth ) {
 			$this->parser->limitationWarn( 'expansion-depth-exceeded',
 					$expansionDepth,
-					$this->parser->mOptions->getMaxPPExpandDepth()
+					$this->maxPPExpandDepth
 			);
 			return '<span class="error">Expansion depth limit exceeded</span>';
 		}
@@ -312,11 +334,14 @@ class PPFrame_Hash implements PPFrame {
 					[ 'attr' => null, 'inner' => null, 'close' => null ];
 				if ( $flags & PPFrame::NO_TAGS ) {
 					$s = '<' . $bits['name']->getFirstChild()->value;
+					// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
 					if ( $bits['attr'] ) {
 						$s .= $bits['attr']->getFirstChild()->value;
 					}
+					// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
 					if ( $bits['inner'] ) {
 						$s .= '>' . $bits['inner']->getFirstChild()->value;
+						// @phan-suppress-next-line PhanTypeArraySuspiciousNullable
 						if ( $bits['close'] ) {
 							$s .= $bits['close']->getFirstChild()->value;
 						}
@@ -325,7 +350,8 @@ class PPFrame_Hash implements PPFrame {
 					}
 					$out .= $s;
 				} else {
-					$out .= $this->parser->extensionSubstitution( $bits, $this );
+					$out .= $this->parser->extensionSubstitution( $bits, $this,
+						(bool)( $flags & PPFrame::PROCESS_NOWIKI ) );
 				}
 			} elseif ( $contextName === 'h' ) {
 				# Heading
@@ -338,7 +364,7 @@ class PPFrame_Hash implements PPFrame {
 					$serial = count( $this->parser->mHeadings ) - 1;
 					$marker = Parser::MARKER_PREFIX . "-h-$serial-" . Parser::MARKER_SUFFIX;
 					$s = substr( $s, 0, $bits['level'] ) . $marker . substr( $s, $bits['level'] );
-					$this->parser->mStripState->addGeneral( $marker, '' );
+					$this->parser->getStripState()->addGeneral( $marker, '' );
 					$out .= $s;
 				} else {
 					# Expand in virtual stack
@@ -495,8 +521,8 @@ class PPFrame_Hash implements PPFrame {
 	}
 
 	/**
-	 * @param bool $level
-	 * @return array|bool|string
+	 * @param string|false $level
+	 * @return array|false|string
 	 */
 	public function getPDBK( $level = false ) {
 		if ( $level === false ) {
@@ -592,8 +618,6 @@ class PPFrame_Hash implements PPFrame {
 	}
 
 	/**
-	 * Set the TTL
-	 *
 	 * @param int $ttl
 	 */
 	public function setTTL( $ttl ) {
@@ -603,8 +627,6 @@ class PPFrame_Hash implements PPFrame {
 	}
 
 	/**
-	 * Get the TTL
-	 *
 	 * @return int|null
 	 */
 	public function getTTL() {

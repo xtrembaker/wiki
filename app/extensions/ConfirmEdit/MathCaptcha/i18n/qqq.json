@@ -1,4 +1,9 @@
 {
-	"@metadata": [],
-	"mathcaptcha-desc": "{{Optional}}\n{{desc}}"
+	"@metadata": {
+		"authors": [
+			"Raymond",
+			"Amire80"
+		]
+	},
+	"mathcaptcha-desc": "{{desc}}\n\n\"Confirm Edit\" is an extension and shouldn't be translated."
 }

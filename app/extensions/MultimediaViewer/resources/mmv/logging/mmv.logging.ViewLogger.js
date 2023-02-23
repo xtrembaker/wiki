@@ -26,50 +26,49 @@
 	 * @constructor
 	 * @param {mw.mmv.Config} config mw.mmv.Config object
 	 * @param {Object} windowObject Browser window object
-	 * @param {mw.mmv.logging.ActionLogger} actionLogger ActionLogger object
 	 */
-	function ViewLogger( config, windowObject, actionLogger ) {
+	function ViewLogger( config, windowObject ) {
 		/**
 		 * Was the last image view logged or was logging skipped?
+		 *
 		 * @property {boolean}
 		 */
 		this.wasLastViewLogged = false;
 
 		/**
 		 * Record when the user started looking at the current image
+		 *
 		 * @property {number}
 		 */
 		this.viewStartTime = 0;
 
 		/**
 		 * How long the user has been looking at the current image
+		 *
 		 * @property {number}
 		 */
 		this.viewDuration = 0;
 
 		/**
 		 * The image URL to record a virtual view for
+		 *
 		 * @property {string}
 		 */
 		this.url = '';
 
 		/**
 		 * If set, URI to send the beacon request to in order to record the virtual view
+		 *
 		 * @property {string}
 		 */
 		this.recordVirtualViewBeaconURI = config.recordVirtualViewBeaconURI();
 
 		/**
 		 * Browser window
+		 *
 		 * @property {Object}
 		 */
 		this.window = windowObject;
-
-		/**
-		 * Action logger
-		 * @property {mw.mmv.logging.ActionLogger}
-		 */
-		this.actionLogger = actionLogger;
 	}
 
 	VL = ViewLogger.prototype;
@@ -83,14 +82,13 @@
 		}
 
 		this.wasLastViewLogged = false;
-		this.actionLogger.log( 'image-unview', true );
 	};
 
 	/**
 	 * Starts recording a viewing window for the current image
 	 */
 	VL.startViewDuration = function () {
-		this.viewStartTime = ( new Date() ).getTime();
+		this.viewStartTime = Date.now();
 	};
 
 	/**
@@ -98,7 +96,7 @@
 	 */
 	VL.stopViewDuration = function () {
 		if ( this.viewStartTime ) {
-			this.viewDuration += ( new Date() ).getTime() - this.viewStartTime;
+			this.viewDuration += Date.now() - this.viewStartTime;
 			this.viewStartTime = 0;
 		}
 	};
@@ -112,9 +110,14 @@
 		this.stopViewDuration();
 
 		if ( this.recordVirtualViewBeaconURI ) {
-			uri = new mw.Uri( this.recordVirtualViewBeaconURI );
-			uri.extend( { duration: this.viewDuration,
-				uri: this.url } );
+			try {
+				uri = new mw.Uri( this.recordVirtualViewBeaconURI );
+				uri.extend( { duration: this.viewDuration,
+					uri: this.url } );
+			} catch ( e ) {
+				// the URI is malformed. We cannot log it.
+				return;
+			}
 
 			try {
 				navigator.sendBeacon( uri.toString() );
@@ -141,7 +144,7 @@
 	VL.attach = function ( url ) {
 		var view = this;
 
-		this.url = url;
+		this.url = encodeURIComponent( url );
 		this.startViewDuration();
 
 		$( this.window )
@@ -174,5 +177,6 @@
 		this.wasLastViewLogged = wasEventLogged;
 	};
 
+	mw.mmv.logging = mw.mmv.logging || {};
 	mw.mmv.logging.ViewLogger = ViewLogger;
 }() );

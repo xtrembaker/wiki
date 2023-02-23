@@ -2,13 +2,19 @@
 
 namespace MediaWiki\Auth;
 
+use MediaWiki\Tests\Unit\Auth\AuthenticationProviderTestTrait;
+use MediaWiki\User\UserNameUtils;
+use Psr\Container\ContainerInterface;
+use Wikimedia\ObjectFactory\ObjectFactory;
 use Wikimedia\TestingAccessWrapper;
 
 /**
  * @group AuthManager
  * @covers \MediaWiki\Auth\ResetPasswordSecondaryAuthenticationProvider
  */
-class ResetPasswordSecondaryAuthenticationProviderTest extends \MediaWikiTestCase {
+class ResetPasswordSecondaryAuthenticationProviderTest extends \MediaWikiIntegrationTestCase {
+	use AuthenticationProviderTestTrait;
+
 	/**
 	 * @dataProvider provideGetAuthenticationRequests
 	 * @param string $action
@@ -37,7 +43,7 @@ class ResetPasswordSecondaryAuthenticationProviderTest extends \MediaWikiTestCas
 		$reqs = [ new \stdClass ];
 
 		$mb = $this->getMockBuilder( ResetPasswordSecondaryAuthenticationProvider::class )
-			->setMethods( [ 'tryReset' ] );
+			->onlyMethods( [ 'tryReset' ] );
 
 		$methods = [
 			'beginSecondaryAuthentication' => [ $user, $reqs ],
@@ -49,8 +55,8 @@ class ResetPasswordSecondaryAuthenticationProviderTest extends \MediaWikiTestCas
 			$mock = $mb->getMock();
 			$mock->expects( $this->once() )->method( 'tryReset' )
 				->with( $this->identicalTo( $user ), $this->identicalTo( $reqs ) )
-				->will( $this->returnValue( $obj ) );
-			$this->assertSame( $obj, call_user_func_array( [ $mock, $method ], $args ) );
+				->willReturn( $obj );
+			$this->assertSame( $obj, $mock->$method( ...$args ) );
 		}
 	}
 
@@ -60,33 +66,50 @@ class ResetPasswordSecondaryAuthenticationProviderTest extends \MediaWikiTestCas
 		$provider = $this->getMockBuilder(
 			ResetPasswordSecondaryAuthenticationProvider::class
 		)
-			->setMethods( [
+			->onlyMethods( [
 				'providerAllowsAuthenticationDataChange', 'providerChangeAuthenticationData'
 			] )
 			->getMock();
-		$provider->expects( $this->any() )->method( 'providerAllowsAuthenticationDataChange' )
-			->will( $this->returnCallback( function ( $req ) {
+		$provider->method( 'providerAllowsAuthenticationDataChange' )
+			->willReturnCallback( function ( $req ) {
 				$this->assertSame( 'UTSysop', $req->username );
 				return $req->allow;
-			} ) );
-		$provider->expects( $this->any() )->method( 'providerChangeAuthenticationData' )
-			->will( $this->returnCallback( function ( $req ) {
+			} );
+		$provider->method( 'providerChangeAuthenticationData' )
+			->willReturnCallback( function ( $req ) {
 				$this->assertSame( 'UTSysop', $req->username );
 				$req->done = true;
-			} ) );
+			} );
 		$config = new \HashConfig( [
 			'AuthManagerConfig' => [
 				'preauth' => [],
 				'primaryauth' => [],
 				'secondaryauth' => [
-					[ 'factory' => function () use ( $provider ) {
+					[ 'factory' => static function () use ( $provider ) {
 						return $provider;
 					} ],
 				],
 			],
 		] );
-		$manager = new AuthManager( new \FauxRequest, $config );
-		$provider->setManager( $manager );
+		$mwServices = $this->getServiceContainer();
+		$manager = new AuthManager(
+			new \FauxRequest,
+			$config,
+			new ObjectFactory( $this->createNoOpAbstractMock( ContainerInterface::class ) ),
+			$this->createHookContainer(),
+			$mwServices->getReadOnlyMode(),
+			$this->createNoOpMock( UserNameUtils::class ),
+			$mwServices->getBlockManager(),
+			$mwServices->getWatchlistManager(),
+			$mwServices->getDBLoadBalancer(),
+			$mwServices->getContentLanguage(),
+			$mwServices->getLanguageConverterFactory(),
+			$mwServices->getBotPasswordStore(),
+			$mwServices->getUserFactory(),
+			$mwServices->getUserIdentityLookup(),
+			$mwServices->getUserOptionsManager()
+		);
+		$this->initProvider( $provider, null, null, $manager );
 		$provider = TestingAccessWrapper::newFromObject( $provider );
 
 		$msg = wfMessage( 'foo' );

@@ -1,6 +1,6 @@
 <?php
 /**
- * Generate a php file containg an array of
+ * Generate a php file containing an array of
  *   utf8_lowercase => utf8_uppercase
  * overrides. Takes as input two json files generated with generateUpperCharTable.php
  * as input.
@@ -31,6 +31,8 @@
  * @file
  * @ingroup MaintenanceLanguage
  */
+
+use Wikimedia\StaticArrayWriter;
 
 require_once __DIR__ . '/../Maintenance.php';
 

@@ -1,6 +1,8 @@
 <?php
 
 use MediaWiki\MediaWikiServices;
+use MediaWiki\Permissions\UltimateAuthority;
+use MediaWiki\User\UserIdentityValue;
 
 /**
  * Test that runs against all registered special pages to make sure that regular
@@ -12,40 +14,45 @@ use MediaWiki\MediaWikiServices;
  * @since 1.32
  * @author Addshore
  */
-class SpecialPageFatalTest extends MediaWikiTestCase {
-	public function provideSpecialPages() {
-		$specialPages = [];
-		$spf = MediaWikiServices::getInstance()->getSpecialPageFactory();
-		foreach ( $spf->getNames() as $name ) {
-			$specialPages[$name] = [ $spf->getPage( $name ) ];
-		}
-		return $specialPages;
+class SpecialPageFatalTest extends MediaWikiIntegrationTestCase {
+
+	protected function setUp(): void {
+		parent::setUp();
+		// Deprecations don't matter for what this test cares about. This made browser tests fail
+		// on many occasions already. (T236809)
+		$this->filterDeprecated( '//' );
 	}
 
-	/**
-	 * @dataProvider provideSpecialPages
-	 */
-	public function testSpecialPageDoesNotFatal( SpecialPage $page ) {
-		$executor = new SpecialPageExecutor();
-		$user = User::newFromName( 'UTSysop' );
+	public function testSpecialPageDoesNotFatal() {
+		$spf = MediaWikiServices::getInstance()->getSpecialPageFactory();
+		foreach ( $spf->getNames() as $name ) {
 
-		try {
-			$executor->executeSpecialPage( $page, '', null, 'qqx', $user );
-		} catch ( \PHPUnit\Framework\Error\Deprecated $deprecated ) {
-			// Allow deprecation,
-			// this test want to check fatals or other things breaking the extension
-		} catch ( \PHPUnit\Framework\Error\Error $error ) {
-			// Let phpunit settings working:
-			// - convertErrorsToExceptions="true"
-			// - convertNoticesToExceptions="true"
-			// - convertWarningsToExceptions="true"
-			throw $error;
-		} catch ( Exception $e ) {
-			// Other exceptions are allowed
+			$page = $spf->getPage( $name );
+			if ( !$page ) {
+				$this->markTestSkipped( "Could not create special page $name" );
+			}
+
+			$executor = new SpecialPageExecutor();
+			$authority = new UltimateAuthority( new UserIdentityValue( 0, 'UTSysop' ) );
+
+			try {
+				$executor->executeSpecialPage( $page, '', null, 'qqx', $authority );
+			} catch ( \PHPUnit\Framework\Error\Deprecated $deprecated ) {
+				// Allow deprecation,
+				// this test want to check fatals or other things breaking the extension
+			} catch ( \PHPUnit\Framework\Error\Error $error ) {
+				// Let phpunit settings working:
+				// - convertErrorsToExceptions="true"
+				// - convertNoticesToExceptions="true"
+				// - convertWarningsToExceptions="true"
+				throw $error;
+			} catch ( Exception $e ) {
+				// Other exceptions are allowed
+			}
+
+			// If the page fataled phpunit will have already died
+			$this->addToAssertionCount( 1 );
 		}
-
-		// If the page fataled phpunit will have already died
-		$this->addToAssertionCount( 1 );
 	}
 
 }

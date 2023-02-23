@@ -5,5 +5,7 @@
 		]
 	},
 	"scribunto-lua-error": "Hadisoana Lua: $2.",
-	"scribunto-limitreport-profile-ms": "$1 ms"
+	"scribunto-limitreport-profile-ms": "$1 ms",
+	"nstab-module": "Raki-defa",
+	"tooltip-ca-nstab-module": "Hijery ny pejy momba ny raki-defa"
 }

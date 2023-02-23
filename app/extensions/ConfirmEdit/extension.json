@@ -13,7 +13,7 @@
 	"license-name": "GPL-2.0-or-later",
 	"type": "antispam",
 	"requires": {
-		"MediaWiki": ">= 1.31.0"
+		"MediaWiki": ">= 1.37.0"
 	},
 	"GroupPermissions": {
 		"*": {
@@ -35,11 +35,16 @@
 	"AvailableRights": [
 		"skipcaptcha"
 	],
+	"GrantPermissions": {
+		"basic": {
+			"skipcaptcha": true
+		}
+	},
 	"ExtensionFunctions": [
-		"ConfirmEditHooks::confirmEditSetup"
+		"MediaWiki\\Extension\\ConfirmEdit\\Hooks::confirmEditSetup"
 	],
 	"SpecialPages": {
-		"Captcha": "SpecialCaptcha"
+		"Captcha": "MediaWiki\\Extension\\ConfirmEdit\\Specials\\SpecialCaptcha"
 	},
 	"MessagesDirs": {
 		"ConfirmEdit": [
@@ -51,18 +56,18 @@
 		"ConfirmEditAlias": "ConfirmEdit.alias.php"
 	},
 	"AutoloadClasses": {
-		"ConfirmEditHooks": "includes/ConfirmEditHooks.php",
+		"CaptchaCacheStore": "includes/Store/CaptchaCacheStore.php",
+		"ConfirmEditHooks": "includes/Hooks.php",
+		"MediaWiki\\Extension\\ConfirmEdit\\Hooks": "includes/Hooks.php",
+		"MediaWiki\\Extension\\ConfirmEdit\\Store\\CaptchaCacheStore": "includes/Store/CaptchaCacheStore.php"
+	},
+	"AutoloadNamespaces": {
+		"MediaWiki\\Extension\\ConfirmEdit\\": "includes/",
+		"MediaWiki\\Extension\\ConfirmEdit\\SimpleCaptcha\\": "SimpleCaptcha/"
+	},
+	"TestAutoloadClasses": {
 		"HTMLFancyCaptchaField": "FancyCaptcha/includes/HTMLFancyCaptchaField.php",
 		"HTMLReCaptchaNoCaptchaField": "ReCaptchaNoCaptcha/includes/HTMLReCaptchaNoCaptchaField.php",
-		"SimpleCaptcha": "SimpleCaptcha/SimpleCaptcha.php",
-		"CaptchaStore": "includes/store/CaptchaStore.php",
-		"CaptchaSessionStore": "includes/store/CaptchaSessionStore.php",
-		"CaptchaCacheStore": "includes/store/CaptchaCacheStore.php",
-		"CaptchaHashStore": "includes/store/CaptchaHashStore.php",
-		"CaptchaTriggers": "includes/CaptchaTriggers.php",
-		"SpecialCaptcha": "includes/specials/SpecialCaptcha.php",
-		"CaptchaPreAuthenticationProvider": "includes/auth/CaptchaPreAuthenticationProvider.php",
-		"CaptchaAuthenticationRequest": "includes/auth/CaptchaAuthenticationRequest.php",
 		"ReCaptchaNoCaptchaAuthenticationRequest": "ReCaptchaNoCaptcha/includes/ReCaptchaNoCaptchaAuthenticationRequest.php"
 	},
 	"ResourceModules": {
@@ -71,64 +76,103 @@
 		},
 		"ext.confirmEdit.visualEditor": {
 			"scripts": "ve-confirmedit/ve.init.mw.CaptchaSaveErrorHandler.js",
-			"targets": [ "desktop", "mobile" ]
+			"dependencies": "ext.confirmEdit.CaptchaInputWidget",
+			"targets": [
+				"desktop",
+				"mobile"
+			]
 		},
 		"ext.confirmEdit.simpleCaptcha": {
 			"styles": "../SimpleCaptcha/resources/ext.confirmEdit.simpleCaptcha.css"
 		}
 	},
-	"VisualEditorPluginModules": [
-		"ext.confirmEdit.visualEditor"
-	],
+	"attributes": {
+		"VisualEditor": {
+			"PluginModules": [
+				"ext.confirmEdit.visualEditor"
+			]
+		}
+	},
 	"ResourceFileModulePaths": {
 		"localBasePath": "resources",
 		"remoteExtPath": "ConfirmEdit/resources"
 	},
+	"HookHandlers": {
+		"ConfirmEditHooks": {
+			"class": "MediaWiki\\Extension\\ConfirmEdit\\Hooks"
+		}
+	},
 	"Hooks": {
-		"EditPageBeforeEditButtons": "ConfirmEditHooks::confirmEditPage",
-		"EmailUserForm": "ConfirmEditHooks::injectEmailUser",
-		"EmailUser": "ConfirmEditHooks::confirmEmailUser",
-		"PageContentSaveComplete": "ConfirmEditHooks::onPageContentSaveComplete",
-		"EditPage::showEditForm:fields": "ConfirmEditHooks::showEditFormFields",
-		"EditFilterMergedContent": "ConfirmEditHooks::confirmEditMerged",
-		"APIGetAllowedParams": "ConfirmEditHooks::onAPIGetAllowedParams",
-		"TitleReadWhitelist": "ConfirmEditHooks::onTitleReadWhitelist",
-		"AlternateEditPreview": "ConfirmEditHooks::onAlternateEditPreview",
-		"AuthChangeFormFields": "ConfirmEditHooks::onAuthChangeFormFields"
+		"EditPageBeforeEditButtons": "ConfirmEditHooks",
+		"EmailUserForm": "ConfirmEditHooks",
+		"EmailUser": "ConfirmEditHooks",
+		"PageSaveComplete": "ConfirmEditHooks",
+		"TitleReadWhitelist": "ConfirmEditHooks",
+		"AlternateEditPreview": "ConfirmEditHooks",
+		"ResourceLoaderRegisterModules": "ConfirmEditHooks",
+		"EditPage::showEditForm:fields": "MediaWiki\\Extension\\ConfirmEdit\\Hooks::showEditFormFields",
+		"EditFilterMergedContent": "MediaWiki\\Extension\\ConfirmEdit\\Hooks::confirmEditMerged",
+		"APIGetAllowedParams": "MediaWiki\\Extension\\ConfirmEdit\\Hooks::onAPIGetAllowedParams",
+		"AuthChangeFormFields": "MediaWiki\\Extension\\ConfirmEdit\\Hooks::onAuthChangeFormFields"
 	},
 	"AuthManagerAutoConfig": {
 		"preauth": {
-			"CaptchaPreAuthenticationProvider":{
-				"class": "CaptchaPreAuthenticationProvider",
+			"CaptchaPreAuthenticationProvider": {
+				"class": "MediaWiki\\Extension\\ConfirmEdit\\Auth\\CaptchaPreAuthenticationProvider",
 				"sort": 10
 			}
 		}
 	},
 	"config": {
-		"CaptchaWhitelistIP": false,
-		"Captcha": null,
+		"CaptchaWhitelistIP": {
+			"value": false
+		},
+		"Captcha": {
+			"value": null
+		},
 		"CaptchaTriggers": {
-			"edit": false,
-			"create": false,
-			"sendemail": false,
-			"addurl": true,
-			"createaccount": true,
-			"badlogin": true,
-			"badloginperuser": true,
-			"_merge_strategy": "array_plus"
+			"value": {
+				"edit": false,
+				"create": false,
+				"sendemail": false,
+				"addurl": true,
+				"createaccount": true,
+				"badlogin": true,
+				"badloginperuser": true
+			},
+			"merge_strategy": "array_plus"
 		},
 		"CaptchaTriggersOnNamespace": {
-			"_merge_strategy": "array_plus_2d"
+			"value": {},
+			"merge_strategy": "array_plus_2d"
 		},
-		"CaptchaStorageClass": "CaptchaSessionStore",
-		"CaptchaSessionExpiration": 1800,
-		"CaptchaBadLoginExpiration": 300,
-		"CaptchaBadLoginPerUserExpiration": 600,
-		"AllowConfirmedEmail": false,
-		"CaptchaBadLoginAttempts": 3,
-		"CaptchaBadLoginPerUserAttempts": 20,
-		"CaptchaWhitelist": false,
-		"CaptchaRegexes": []
+		"CaptchaStorageClass": {
+			"value": "MediaWiki\\Extension\\ConfirmEdit\\Store\\CaptchaSessionStore"
+		},
+		"CaptchaSessionExpiration": {
+			"value": 1800
+		},
+		"CaptchaBadLoginExpiration": {
+			"value": 300
+		},
+		"CaptchaBadLoginPerUserExpiration": {
+			"value": 600
+		},
+		"AllowConfirmedEmail": {
+			"value": false
+		},
+		"CaptchaBadLoginAttempts": {
+			"value": 3
+		},
+		"CaptchaBadLoginPerUserAttempts": {
+			"value": 20
+		},
+		"CaptchaWhitelist": {
+			"value": false
+		},
+		"CaptchaRegexes": {
+			"value": []
+		}
 	},
-	"manifest_version": 1
+	"manifest_version": 2
 }

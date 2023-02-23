@@ -23,7 +23,6 @@
 
 use MediaWiki\Auth\AuthManager;
 use MediaWiki\Logger\LoggerFactory;
-use MediaWiki\MediaWikiServices;
 
 /**
  * Let users change their email address.
@@ -36,8 +35,13 @@ class SpecialChangeEmail extends FormSpecialPage {
 	 */
 	private $status;
 
-	public function __construct() {
+	/**
+	 * @param AuthManager $authManager
+	 */
+	public function __construct( AuthManager $authManager ) {
 		parent::__construct( 'ChangeEmail', 'editmyprivateinfo' );
+
+		$this->setAuthManager( $authManager );
 	}
 
 	public function doesWrites() {
@@ -48,17 +52,17 @@ class SpecialChangeEmail extends FormSpecialPage {
 	 * @return bool
 	 */
 	public function isListed() {
-		return AuthManager::singleton()->allowsPropertyChange( 'emailaddress' );
+		return $this->getAuthManager()->allowsPropertyChange( 'emailaddress' );
 	}
 
 	/**
 	 * Main execution point
-	 * @param string $par
+	 * @param string|null $par
 	 */
-	function execute( $par ) {
+	public function execute( $par ) {
 		$out = $this->getOutput();
 		$out->disallowUserJs();
-
+		$out->addModules( 'mediawiki.special.changeemail' );
 		parent::execute( $par );
 	}
 
@@ -67,18 +71,15 @@ class SpecialChangeEmail extends FormSpecialPage {
 	}
 
 	protected function checkExecutePermissions( User $user ) {
-		if ( !AuthManager::singleton()->allowsPropertyChange( 'emailaddress' ) ) {
+		if ( !$this->getAuthManager()->allowsPropertyChange( 'emailaddress' ) ) {
 			throw new ErrorPageError( 'changeemail', 'cannotchangeemail' );
 		}
 
-		$this->requireLogin( 'changeemail-no-info' );
+		$this->requireNamedUser( 'changeemail-no-info' );
 
 		// This could also let someone check the current email address, so
 		// require both permissions.
-		if ( !MediaWikiServices::getInstance()
-				->getPermissionManager()
-				->userHasRight( $this->getUser(), 'viewmyprivateinfo' )
-		) {
+		if ( !$this->getAuthority()->isAllowed( 'viewmyprivateinfo' ) ) {
 			throw new PermissionsError( 'viewmyprivateinfo' );
 		}
 
@@ -103,6 +104,7 @@ class SpecialChangeEmail extends FormSpecialPage {
 				'type' => 'email',
 				'label-message' => 'changeemail-newemail',
 				'autofocus' => true,
+				'maxlength' => 255,
 				'help-message' => 'changeemail-newemail-help',
 			],
 		];
@@ -121,6 +123,7 @@ class SpecialChangeEmail extends FormSpecialPage {
 		$form->addHiddenFields( $this->getRequest()->getValues( 'returnto', 'returntoquery' ) );
 
 		$form->addHeaderText( $this->msg( 'changeemail-header' )->parseAsBlock() );
+		$form->setSubmitID( 'change_email_submit' );
 	}
 
 	public function onSubmit( array $data ) {
@@ -139,14 +142,18 @@ class SpecialChangeEmail extends FormSpecialPage {
 		if ( !$titleObj instanceof Title ) {
 			$titleObj = Title::newMainPage();
 		}
-		$query = $request->getVal( 'returntoquery' );
+		$query = $request->getVal( 'returntoquery', '' );
 
 		if ( $this->status->value === true ) {
 			$this->getOutput()->redirect( $titleObj->getFullUrlForRedirect( $query ) );
 		} elseif ( $this->status->value === 'eauth' ) {
 			# Notify user that a confirmation email has been sent...
-			$this->getOutput()->wrapWikiMsg( "<div class='error' style='clear: both;'>\n$1\n</div>",
-				'eauthentsent', $this->getUser()->getName() );
+			$out = $this->getOutput();
+			$out->addHTML(
+				Html::warningBox(
+					$out->msg( 'eauthentsent', $this->getUser()->getName() )->parse()
+				)
+			);
 			// just show the link to go back
 			$this->getOutput()->addReturnTo( $titleObj, wfCgiToArray( $query ) );
 		}
@@ -162,8 +169,13 @@ class SpecialChangeEmail extends FormSpecialPage {
 			return Status::newFatal( 'invalidemailaddress' );
 		}
 
-		if ( $newaddr === $user->getEmail() ) {
+		$oldaddr = $user->getEmail();
+		if ( $newaddr === $oldaddr ) {
 			return Status::newFatal( 'changeemail-nochange' );
+		}
+
+		if ( strlen( $newaddr ) > 255 ) {
+			return Status::newFatal( 'changeemail-maxlength' );
 		}
 
 		// To prevent spam, rate limit adding a new address, but do
@@ -172,23 +184,23 @@ class SpecialChangeEmail extends FormSpecialPage {
 			return Status::newFatal( 'actionthrottledtext' );
 		}
 
-		$oldaddr = $user->getEmail();
-		$status = $user->setEmailWithConfirmation( $newaddr );
+		$userLatest = $user->getInstanceForUpdate();
+		$status = $userLatest->setEmailWithConfirmation( $newaddr );
 		if ( !$status->isGood() ) {
 			return $status;
 		}
 
 		LoggerFactory::getInstance( 'authentication' )->info(
 			'Changing email address for {user} from {oldemail} to {newemail}', [
-				'user' => $user->getName(),
+				'user' => $userLatest->getName(),
 				'oldemail' => $oldaddr,
 				'newemail' => $newaddr,
 			]
 		);
 
-		Hooks::run( 'PrefsEmailAudit', [ $user, $oldaddr, $newaddr ] );
+		$this->getHookRunner()->onPrefsEmailAudit( $userLatest, $oldaddr, $newaddr );
 
-		$user->saveSettings();
+		$userLatest->saveSettings();
 
 		return $status;
 	}

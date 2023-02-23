@@ -7,7 +7,7 @@
 
 // Start up MediaWiki in command-line mode
 require_once __DIR__ . "/../../../../maintenance/Maintenance.php";
-require __DIR__ . "/RandomImageGenerator.php";
+require_once __DIR__ . "/RandomImageGenerator.php";
 
 class GenerateRandomImages extends Maintenance {
 
@@ -17,7 +17,6 @@ class GenerateRandomImages extends Maintenance {
 
 	public function execute() {
 		$getOptSpec = [
-			'dictionaryFile::',
 			'minWidth::',
 			'maxWidth::',
 			'minHeight::',
@@ -33,7 +32,7 @@ class GenerateRandomImages extends Maintenance {
 		$format = $options['format'] ?? 'jpg';
 		unset( $options['format'] );
 
-		$number = isset( $options['number'] ) ? intval( $options['number'] ) : 10;
+		$number = (int)( $options['number'] ?? 10 );
 		unset( $options['number'] );
 
 		$randomImageGenerator = new RandomImageGenerator( $options );
@@ -41,5 +40,5 @@ class GenerateRandomImages extends Maintenance {
 	}
 }
 
-$maintClass = 'GenerateRandomImages';
-require RUN_MAINTENANCE_IF_MAIN;
+$maintClass = GenerateRandomImages::class;
+require_once RUN_MAINTENANCE_IF_MAIN;

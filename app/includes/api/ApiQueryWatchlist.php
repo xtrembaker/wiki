@@ -20,8 +20,11 @@
  * @file
  */
 
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Linker\LinkTarget;
+use MediaWiki\ParamValidator\TypeDef\UserDef;
 use MediaWiki\Revision\RevisionRecord;
+use Wikimedia\ParamValidator\ParamValidator;
+use Wikimedia\ParamValidator\TypeDef\IntegerDef;
 
 /**
  * This query action allows clients to retrieve a list of recently modified pages
@@ -34,8 +37,42 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 	/** @var CommentStore */
 	private $commentStore;
 
-	public function __construct( ApiQuery $query, $moduleName ) {
+	/** @var WatchedItemQueryService */
+	private $watchedItemQueryService;
+
+	/** @var Language */
+	private $contentLanguage;
+
+	/** @var NamespaceInfo */
+	private $namespaceInfo;
+
+	/** @var GenderCache */
+	private $genderCache;
+
+	/**
+	 * @param ApiQuery $query
+	 * @param string $moduleName
+	 * @param CommentStore $commentStore
+	 * @param WatchedItemQueryService $watchedItemQueryService
+	 * @param Language $contentLanguage
+	 * @param NamespaceInfo $namespaceInfo
+	 * @param GenderCache $genderCache
+	 */
+	public function __construct(
+		ApiQuery $query,
+		$moduleName,
+		CommentStore $commentStore,
+		WatchedItemQueryService $watchedItemQueryService,
+		Language $contentLanguage,
+		NamespaceInfo $namespaceInfo,
+		GenderCache $genderCache
+	) {
 		parent::__construct( $query, $moduleName, 'wl' );
+		$this->commentStore = $commentStore;
+		$this->watchedItemQueryService = $watchedItemQueryService;
+		$this->contentLanguage = $contentLanguage;
+		$this->namespaceInfo = $namespaceInfo;
+		$this->genderCache = $genderCache;
 	}
 
 	public function execute() {
@@ -52,20 +89,21 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 		$fld_notificationtimestamp = false, $fld_userid = false,
 		$fld_loginfo = false, $fld_tags;
 
+	/** @var bool */
+	private $fld_expiry = false;
+
 	/**
-	 * @param ApiPageSet $resultPageSet
+	 * @param ApiPageSet|null $resultPageSet
 	 * @return void
 	 */
 	private function run( $resultPageSet = null ) {
-		$this->selectNamedDB( 'watchlist', DB_REPLICA, 'watchlist' );
-
 		$params = $this->extractRequestParams();
 
 		$user = $this->getUser();
 		$wlowner = $this->getWatchlistUser( $params );
 
-		if ( !is_null( $params['prop'] ) && is_null( $resultPageSet ) ) {
-			$prop = array_flip( $params['prop'] );
+		if ( $params['prop'] !== null && $resultPageSet === null ) {
+			$prop = array_fill_keys( $params['prop'], true );
 
 			$this->fld_ids = isset( $prop['ids'] );
 			$this->fld_title = isset( $prop['title'] );
@@ -80,13 +118,10 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 			$this->fld_notificationtimestamp = isset( $prop['notificationtimestamp'] );
 			$this->fld_loginfo = isset( $prop['loginfo'] );
 			$this->fld_tags = isset( $prop['tags'] );
+			$this->fld_expiry = isset( $prop['expiry'] );
 
 			if ( $this->fld_patrol && !$user->useRCPatrol() && !$user->useNPPatrol() ) {
 				$this->dieWithError( 'apierror-permissiondenied-patrolflag', 'patrol' );
-			}
-
-			if ( $this->fld_comment || $this->fld_parsedcomment ) {
-				$this->commentStore = CommentStore::getStore();
 			}
 		}
 
@@ -96,7 +131,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 				: WatchedItemQueryService::DIR_NEWER,
 		];
 
-		if ( is_null( $resultPageSet ) ) {
+		if ( $resultPageSet === null ) {
 			$options['includeFields'] = $this->getFieldsToInclude();
 		} else {
 			$options['usedInGenerator'] = true;
@@ -110,7 +145,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 		}
 
 		$startFrom = null;
-		if ( !is_null( $params['continue'] ) ) {
+		if ( $params['continue'] !== null ) {
 			$cont = explode( '|', $params['continue'] );
 			$this->dieContinueUsageIf( count( $cont ) != 2 );
 			$continueTimestamp = $cont[0];
@@ -124,7 +159,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 			$options['watchlistOwnerToken'] = $params['token'];
 		}
 
-		if ( !is_null( $params['namespace'] ) ) {
+		if ( $params['namespace'] !== null ) {
 			$options['namespaceIds'] = $params['namespace'];
 		}
 
@@ -132,8 +167,8 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 			$options['allRevisions'] = true;
 		}
 
-		if ( !is_null( $params['show'] ) ) {
-			$show = array_flip( $params['show'] );
+		if ( $params['show'] !== null ) {
+			$show = array_fill_keys( $params['show'], true );
 
 			/* Check for conflicting parameters. */
 			if ( $this->showParamsConflicting( $show ) ) {
@@ -152,7 +187,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 			$options['filters'] = array_keys( $show );
 		}
 
-		if ( !is_null( $params['type'] ) ) {
+		if ( $params['type'] !== null ) {
 			try {
 				$rcTypes = RecentChange::parseToRCType( $params['type'] );
 				if ( $rcTypes ) {
@@ -164,26 +199,41 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 		}
 
 		$this->requireMaxOneParameter( $params, 'user', 'excludeuser' );
-		if ( !is_null( $params['user'] ) ) {
+		if ( $params['user'] !== null ) {
 			$options['onlyByUser'] = $params['user'];
 		}
-		if ( !is_null( $params['excludeuser'] ) ) {
+		if ( $params['excludeuser'] !== null ) {
 			$options['notByUser'] = $params['excludeuser'];
 		}
 
 		$options['limit'] = $params['limit'];
 
-		Hooks::run( 'ApiQueryWatchlistPrepareWatchedItemQueryServiceOptions', [
-			$this, $params, &$options
-		] );
+		$this->getHookRunner()->onApiQueryWatchlistPrepareWatchedItemQueryServiceOptions(
+			$this, $params, $options );
 
 		$ids = [];
-		$watchedItemQuery = MediaWikiServices::getInstance()->getWatchedItemQueryService();
-		$items = $watchedItemQuery->getWatchedItemsWithRecentChangeInfo( $wlowner, $options, $startFrom );
+		$items = $this->watchedItemQueryService->getWatchedItemsWithRecentChangeInfo( $wlowner, $options, $startFrom );
+
+		// Get gender information
+		if ( $items !== [] && $resultPageSet === null && $this->fld_title &&
+			$this->contentLanguage->needsGenderDistinction()
+		) {
+			$usernames = [];
+			foreach ( $items as list( $watchedItem, $recentChangeInfo ) ) {
+				/** @var WatchedItem $watchedItem */
+				$linkTarget = $watchedItem->getTarget();
+				if ( $this->namespaceInfo->hasGenderDistinction( $linkTarget->getNamespace() ) ) {
+					$usernames[] = $linkTarget->getText();
+				}
+			}
+			if ( $usernames !== [] ) {
+				$this->genderCache->doQuery( $usernames, __METHOD__ );
+			}
+		}
 
 		foreach ( $items as list( $watchedItem, $recentChangeInfo ) ) {
 			/** @var WatchedItem $watchedItem */
-			if ( is_null( $resultPageSet ) ) {
+			if ( $resultPageSet === null ) {
 				$vals = $this->extractOutputData( $watchedItem, $recentChangeInfo );
 				$fit = $this->getResult()->addValue( [ 'query', $this->getModuleName() ], null, $vals );
 				if ( !$fit ) {
@@ -201,7 +251,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 			$this->setContinueEnumParameter( 'continue', implode( '|', $startFrom ) );
 		}
 
-		if ( is_null( $resultPageSet ) ) {
+		if ( $resultPageSet === null ) {
 			$this->getResult()->addIndexedTagName(
 				[ 'query', $this->getModuleName() ],
 				'item'
@@ -218,10 +268,10 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 		if ( $this->fld_flags ) {
 			$includeFields[] = WatchedItemQueryService::INCLUDE_FLAGS;
 		}
-		if ( $this->fld_user || $this->fld_userid ) {
+		if ( $this->fld_user || $this->fld_userid || $this->fld_loginfo ) {
 			$includeFields[] = WatchedItemQueryService::INCLUDE_USER_ID;
 		}
-		if ( $this->fld_user ) {
+		if ( $this->fld_user || $this->fld_loginfo ) {
 			$includeFields[] = WatchedItemQueryService::INCLUDE_USER;
 		}
 		if ( $this->fld_comment || $this->fld_parsedcomment ) {
@@ -262,7 +312,12 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 
 	private function extractOutputData( WatchedItem $watchedItem, array $recentChangeInfo ) {
 		/* Determine the title of the page that has been changed. */
-		$title = Title::newFromLinkTarget( $watchedItem->getLinkTarget() );
+		$target = $watchedItem->getTarget();
+		if ( $target instanceof LinkTarget ) {
+			$title = Title::newFromLinkTarget( $target );
+		} else {
+			$title = Title::castFromPageIdentity( $target );
+		}
 		$user = $this->getUser();
 
 		/* Our output data. */
@@ -286,6 +341,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 				)
 			) {
 				if ( $this->fld_title ) {
+					// @phan-suppress-next-line PhanTypeMismatchArgumentNullable castFrom does not return null here
 					ApiQueryBase::addTitleInfo( $vals, $title );
 				}
 				if ( $this->fld_ids ) {
@@ -317,9 +373,7 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 					$vals['user'] = $recentChangeInfo['rc_user_text'];
 				}
 
-				if ( !$recentChangeInfo['rc_user'] ) {
-					$vals['anon'] = true;
-				}
+				$vals['anon'] = !$recentChangeInfo['rc_user'];
 			}
 		}
 
@@ -389,7 +443,10 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 				$vals['logid'] = (int)$recentChangeInfo['rc_logid'];
 				$vals['logtype'] = $recentChangeInfo['rc_log_type'];
 				$vals['logaction'] = $recentChangeInfo['rc_log_action'];
-				$vals['logparams'] = LogFormatter::newFromRow( $recentChangeInfo )->formatParametersForApi();
+
+				$logFormatter = LogFormatter::newFromRow( $recentChangeInfo );
+				$vals['logparams'] = $logFormatter->formatParametersForApi();
+				$vals['logdisplay'] = $logFormatter->getActionText();
 			}
 		}
 
@@ -403,13 +460,18 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 			}
 		}
 
+		if ( $this->fld_expiry ) {
+			// Add expiration, T263796
+			$expiry = $watchedItem->getExpiry( TS_ISO_8601 );
+			$vals['expiry'] = ( $expiry ?? false );
+		}
+
 		if ( $anyHidden && ( $recentChangeInfo['rc_deleted'] & RevisionRecord::DELETED_RESTRICTED ) ) {
 			$vals['suppressed'] = true;
 		}
 
-		Hooks::run( 'ApiQueryWatchlistExtractOutputData', [
-			$this, $watchedItem, $recentChangeInfo, &$vals
-		] );
+		$this->getHookRunner()->onApiQueryWatchlistExtractOutputData(
+			$this, $watchedItem, $recentChangeInfo, $vals );
 
 		return $vals;
 	}
@@ -418,41 +480,43 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 		return [
 			'allrev' => false,
 			'start' => [
-				ApiBase::PARAM_TYPE => 'timestamp'
+				ParamValidator::PARAM_TYPE => 'timestamp'
 			],
 			'end' => [
-				ApiBase::PARAM_TYPE => 'timestamp'
+				ParamValidator::PARAM_TYPE => 'timestamp'
 			],
 			'namespace' => [
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_TYPE => 'namespace'
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_TYPE => 'namespace'
 			],
 			'user' => [
-				ApiBase::PARAM_TYPE => 'user',
+				ParamValidator::PARAM_TYPE => 'user',
+				UserDef::PARAM_ALLOWED_USER_TYPES => [ 'name', 'ip', 'id', 'interwiki' ],
 			],
 			'excludeuser' => [
-				ApiBase::PARAM_TYPE => 'user',
+				ParamValidator::PARAM_TYPE => 'user',
+				UserDef::PARAM_ALLOWED_USER_TYPES => [ 'name', 'ip', 'id', 'interwiki' ],
 			],
 			'dir' => [
-				ApiBase::PARAM_DFLT => 'older',
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_DEFAULT => 'older',
+				ParamValidator::PARAM_TYPE => [
 					'newer',
 					'older'
 				],
-				ApiHelp::PARAM_HELP_MSG => 'api-help-param-direction',
+				ApiBase::PARAM_HELP_MSG => 'api-help-param-direction',
 			],
 			'limit' => [
-				ApiBase::PARAM_DFLT => 10,
-				ApiBase::PARAM_TYPE => 'limit',
-				ApiBase::PARAM_MIN => 1,
-				ApiBase::PARAM_MAX => ApiBase::LIMIT_BIG1,
-				ApiBase::PARAM_MAX2 => ApiBase::LIMIT_BIG2
+				ParamValidator::PARAM_DEFAULT => 10,
+				ParamValidator::PARAM_TYPE => 'limit',
+				IntegerDef::PARAM_MIN => 1,
+				IntegerDef::PARAM_MAX => ApiBase::LIMIT_BIG1,
+				IntegerDef::PARAM_MAX2 => ApiBase::LIMIT_BIG2
 			],
 			'prop' => [
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_DFLT => 'ids|title|flags',
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_DEFAULT => 'ids|title|flags',
 				ApiBase::PARAM_HELP_MSG_PER_VALUE => [],
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_TYPE => [
 					'ids',
 					'title',
 					'flags',
@@ -466,11 +530,12 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 					'notificationtimestamp',
 					'loginfo',
 					'tags',
+					'expiry',
 				]
 			],
 			'show' => [
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_TYPE => [
 					WatchedItemQueryService::FILTER_MINOR,
 					WatchedItemQueryService::FILTER_NOT_MINOR,
 					WatchedItemQueryService::FILTER_BOT,
@@ -486,17 +551,18 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 				]
 			],
 			'type' => [
-				ApiBase::PARAM_DFLT => 'edit|new|log|categorize',
-				ApiBase::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_DEFAULT => 'edit|new|log|categorize',
+				ParamValidator::PARAM_ISMULTI => true,
 				ApiBase::PARAM_HELP_MSG_PER_VALUE => [],
-				ApiBase::PARAM_TYPE => RecentChange::getChangeTypes()
+				ParamValidator::PARAM_TYPE => RecentChange::getChangeTypes()
 			],
 			'owner' => [
-				ApiBase::PARAM_TYPE => 'user'
+				ParamValidator::PARAM_TYPE => 'user',
+				UserDef::PARAM_ALLOWED_USER_TYPES => [ 'name' ],
 			],
 			'token' => [
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_SENSITIVE => true,
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_SENSITIVE => true,
 			],
 			'continue' => [
 				ApiBase::PARAM_HELP_MSG => 'api-help-param-continue',
@@ -510,6 +576,8 @@ class ApiQueryWatchlist extends ApiQueryGeneratorBase {
 				=> 'apihelp-query+watchlist-example-simple',
 			'action=query&list=watchlist&wlprop=ids|title|timestamp|user|comment'
 				=> 'apihelp-query+watchlist-example-props',
+			'action=query&list=watchlist&wlprop=ids|title|timestamp|user|comment|expiry'
+				=> 'apihelp-query+watchlist-example-expiry',
 			'action=query&list=watchlist&wlallrev=&wlprop=ids|title|timestamp|user|comment'
 				=> 'apihelp-query+watchlist-example-allrev',
 			'action=query&generator=watchlist&prop=info'

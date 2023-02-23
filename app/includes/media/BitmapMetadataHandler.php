@@ -22,6 +22,9 @@
  */
 
 use MediaWiki\Logger\LoggerFactory;
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use Wikimedia\RequestTimeout\TimeoutException;
 use Wikimedia\XMPReader\Reader as XMPReader;
 
 /**
@@ -32,6 +35,10 @@ use Wikimedia\XMPReader\Reader as XMPReader;
  * and the various metadata extractors.
  *
  * @todo Other image formats.
+ * @newable
+ * @note marked as newable in 1.35 for lack of a better alternative,
+ *       but should become a stateless service, or a handler managed
+ *       registry for metadata handlers for different file types.
  * @ingroup Media
  */
 class BitmapMetadataHandler {
@@ -64,11 +71,13 @@ class BitmapMetadataHandler {
 	private function doApp13( $app13 ) {
 		try {
 			$this->iptcType = JpegMetadataExtractor::doPSIR( $app13 );
+		} catch ( TimeoutException $e ) {
+			throw $e;
 		} catch ( Exception $e ) {
 			// Error reading the iptc hash information.
 			// This probably means the App13 segment is something other than what we expect.
 			// However, still try to read it, and treat it as if the hash didn't exist.
-			wfDebug( "Error parsing iptc data of file: " . $e->getMessage() . "\n" );
+			wfDebug( "Error parsing iptc data of file: " . $e->getMessage() );
 			$this->iptcType = 'iptc-no-hash';
 		}
 
@@ -86,9 +95,9 @@ class BitmapMetadataHandler {
 	 * @param string $filename
 	 * @param string $byteOrder
 	 */
-	function getExif( $filename, $byteOrder ) {
-		global $wgShowEXIF;
-		if ( file_exists( $filename ) && $wgShowEXIF ) {
+	public function getExif( $filename, $byteOrder ) {
+		$showEXIF = MediaWikiServices::getInstance()->getMainConfig()->get( MainConfigNames::ShowEXIF );
+		if ( file_exists( $filename ) && $showEXIF ) {
 			$exif = new Exif( $filename, $byteOrder );
 			$data = $exif->getFilteredData();
 			if ( $data ) {
@@ -103,10 +112,10 @@ class BitmapMetadataHandler {
 	 * @param array $metaArray Array of metadata values
 	 * @param string $type Type. defaults to other. if two things have the same type they're merged
 	 */
-	function addMetadata( $metaArray, $type = 'other' ) {
+	public function addMetadata( $metaArray, $type = 'other' ) {
 		if ( isset( $this->metadata[$type] ) ) {
 			/* merge with old data */
-			$metaArray = $metaArray + $this->metadata[$type];
+			$metaArray += $this->metadata[$type];
 		}
 
 		$this->metadata[$type] = $metaArray;
@@ -114,14 +123,14 @@ class BitmapMetadataHandler {
 
 	/**
 	 * Merge together the various types of metadata
-	 * the different types have different priorites,
+	 * the different types have different priorities,
 	 * and are merged in order.
 	 *
 	 * This function is generally called by the media handlers' getMetadata()
 	 *
-	 * @return array Metadata array
+	 * @return array
 	 */
-	function getMetadataArray() {
+	public function getMetadataArray() {
 		// this seems a bit ugly... This is all so its merged in right order
 		// based on the MWG recommendation.
 		$temp = [];
@@ -142,7 +151,7 @@ class BitmapMetadataHandler {
 						}
 					}
 
-					$temp = $temp + $this->metadata[$type];
+					$temp += $this->metadata[$type];
 				}
 			}
 		}
@@ -156,12 +165,15 @@ class BitmapMetadataHandler {
 	 * @return array Metadata result array.
 	 * @throws MWException On invalid file.
 	 */
-	static function Jpeg( $filename ) {
+	public static function Jpeg( $filename ) {
 		$showXMP = XMPReader::isSupported();
 		$meta = new self();
 
 		$seg = JpegMetadataExtractor::segmentSplitter( $filename );
 
+		if ( isset( $seg['SOF'] ) ) {
+			$meta->addMetadata( [ 'SOF' => $seg['SOF'] ] );
+		}
 		if ( isset( $seg['COM'] ) && isset( $seg['COM'][0] ) ) {
 			$meta->addMetadata( [ 'JPEGFileComment' => $seg['COM'] ], 'native' );
 		}
@@ -214,6 +226,7 @@ class BitmapMetadataHandler {
 			}
 		}
 		unset( $array['text']['xmp'] );
+		// @phan-suppress-next-line PhanTypePossiblyInvalidDimOffset xmp is not alone in text, makes text always set
 		$meta->addMetadata( $array['text'], 'native' );
 		unset( $array['text'] );
 		$array['metadata'] = $meta->getMetadataArray();
@@ -294,9 +307,9 @@ class BitmapMetadataHandler {
 	 * Little Endian or Big Endian. Needed for exif stuff.
 	 *
 	 * @param string $filename
-	 * @return string 'BE' or 'LE' or false
+	 * @return string|false 'BE' or 'LE' or false
 	 */
-	static function getTiffByteOrder( $filename ) {
+	public static function getTiffByteOrder( $filename ) {
 		$fh = fopen( $filename, 'rb' );
 		if ( !$fh ) {
 			return false;

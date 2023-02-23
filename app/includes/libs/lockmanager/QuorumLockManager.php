@@ -25,6 +25,7 @@
  * Version of LockManager that uses a quorum from peer servers for locks.
  * The resource space can also be sharded into separate peer groups.
  *
+ * @stable to extend
  * @ingroup LockManager
  * @since 1.20
  */
@@ -78,6 +79,13 @@ abstract class QuorumLockManager extends LockManager {
 		return $status;
 	}
 
+	/**
+	 * @stable to override
+	 *
+	 * @param array $pathsByType
+	 *
+	 * @return StatusValue
+	 */
 	protected function doUnlockByType( array $pathsByType ) {
 		$status = StatusValue::newGood();
 
@@ -276,10 +284,12 @@ abstract class QuorumLockManager extends LockManager {
 	abstract protected function releaseAllLocks();
 
 	final protected function doLock( array $paths, $type ) {
+		// @phan-suppress-previous-line PhanPluginNeverReturnMethod
 		throw new LogicException( __METHOD__ . ': proxy class does not need this method.' );
 	}
 
 	final protected function doUnlock( array $paths, $type ) {
+		// @phan-suppress-previous-line PhanPluginNeverReturnMethod
 		throw new LogicException( __METHOD__ . ': proxy class does not need this method.' );
 	}
 }

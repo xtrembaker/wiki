@@ -44,16 +44,23 @@ namespace :deploy do
         end
     end
 
+    desc 'Run update script'
+    task :run_mediawiki_update_script do
+        on roles(:app), in: :sequence, wait: 5 do
+            execute('php #{release_path}/app/maintenance/update.php')
+        end
+    end
+
     desc 'Restart application'
     task :restart do
         on roles(:app), in: :sequence, wait: 5 do
           # Your restart mechanism here, for example:
-          execute('sudo /usr/sbin/service php7.3-fpm restart')
+          execute('sudo /usr/sbin/service apache restart')
         end
     end
 
     after :publishing, :copy_env_file
-    after :copy_env_file, :restart
+    after :copy_env_file, :restart, :run_mediawiki_update_script
 #
 #   after :restart, :clear_cache do
 #     on roles(:web), in: :groups, limit: 3, wait: 10 do

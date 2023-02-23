@@ -1,11 +1,12 @@
 {
 	"@metadata": {
 		"authors": [
-			"StanProg",
-			"ShockD",
-			"Vlad5250",
 			"Ivml",
-			"Stoyan"
+			"Kareyac",
+			"ShockD",
+			"StanProg",
+			"Stoyan",
+			"Vlad5250"
 		]
 	},
 	"oathauth-desc": "Осигурява поддръжка на удостоверяването посредством HMAC на базата на еднократни пароли",
@@ -28,9 +29,10 @@
 	"oathauth-entertoken": "Въведете код от устройството Ви за удостоверяване, за проверка:",
 	"oathauth-disable-for-user": "Деактивиране на двукомпонентно удостоверяване на потребител",
 	"right-oathauth-disable-for-user": "Деактивиране на двукомпонентно удостоверяване на потребител",
+	"action-oathauth-disable-for-user": "деактивиране на двукомпонентно удостоверяване на потребител",
 	"oathauth-disable-intro": "С голямата сила идва голяма отговорност",
 	"oathauth-enteruser": "Потребителско име:",
-	"oathauth-enterreason": "Причина за изключване:",
+	"oathauth-enterdisablereason": "Причина за изключване:",
 	"right-oathauth-enable": "Включване на двукомпонентно удостоверяване",
 	"action-oathauth-enable": "включване на двукомпонентно удостоверяване",
 	"oathauth-auth-token-label": "Маркер",
@@ -44,7 +46,7 @@
 	"oathauth-user-not-found": "Не е открита потребителска сметка с това име",
 	"oath-log-name": "Дневник на двукомпонентното удостоверяване",
 	"logentry-oath-disable-other": "$1 {{GENDER:$2|изключи}} двукомпонентното удостоверяване на $3",
-	"oauthauth-ui-no-module": "Не е включено",
+	"oathauth-ui-no-module": "Не е включено",
 	"oathauth-ui-manage": "Управление",
 	"oathmanage": "Управление на двукомпонентното удостоверяване",
 	"oathauth-ui-enabled-module": "Включен метод за удостоверяване",
@@ -52,5 +54,7 @@
 	"oathauth-disable-generic": "Изключване",
 	"oathauth-disable-page-title": "Изключване на $1",
 	"oathauth-enable-page-title": "Включване на $1",
-	"oathauth-ui-available-modules": "Налични методи"
+	"oathauth-ui-available-modules": "Налични методи",
+	"oathauth-notifications-disable-help": "Помощ",
+	"oathauth-notifications-enabled-help": "Помощ"
 }

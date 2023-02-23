@@ -6,6 +6,13 @@
  * If all revisions contain spam, blanks the page
  */
 
+use MediaWiki\Extension\SpamBlacklist\BaseBlacklist;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\WikiPageFactory;
+use MediaWiki\Revision\RevisionLookup;
+use MediaWiki\Revision\RevisionRecord;
+use MediaWiki\Revision\SlotRecord;
+
 $IP = getenv( 'MW_INSTALL_PATH' );
 if ( $IP === false ) {
 	$IP = __DIR__ . '/../../..';
@@ -13,8 +20,19 @@ if ( $IP === false ) {
 require_once "$IP/maintenance/Maintenance.php";
 
 class Cleanup extends Maintenance {
+	/** @var RevisionLookup */
+	private $revisionLookup;
+	/** @var TitleFormatter */
+	private $titleFormatter;
+	/** @var WikiPageFactory */
+	private $wikiPageFactory;
+
 	public function __construct() {
 		parent::__construct();
+		$this->revisionLookup = MediaWikiServices::getInstance()->getRevisionLookup();
+		$this->titleFormatter = MediaWikiServices::getInstance()->getTitleFormatter();
+		$this->wikiPageFactory = MediaWikiServices::getInstance()->getWikiPageFactory();
+
 		$this->requireExtension( 'SpamBlacklist' );
 		$this->addOption( 'dry-run', 'Only do a dry run' );
 	}
@@ -30,7 +48,7 @@ class Cleanup extends Maintenance {
 		$dryRun = $this->hasOption( 'dry-run' );
 
 		$dbr = wfGetDB( DB_REPLICA );
-		$maxID = (int)$dbr->selectField( 'page', 'MAX(page_id)' );
+		$maxID = (int)$dbr->selectField( 'page', 'MAX(page_id)', [], __METHOD__ );
 		$reportingInterval = 100;
 
 		$this->output( "Regexes are " . implode( ', ', array_map( 'count', $regexes ) ) . " bytes\n" );
@@ -43,14 +61,14 @@ class Cleanup extends Maintenance {
 			if ( $id % $reportingInterval == 0 ) {
 				printf( "%-8d  %-5.2f%%\r", $id, $id / $maxID * 100 );
 			}
-			$revision = Revision::loadFromPageId( $dbr, $id );
+			$revision = $this->revisionLookup->getRevisionByPageId( $id );
 			if ( $revision ) {
-				$text = ContentHandler::getContentText( $revision->getContent() );
+				$content = $revision->getContent( SlotRecord::MAIN );
+				$text = ( $content instanceof TextContent ) ? $content->getText() : null;
 				if ( $text ) {
 					foreach ( $regexes as $regex ) {
 						if ( preg_match( $regex, $text, $matches ) ) {
-							$title = $revision->getTitle();
-							$titleText = $title->getPrefixedText();
+							$titleText = $this->titleFormatter->getPrefixedText( $revision->getPageAsLinkTarget() );
 							if ( $dryRun ) {
 								$this->output( "Found spam in [[$titleText]]\n" );
 							} else {
@@ -69,20 +87,21 @@ class Cleanup extends Maintenance {
 
 	/**
 	 * Find the latest revision of the article that does not contain spam and revert to it
-	 * @param Revision $rev
+	 * @param RevisionRecord $rev
 	 * @param array $regexes
 	 * @param string $match
 	 * @param User $user
 	 */
-	private function cleanupArticle( Revision $rev, $regexes, $match, User $user ) {
-		$title = $rev->getTitle();
+	private function cleanupArticle( RevisionRecord $rev, $regexes, $match, User $user ) {
+		$title = Title::newFromLinkTarget( $rev->getPageAsLinkTarget() );
 		while ( $rev ) {
 			$matches = false;
+			$content = $rev->getContent( SlotRecord::MAIN );
 			foreach ( $regexes as $regex ) {
 				$matches = $matches
 					|| preg_match(
 						$regex,
-						ContentHandler::getContentText( $rev->getContent() )
+						( $content instanceof TextContent ) ? $content->getText() : null
 					);
 			}
 			if ( !$matches ) {
@@ -90,23 +109,21 @@ class Cleanup extends Maintenance {
 				break;
 			}
 
-			$rev = $rev->getPrevious();
+			$rev = $this->revisionLookup->getPreviousRevision( $rev );
 		}
 		if ( !$rev ) {
 			// Didn't find a non-spammy revision, blank the page
 			$this->output( "All revisions are spam, blanking...\n" );
-			$text = '';
+			$content = ContentHandler::makeContent( '', $title );
 			$comment = "All revisions matched the spam blacklist ($match), blanking";
 		} else {
 			// Revert to this revision
-			$text = ContentHandler::getContentText( $rev->getContent() );
+			$content = $rev->getContent( SlotRecord::MAIN ) ?:
+				ContentHandler::makeContent( '', $title );
 			$comment = "Cleaning up links to $match";
 		}
-		$wikiPage = new WikiPage( $title );
-		$wikiPage->doEditContent(
-			ContentHandler::makeContent( $text, $title ), $comment,
-			0, false, $user
-		);
+		$wikiPage = $this->wikiPageFactory->newFromTitle( $title );
+		$wikiPage->doUserEditContent( $content, $user, $comment );
 	}
 }
 

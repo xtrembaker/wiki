@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 use MediaWiki\Revision\MutableRevisionRecord;
 use MediaWiki\Revision\RevisionStore;
@@ -12,6 +13,7 @@ use MediaWiki\User\UserIdentityValue;
  * @covers BlockLevelPass
  */
 class ParserMethodsTest extends MediaWikiLangTestCase {
+	use MockTitleTrait;
 
 	public static function providePreSaveTransform() {
 		return [
@@ -28,11 +30,11 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 	 * @dataProvider providePreSaveTransform
 	 */
 	public function testPreSaveTransform( $text, $expected ) {
-		$title = Title::newFromText( str_replace( '::', '__', __METHOD__ ) );
+		$title = Title::makeTitle( NS_MAIN, 'TestPreSaveTransform' );
 		$user = new User();
 		$user->setName( "127.0.0.1" );
 		$popts = ParserOptions::newFromUser( $user );
-		$text = MediaWikiServices::getInstance()->getParser()
+		$text = $this->getServiceContainer()->getParser()
 			->preSaveTransform( $text, $title, $user, $popts );
 
 		$this->assertEquals( $expected, $text );
@@ -73,36 +75,71 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 		$this->assertEquals( $expected, Parser::stripOuterParagraph( $text ) );
 	}
 
+	public static function provideFormatPageTitle() {
+		return [
+			"Non-main namespace" => [
+				[ 'Talk', ':', 'Hello' ],
+				'<span class="mw-page-title-namespace">Talk</span><span class="mw-page-title-separator">:</span><span class="mw-page-title-main">Hello</span>',
+			],
+			"Main namespace (ignores the separator)" => [
+				[ '', ':', 'Hello' ],
+				'<span class="mw-page-title-main">Hello</span>',
+			],
+			"Pieces are HTML-escaped" => [
+				[ 'Ta&lk', ':', 'He&llo' ],
+				'<span class="mw-page-title-namespace">Ta&amp;lk</span><span class="mw-page-title-separator">:</span><span class="mw-page-title-main">He&amp;llo</span>',
+			],
+			"In the future, the colon separator could be localized" => [
+				[ 'Talk', ' : ', 'Hello' ],
+				'<span class="mw-page-title-namespace">Talk</span><span class="mw-page-title-separator"> : </span><span class="mw-page-title-main">Hello</span>',
+			],
+			"In the future, displaytitle could be customized separately from the namespace" => [
+				[ 'Talk', ':', new HtmlArmor( '<span class="whatever">Hello</span>' ) ],
+				'<span class="mw-page-title-namespace">Talk</span><span class="mw-page-title-separator">:</span><span class="mw-page-title-main"><span class="whatever">Hello</span></span>',
+			],
+		];
+	}
+
 	/**
-	 * @expectedException MWException
-	 * @expectedExceptionMessage Parser state cleared while parsing.
-	 *  Did you call Parser::parse recursively?
+	 * @dataProvider provideFormatPageTitle
 	 */
+	public function testFormatPageTitle( $args, $expected ) {
+		$this->assertEquals( $expected, Parser::formatPageTitle( ...$args ) );
+	}
+
 	public function testRecursiveParse() {
-		$title = Title::newFromText( 'foo' );
-		$parser = MediaWikiServices::getInstance()->getParser();
-		$po = new ParserOptions;
+		$title = Title::makeTitle( NS_MAIN, 'Foo' );
+		$parser = $this->getServiceContainer()->getParser();
+		$po = ParserOptions::newFromAnon();
 		$parser->setHook( 'recursivecallparser', [ $this, 'helperParserFunc' ] );
+		$this->expectException( MWException::class );
+		$this->expectExceptionMessage(
+			"Parser state cleared while parsing. Did you call Parser::parse recursively?"
+		);
 		$parser->parse( '<recursivecallparser>baz</recursivecallparser>', $title, $po );
 	}
 
 	public function helperParserFunc( $input, $args, $parser ) {
-		$title = Title::newFromText( 'foo' );
-		$po = new ParserOptions;
+		$title = Title::makeTitle( NS_MAIN, 'Foo' );
+		$po = ParserOptions::newFromAnon();
 		$parser->parse( $input, $title, $po );
 		return 'bar';
 	}
 
 	public function testCallParserFunction() {
 		// Normal parses test passing PPNodes. Test passing an array.
-		$title = Title::newFromText( str_replace( '::', '__', __METHOD__ ) );
-		$parser = MediaWikiServices::getInstance()->getParser();
-		$parser->startExternalParse( $title, new ParserOptions(), Parser::OT_HTML );
+		$title = Title::makeTitle( NS_MAIN, 'TestCallParserFunction' );
+		$parser = $this->getServiceContainer()->getParser();
+		$parser->startExternalParse(
+			$title,
+			ParserOptions::newFromAnon(),
+			Parser::OT_HTML
+		);
 		$frame = $parser->getPreprocessor()->newFrame();
 		$ret = $parser->callParserFunction( $frame, '#tag',
 			[ 'pre', 'foo', 'style' => 'margin-left: 1.6em' ]
 		);
-		$ret['text'] = $parser->mStripState->unstripBoth( $ret['text'] );
+		$ret['text'] = $parser->getStripState()->unstripBoth( $ret['text'] );
 		$this->assertSame( [
 			'found' => true,
 			'text' => '<pre style="margin-left: 1.6em">foo</pre>',
@@ -114,9 +151,12 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 	 * @covers ParserOutput::getSections
 	 */
 	public function testGetSections() {
-		$title = Title::newFromText( str_replace( '::', '__', __METHOD__ ) );
-		$out = MediaWikiServices::getInstance()->getParser()
-			->parse( "==foo==\n<h2>bar</h2>\n==baz==\n", $title, new ParserOptions() );
+		$title = Title::makeTitle( NS_MAIN, 'TestGetSections' );
+		$out = $this->getServiceContainer()->getParser()->parse(
+			"==foo==\n<h2>bar</h2>\n==baz==\n",
+			$title,
+			ParserOptions::newFromAnon()
+		);
 		$this->assertSame( [
 			[
 				'toclevel' => 1,
@@ -194,47 +234,29 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 	}
 
 	public function testWrapOutput() {
-		$title = Title::newFromText( 'foo' );
-		$po = new ParserOptions();
-		$parser = MediaWikiServices::getInstance()->getParser();
+		$title = Title::makeTitle( NS_MAIN, 'Foo' );
+		$po = ParserOptions::newFromAnon();
+		$parser = $this->getServiceContainer()->getParser();
 		$parser->parse( 'Hello World', $title, $po );
 		$text = $parser->getOutput()->getText();
 
-		$this->assertContains( 'Hello World', $text );
-		$this->assertContains( '<div', $text );
-		$this->assertContains( 'class="mw-parser-output"', $text );
-	}
-
-	/**
-	 * @param string $name
-	 * @return Title
-	 */
-	private function getMockTitle( $name ) {
-		$title = $this->getMock( Title::class );
-		$title->method( 'getPrefixedDBkey' )->willReturn( $name );
-		$title->method( 'getPrefixedText' )->willReturn( $name );
-		$title->method( 'getDBkey' )->willReturn( $name );
-		$title->method( 'getText' )->willReturn( $name );
-		$title->method( 'getNamespace' )->willReturn( 0 );
-		$title->method( 'getPageLanguage' )->willReturn( Language::factory( 'en' ) );
-
-		return $title;
+		$this->assertStringContainsString( 'Hello World', $text );
+		$this->assertStringContainsString( '<div', $text );
+		$this->assertStringContainsString( 'class="mw-parser-output"', $text );
 	}
 
 	public function provideRevisionAccess() {
-		$title = $this->getMockTitle( 'ParserRevisionAccessTest' );
+		$title = $this->makeMockTitle( 'ParserRevisionAccessTest', [
+			'language' => MediaWikiServices::getInstance()->getLanguageFactory()->getLanguage( 'en' )
+		] );
 
-		$frank = $this->getMockBuilder( User::class )
-			->disableOriginalConstructor()
-			->getMock();
-
-		$frank->method( 'getName' )->willReturn( 'Frank' );
+		$frank = new UserIdentityValue( 5, 'Frank' );
 
 		$text = '* user:{{REVISIONUSER}};id:{{REVISIONID}};time:{{REVISIONTIMESTAMP}};';
 		$po = new ParserOptions( $frank );
 
 		yield 'current' => [ $text, $po, 0, 'user:CurrentAuthor;id:200;time:20160606000000;' ];
-		yield 'current' => [ $text, $po, null, 'user:;id:;time:' ];
+		yield 'anonymous' => [ $text, $po, null, 'user:;id:;time:' ];
 		yield 'current with ID' => [ $text, $po, 200, 'user:CurrentAuthor;id:200;time:20160606000000;' ];
 
 		$text = '* user:{{REVISIONUSER}};id:{{REVISIONID}};time:{{REVISIONTIMESTAMP}};';
@@ -244,13 +266,13 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 
 		$oldRevision = new MutableRevisionRecord( $title );
 		$oldRevision->setId( 100 );
-		$oldRevision->setUser( new UserIdentityValue( 7, 'FauxAuthor', 0 ) );
+		$oldRevision->setUser( new UserIdentityValue( 7, 'FauxAuthor' ) );
 		$oldRevision->setTimestamp( '20141111111111' );
 		$oldRevision->setContent( SlotRecord::MAIN, new WikitextContent( 'FAUX' ) );
 
 		$po = new ParserOptions( $frank );
-		$po->setCurrentRevisionCallback( function () use ( $oldRevision ) {
-			return new Revision( $oldRevision );
+		$po->setCurrentRevisionRecordCallback( static function () use ( $oldRevision ) {
+			return $oldRevision;
 		} );
 
 		yield 'old with override' => [ $text, $po, 100, 'user:FauxAuthor;id:100;time:20141111111111;' ];
@@ -272,14 +294,14 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 			. 'user-subst:{{subst:REVISIONUSER}};time-subst:{{subst:REVISIONTIMESTAMP}};';
 
 		$newRevision = new MutableRevisionRecord( $title );
-		$newRevision->setUser( new UserIdentityValue( 9, 'NewAuthor', 0 ) );
+		$newRevision->setUser( new UserIdentityValue( 9, 'NewAuthor' ) );
 		$newRevision->setTimestamp( '20180808000000' );
 		$newRevision->setContent( SlotRecord::MAIN, new WikitextContent( 'NEW' ) );
 
 		$po = new ParserOptions( $frank );
 		$po->setIsPreview( true );
-		$po->setCurrentRevisionCallback( function () use ( $newRevision ) {
-			return new Revision( $newRevision );
+		$po->setCurrentRevisionRecordCallback( static function () use ( $newRevision ) {
+			return $newRevision;
 		} );
 
 		yield 'preview' => [
@@ -291,8 +313,8 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 		];
 
 		$po = new ParserOptions( $frank );
-		$po->setCurrentRevisionCallback( function () use ( $newRevision ) {
-			return new Revision( $newRevision );
+		$po->setCurrentRevisionRecordCallback( static function () use ( $newRevision ) {
+			return $newRevision;
 		} );
 
 		yield 'pre-save' => [
@@ -307,14 +329,14 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 			. "<noinclude>#{{:ParserRevisionAccessTest}}#</noinclude>";
 
 		$newRevision = new MutableRevisionRecord( $title );
-		$newRevision->setUser( new UserIdentityValue( 9, 'NewAuthor', 0 ) );
+		$newRevision->setUser( new UserIdentityValue( 9, 'NewAuthor' ) );
 		$newRevision->setTimestamp( '20180808000000' );
 		$newRevision->setContent( SlotRecord::MAIN, new WikitextContent( $text ) );
 
 		$po = new ParserOptions( $frank );
 		$po->setIsPreview( true );
-		$po->setCurrentRevisionCallback( function () use ( $newRevision ) {
-			return new Revision( $newRevision );
+		$po->setCurrentRevisionRecordCallback( static function () use ( $newRevision ) {
+			return $newRevision;
 		} );
 
 		yield 'preview with self-transclude' => [ $text, $po, null, '(ONE)#(ONE)(TWO)#' ];
@@ -330,25 +352,23 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 		$expectedInHtml,
 		$expectedInPst = null
 	) {
-		$title = $this->getMockTitle( 'ParserRevisionAccessTest' );
-
-		$po->enableLimitReport( false );
+		$title = $this->makeMockTitle( 'ParserRevisionAccessTest', [
+			'language' => $this->getServiceContainer()->getLanguageFactory()->getLanguage( 'en' )
+		] );
 
 		$oldRevision = new MutableRevisionRecord( $title );
 		$oldRevision->setId( 100 );
-		$oldRevision->setUser( new UserIdentityValue( 7, 'OldAuthor', 0 ) );
+		$oldRevision->setUser( new UserIdentityValue( 7, 'OldAuthor' ) );
 		$oldRevision->setTimestamp( '20140404000000' );
 		$oldRevision->setContent( SlotRecord::MAIN, new WikitextContent( 'OLD' ) );
 
 		$currentRevision = new MutableRevisionRecord( $title );
 		$currentRevision->setId( 200 );
-		$currentRevision->setUser( new UserIdentityValue( 9, 'CurrentAuthor', 0 ) );
+		$currentRevision->setUser( new UserIdentityValue( 9, 'CurrentAuthor' ) );
 		$currentRevision->setTimestamp( '20160606000000' );
 		$currentRevision->setContent( SlotRecord::MAIN, new WikitextContent( 'CURRENT' ) );
 
-		$revisionStore = $this->getMockBuilder( RevisionStore::class )
-			->disableOriginalConstructor()
-			->getMock();
+		$revisionStore = $this->createMock( RevisionStore::class );
 
 		$revisionStore
 			->method( 'getKnownCurrentRevision' )
@@ -361,21 +381,21 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 		$revisionStore
 			->method( 'getRevisionById' )
 			->willReturnMap( [
-				[ 100, 0, $oldRevision ],
-				[ 200, 0, $currentRevision ],
+				[ 100, 0, null, $oldRevision ],
+				[ 200, 0, null, $currentRevision ],
 			] );
 
 		$this->setService( 'RevisionStore', $revisionStore );
 
-		$parser = MediaWikiServices::getInstance()->getParser();
+		$parser = $this->getServiceContainer()->getParser();
 		$parser->parse( $text, $title, $po, true, true, $revId );
 		$html = $parser->getOutput()->getText();
 
-		$this->assertContains( $expectedInHtml, $html, 'In HTML' );
+		$this->assertStringContainsString( $expectedInHtml, $html, 'In HTML' );
 
 		if ( $expectedInPst !== null ) {
-			$pst = $parser->preSaveTransform( $text, $title, $po->getUser(), $po );
-			$this->assertContains( $expectedInPst, $pst, 'After Pre-Safe Transform' );
+			$pst = $parser->preSaveTransform( $text, $title, $po->getUserIdentity(), $po );
+			$this->assertStringContainsString( $expectedInPst, $pst, 'After Pre-Safe Transform' );
 		}
 	}
 
@@ -388,10 +408,10 @@ class ParserMethodsTest extends MediaWikiLangTestCase {
 
 	/** @dataProvider provideGuessSectionNameFromWikiText */
 	public function testGuessSectionNameFromWikiText( $input, $mode, $expected ) {
-		$this->setMwGlobals( [ 'wgFragmentMode' => [ $mode ] ] );
-		$result = MediaWikiServices::getInstance()->getParser()
+		$this->overrideConfigValue( MainConfigNames::FragmentMode, [ $mode ] );
+		$result = $this->getServiceContainer()->getParser()
 			->guessSectionNameFromWikiText( $input );
-		$this->assertEquals( $result, $expected );
+		$this->assertEquals( $expected, $result );
 	}
 
 	// @todo Add tests for cleanSig() / cleanSigInSig(), getSection(),

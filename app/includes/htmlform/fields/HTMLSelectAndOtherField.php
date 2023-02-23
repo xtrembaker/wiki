@@ -8,12 +8,19 @@
  * Plus a text field underneath for an additional reason.  The 'value' of the field is
  * "<select>: <extra reason>", or "<extra reason>" if nothing has been selected in the
  * select dropdown.
+ *
+ * @stable to extend
  * @todo FIXME: If made 'required', only the text field should be compulsory.
  */
 class HTMLSelectAndOtherField extends HTMLSelectField {
+	private const FIELD_CLASS = 'mw-htmlform-select-and-other-field';
 	/** @var string[] */
 	private $mFlatOptions;
 
+	/**
+	 * @stable to call
+	 * @inheritDoc
+	 */
 	public function __construct( $params ) {
 		if ( array_key_exists( 'other', $params ) ) {
 			// Do nothing
@@ -40,15 +47,8 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 		$select = parent::getInputHTML( $value[1] );
 
 		$textAttribs = [
-			'id' => $this->mID . '-other',
 			'size' => $this->getSize(),
-			'class' => [ 'mw-htmlform-select-and-other-field' ],
-			'data-id-select' => $this->mID,
 		];
-
-		if ( $this->mClass !== '' ) {
-			$textAttribs['class'][] = $this->mClass;
-		}
 
 		if ( isset( $this->mParams['maxlength-unit'] ) ) {
 			$textAttribs['data-mw-maxlength-unit'] = $this->mParams['maxlength-unit'];
@@ -68,7 +68,18 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 
 		$textbox = Html::input( $this->mName . '-other', $value[2], 'text', $textAttribs );
 
-		return "$select<br />\n$textbox";
+		$wrapperAttribs = [
+			'id' => $this->mID,
+			'class' => self::FIELD_CLASS
+		];
+		if ( $this->mClass !== '' ) {
+			$wrapperAttribs['class'] .= ' ' . $this->mClass;
+		}
+		return Html::rawElement(
+			'div',
+			$wrapperAttribs,
+			"$select<br />\n$textbox"
+		);
 	}
 
 	protected function getOOUIModules() {
@@ -97,14 +108,9 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 			$this->getAttributes( $allowedParams )
 		);
 
-		if ( $this->mClass !== '' ) {
-			$textAttribs['classes'] = [ $this->mClass ];
-		}
-
 		# DropdownInput
 		$dropdownInputAttribs = [
 			'name' => $this->mName,
-			'id' => $this->mID . '-select',
 			'options' => $this->getOptionsOOUI(),
 			'value' => $value[1],
 		];
@@ -118,15 +124,15 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 			$this->getAttributes( $allowedParams )
 		);
 
-		if ( $this->mClass !== '' ) {
-			$dropdownInputAttribs['classes'] = [ $this->mClass ];
-		}
-
 		$disabled = false;
 		if ( isset( $this->mParams[ 'disabled' ] ) && $this->mParams[ 'disabled' ] ) {
 			$disabled = true;
 		}
 
+		$inputClasses = [ self::FIELD_CLASS ];
+		if ( $this->mClass !== '' ) {
+			$inputClasses = array_merge( $inputClasses, explode( ' ', $this->mClass ) );
+		}
 		return $this->getInputWidget( [
 			'id' => $this->mID,
 			'disabled' => $disabled,
@@ -134,13 +140,17 @@ class HTMLSelectAndOtherField extends HTMLSelectField {
 			'dropdowninput' => $dropdownInputAttribs,
 			'or' => false,
 			'required' => $this->mParams[ 'required' ] ?? false,
-			'classes' => [ 'mw-htmlform-select-and-other-field' ],
+			'classes' => $inputClasses,
 			'data' => [
 				'maxlengthUnit' => $this->mParams['maxlength-unit'] ?? 'bytes'
 			],
 		] );
 	}
 
+	/**
+	 * @inheritDoc
+	 * @stable to override
+	 */
 	public function getInputWidget( $params ) {
 		return new MediaWiki\Widget\SelectWithInputWidget( $params );
 	}

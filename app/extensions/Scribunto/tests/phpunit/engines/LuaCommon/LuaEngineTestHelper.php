@@ -1,17 +1,29 @@
 <?php
 
+use MediaWiki\Extension\Scribunto\Engines\LuaSandbox\LuaSandboxEngine;
+use MediaWiki\Extension\Scribunto\Engines\LuaStandalone\LuaStandaloneEngine;
+use MediaWiki\Extension\Scribunto\ScribuntoEngineBase;
+use MediaWiki\MediaWikiServices;
+use PHPUnit\Framework\DataProviderTestSuite;
+use PHPUnit\Framework\TestSuite;
+use PHPUnit\Framework\WarningTestCase;
+use PHPUnit\Util\Test;
+
 /**
  * Trait that helps LuaEngineTestBase and LuaEngineUnitTestBase
  */
 trait Scribunto_LuaEngineTestHelper {
+	/** @var array[] */
 	private static $engineConfigurations = [
 		'LuaSandbox' => [
+			'class' => LuaSandboxEngine::class,
 			'memoryLimit' => 50000000,
 			'cpuLimit' => 30,
 			'allowEnvFuncs' => true,
 			'maxLangCacheSize' => 30,
 		],
 		'LuaStandalone' => [
+			'class' => LuaStandaloneEngine::class,
 			'errorFile' => null,
 			'luaPath' => null,
 			'memoryLimit' => 50000000,
@@ -20,9 +32,17 @@ trait Scribunto_LuaEngineTestHelper {
 			'maxLangCacheSize' => 30,
 		],
 	];
+	/** @var int[] */
+	protected $templateLoadCounts = [];
 
+	/**
+	 * Create a PHPUnit test suite to run the test against all engines
+	 * @param string $className Test class name
+	 * @param string|null $group Engine to run with, or null to run all engines
+	 * @return TestSuite
+	 */
 	protected static function makeSuite( $className, $group = null ) {
-		$suite = new PHPUnit_Framework_TestSuite;
+		$suite = new TestSuite;
 		$suite->setName( $className );
 
 		$class = new ReflectionClass( $className );
@@ -33,9 +53,14 @@ trait Scribunto_LuaEngineTestHelper {
 			}
 
 			try {
-				$parser = new Parser;
-				$parser->startExternalParse( Title::newMainPage(), new ParserOptions, Parser::OT_HTML, true );
-				$engineClass = "Scribunto_{$engineName}Engine";
+				$parser = MediaWikiServices::getInstance()->getParserFactory()->create();
+				$parser->startExternalParse(
+					Title::newMainPage(),
+					ParserOptions::newFromAnon(),
+					Parser::OT_HTML,
+					true
+				);
+				$engineClass = $opts['class'];
 				$engine = new $engineClass(
 					self::$engineConfigurations[$engineName] + [ 'parser' => $parser ]
 				);
@@ -52,27 +77,30 @@ trait Scribunto_LuaEngineTestHelper {
 			}
 
 			// Work around PHPUnit breakage: the only straightforward way to
-			// get the data provider is to call
-			// PHPUnit_Util_Test::getProvidedData, but that instantiates the
-			// class without passing any parameters to the constructor. But we
-			// *need* that engine name.
+			// get the data provider is to call Test::getProvidedData, but that
+			// instantiates the class without passing any parameters to the
+			// constructor. But we *need* that engine name.
 			self::$staticEngineName = $engineName;
 
-			$engineSuite = new PHPUnit_Framework_TestSuite;
+			$engineSuite = new DataProviderTestSuite;
 			$engineSuite->setName( "$engineName: $className" );
 
 			foreach ( $class->getMethods() as $method ) {
-				if ( PHPUnit_Framework_TestSuite::isTestMethod( $method ) && $method->isPublic() ) {
+				if ( Test::isTestMethod( $method ) && $method->isPublic() ) {
 					$name = $method->getName();
-					$groups = PHPUnit_Util_Test::getGroups( $className, $name );
+					$groups = Test::getGroups( $className, $name );
 					$groups[] = 'Lua';
 					$groups[] = $engineName;
+					// Only run tests locally if the engine isn't the MW sandbox T125050
+					if ( $engineName !== 'LuaSandbox' ) {
+						$groups[] = 'Standalone';
+					}
 					$groups = array_unique( $groups );
 
-					$data = PHPUnit_Util_Test::getProvidedData( $className, $name );
-					if ( is_array( $data ) || $data instanceof Iterator ) {
+					$data = Test::getProvidedData( $className, $name );
+					if ( is_iterable( $data ) ) {
 						// with @dataProvider
-						$dataSuite = new PHPUnit_Framework_TestSuite_DataProvider(
+						$dataSuite = new DataProviderTestSuite(
 							$className . '::' . $name
 						);
 						foreach ( $data as $k => $v ) {
@@ -84,7 +112,7 @@ trait Scribunto_LuaEngineTestHelper {
 						$engineSuite->addTest( $dataSuite );
 					} elseif ( $data === false ) {
 						// invalid @dataProvider
-						$engineSuite->addTest( new PHPUnit_Framework_Warning(
+						$engineSuite->addTest( new WarningTestCase(
 							"The data provider specified for {$className}::$name is invalid."
 						) );
 					} else {
@@ -108,11 +136,18 @@ trait Scribunto_LuaEngineTestHelper {
 	 */
 	protected function getEngine() {
 		if ( !$this->engine ) {
-			$parser = new Parser;
-			$options = new ParserOptions;
+			$parser = MediaWikiServices::getInstance()->getParserFactory()->create();
+			$options = ParserOptions::newFromAnon();
 			$options->setTemplateCallback( [ $this, 'templateCallback' ] );
 			$parser->startExternalParse( $this->getTestTitle(), $options, Parser::OT_HTML, true );
-			$class = "Scribunto_{$this->engineName}Engine";
+
+			// HACK
+			if ( $this->engineName === 'LuaSandbox' ) {
+				$class = LuaSandboxEngine::class;
+			} elseif ( $this->engineName === 'LuaStandalone' ) {
+				$class = LuaStandaloneEngine::class;
+			}
+
 			$this->engine = new $class(
 				self::$engineConfigurations[$this->engineName] + [ 'parser' => $parser ]
 			);
@@ -122,7 +157,15 @@ trait Scribunto_LuaEngineTestHelper {
 		return $this->engine;
 	}
 
+	/**
+	 * @see Parser::statelessFetchTemplate
+	 * @param Title $title
+	 * @param Parser|false $parser
+	 * @return array
+	 */
 	public function templateCallback( $title, $parser ) {
+		$this->templateLoadCounts[$title->getFullText()] =
+			( $this->templateLoadCounts[$title->getFullText()] ?? 0 ) + 1;
 		if ( isset( $this->extraModules[$title->getFullText()] ) ) {
 			return [
 				'text' => $this->extraModules[$title->getFullText()],
@@ -152,6 +195,14 @@ trait Scribunto_LuaEngineTestHelper {
 	 */
 	protected function getTestTitle() {
 		return Title::newMainPage();
+	}
+
+	/**
+	 * Reset the cached engine. The next call to getEngine() will return a new
+	 * object.
+	 */
+	protected function resetEngine() {
+		$this->engine = null;
 	}
 
 }

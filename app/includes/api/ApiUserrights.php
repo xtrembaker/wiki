@@ -23,6 +23,11 @@
  * @file
  */
 
+use MediaWiki\ParamValidator\TypeDef\UserDef;
+use MediaWiki\Permissions\Authority;
+use MediaWiki\User\UserGroupManager;
+use Wikimedia\ParamValidator\ParamValidator;
+
 /**
  * @ingroup API
  */
@@ -30,20 +35,21 @@ class ApiUserrights extends ApiBase {
 
 	private $mUser = null;
 
-	/**
-	 * Get a UserrightsPage object, or subclass.
-	 * @return UserrightsPage
-	 */
-	protected function getUserRightsPage() {
-		return new UserrightsPage;
-	}
+	/** @var UserGroupManager */
+	private $userGroupManager;
 
 	/**
-	 * Get all available groups.
-	 * @return array
+	 * @param ApiMain $mainModule
+	 * @param string $moduleName
+	 * @param UserGroupManager $userGroupManager
 	 */
-	protected function getAllGroups() {
-		return User::getAllGroups();
+	public function __construct(
+		ApiMain $mainModule,
+		$moduleName,
+		UserGroupManager $userGroupManager
+	) {
+		parent::__construct( $mainModule, $moduleName );
+		$this->userGroupManager = $userGroupManager;
 	}
 
 	public function execute() {
@@ -51,8 +57,8 @@ class ApiUserrights extends ApiBase {
 
 		// Deny if the user is blocked and doesn't have the full 'userrights' permission.
 		// This matches what Special:UserRights does for the web UI.
-		if ( !$this->getPermissionManager()->userHasRight( $pUser, 'userrights' ) ) {
-			$block = $pUser->getBlock();
+		if ( !$this->getAuthority()->isAllowed( 'userrights' ) ) {
+			$block = $pUser->getBlock( Authority::READ_LATEST );
 			if ( $block && $block->isSitewide() ) {
 				$this->dieBlocked( $block );
 			}
@@ -104,20 +110,20 @@ class ApiUserrights extends ApiBase {
 
 		// Check if user can add tags
 		if ( $tags !== null ) {
-			$ableToTag = ChangeTags::canAddTagsAccompanyingChange( $tags, $pUser );
+			$ableToTag = ChangeTags::canAddTagsAccompanyingChange( $tags, $this->getAuthority() );
 			if ( !$ableToTag->isOK() ) {
 				$this->dieStatus( $ableToTag );
 			}
 		}
 
-		$form = $this->getUserRightsPage();
+		$form = new UserrightsPage();
 		$form->setContext( $this->getContext() );
 		$r = [];
 		$r['user'] = $user->getName();
 		$r['userid'] = $user->getId();
 		list( $r['added'], $r['removed'] ) = $form->doSaveUserGroups(
 			// Don't pass null to doSaveUserGroups() for array params, cast to empty array
-			$user, (array)$add, (array)$params['remove'],
+			$user, $add, (array)$params['remove'],
 			$params['reason'], (array)$tags, $groupExpiries
 		);
 
@@ -140,7 +146,7 @@ class ApiUserrights extends ApiBase {
 
 		$user = $params['user'] ?? '#' . $params['userid'];
 
-		$form = $this->getUserRightsPage();
+		$form = new UserrightsPage();
 		$form->setContext( $this->getContext() );
 		$status = $form->fetchUser( $user );
 		if ( !$status->isOK() ) {
@@ -160,44 +166,47 @@ class ApiUserrights extends ApiBase {
 		return true;
 	}
 
-	public function getAllowedParams() {
-		$a = [
+	public function getAllowedParams( $flags = 0 ) {
+		$allGroups = $this->userGroupManager->listAllGroups();
+
+		if ( $flags & ApiBase::GET_VALUES_FOR_HELP ) {
+			sort( $allGroups );
+		}
+
+		return [
 			'user' => [
-				ApiBase::PARAM_TYPE => 'user',
+				ParamValidator::PARAM_TYPE => 'user',
+				UserDef::PARAM_ALLOWED_USER_TYPES => [ 'name', 'id' ],
 			],
 			'userid' => [
-				ApiBase::PARAM_TYPE => 'integer',
+				ParamValidator::PARAM_TYPE => 'integer',
+				ParamValidator::PARAM_DEPRECATED => true,
 			],
 			'add' => [
-				ApiBase::PARAM_TYPE => $this->getAllGroups(),
-				ApiBase::PARAM_ISMULTI => true
+				ParamValidator::PARAM_TYPE => $allGroups,
+				ParamValidator::PARAM_ISMULTI => true
 			],
 			'expiry' => [
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_ALLOW_DUPLICATES => true,
-				ApiBase::PARAM_DFLT => 'infinite',
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_ALLOW_DUPLICATES => true,
+				ParamValidator::PARAM_DEFAULT => 'infinite',
 			],
 			'remove' => [
-				ApiBase::PARAM_TYPE => $this->getAllGroups(),
-				ApiBase::PARAM_ISMULTI => true
+				ParamValidator::PARAM_TYPE => $allGroups,
+				ParamValidator::PARAM_ISMULTI => true
 			],
 			'reason' => [
-				ApiBase::PARAM_DFLT => ''
+				ParamValidator::PARAM_DEFAULT => ''
 			],
 			'token' => [
 				// Standard definition automatically inserted
 				ApiBase::PARAM_HELP_MSG_APPEND => [ 'api-help-param-token-webui' ],
 			],
 			'tags' => [
-				ApiBase::PARAM_TYPE => 'tags',
-				ApiBase::PARAM_ISMULTI => true
+				ParamValidator::PARAM_TYPE => 'tags',
+				ParamValidator::PARAM_ISMULTI => true
 			],
 		];
-		// CentralAuth's ApiGlobalUserRights subclass can't handle expiries
-		if ( !$this->getUserRightsPage()->canProcessExpiries() ) {
-			unset( $a['expiry'] );
-		}
-		return $a;
 	}
 
 	public function needsToken() {
@@ -209,17 +218,14 @@ class ApiUserrights extends ApiBase {
 	}
 
 	protected function getExamplesMessages() {
-		$a = [
+		return [
 			'action=userrights&user=FooBot&add=bot&remove=sysop|bureaucrat&token=123ABC'
 				=> 'apihelp-userrights-example-user',
 			'action=userrights&userid=123&add=bot&remove=sysop|bureaucrat&token=123ABC'
 				=> 'apihelp-userrights-example-userid',
+			'action=userrights&user=SometimeSysop&add=sysop&expiry=1%20month&token=123ABC'
+				=> 'apihelp-userrights-example-expiry',
 		];
-		if ( $this->getUserRightsPage()->canProcessExpiries() ) {
-			$a['action=userrights&user=SometimeSysop&add=sysop&expiry=1%20month&token=123ABC']
-				= 'apihelp-userrights-example-expiry';
-		}
-		return $a;
 	}
 
 	public function getHelpUrls() {

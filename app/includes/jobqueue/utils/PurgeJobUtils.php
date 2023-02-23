@@ -20,8 +20,9 @@
  *
  * @file
  */
-use Wikimedia\Rdbms\IDatabase;
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
+use Wikimedia\Rdbms\IDatabase;
 
 class PurgeJobUtils {
 	/**
@@ -30,7 +31,7 @@ class PurgeJobUtils {
 	 *
 	 * @param IDatabase $dbw
 	 * @param int $namespace Namespace number
-	 * @param array $dbkeys
+	 * @param string[] $dbkeys
 	 */
 	public static function invalidatePages( IDatabase $dbw, $namespace, array $dbkeys ) {
 		if ( $dbkeys === [] ) {
@@ -41,7 +42,7 @@ class PurgeJobUtils {
 		DeferredUpdates::addUpdate( new AutoCommitUpdate(
 			$dbw,
 			__METHOD__,
-			function () use ( $dbw, $namespace, $dbkeys, $fname ) {
+			static function () use ( $dbw, $namespace, $dbkeys, $fname ) {
 				$services = MediaWikiServices::getInstance();
 				$lbFactory = $services->getDBLoadBalancerFactory();
 				// Determine which pages need to be updated.
@@ -63,7 +64,8 @@ class PurgeJobUtils {
 					return;
 				}
 
-				$batchSize = $services->getMainConfig()->get( 'UpdateRowsPerQuery' );
+				$batchSize =
+					$services->getMainConfig()->get( MainConfigNames::UpdateRowsPerQuery );
 				$ticket = $lbFactory->getEmptyTransactionTicket( $fname );
 				$idBatches = array_chunk( $ids, $batchSize );
 				foreach ( $idBatches as $idBatch ) {

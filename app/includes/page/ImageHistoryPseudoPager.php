@@ -18,13 +18,15 @@
  * @file
  */
 
+use MediaWiki\Cache\LinkBatchFactory;
+use MediaWiki\MediaWikiServices;
 use Wikimedia\Timestamp\TimestampException;
 
 class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 	protected $preventClickjacking = false;
 
 	/**
-	 * @var File
+	 * @var File|null
 	 */
 	protected $mImg;
 
@@ -51,10 +53,14 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 	 */
 	public $mRange;
 
+	/** @var LinkBatchFactory */
+	private $linkBatchFactory;
+
 	/**
 	 * @param ImagePage $imagePage
+	 * @param LinkBatchFactory|null $linkBatchFactory
 	 */
-	public function __construct( $imagePage ) {
+	public function __construct( $imagePage, LinkBatchFactory $linkBatchFactory = null ) {
 		parent::__construct( $imagePage->getContext() );
 		$this->mImagePage = $imagePage;
 		$this->mTitle = $imagePage->getTitle()->createFragmentTarget( 'filehistory' );
@@ -66,7 +72,12 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 		$this->mLimitsShown = array_merge( [ 10 ], $this->mLimitsShown );
 		$this->mDefaultLimit = 10;
 		list( $this->mLimit, /* $offset */ ) =
-			$this->mRequest->getLimitOffset( $this->mDefaultLimit, '' );
+			$this->mRequest->getLimitOffsetForUser(
+				$this->getUser(),
+				$this->mDefaultLimit,
+				''
+			);
+		$this->linkBatchFactory = $linkBatchFactory ?? MediaWikiServices::getInstance()->getLinkBatchFactory();
 	}
 
 	/**
@@ -88,7 +99,7 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 	}
 
 	/**
-	 * @param object $row
+	 * @param stdClass $row
 	 * @return string
 	 */
 	public function formatRow( $row ) {
@@ -103,16 +114,31 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 		$this->doQuery();
 		if ( count( $this->mHist ) ) {
 			if ( $this->mImg->isLocal() ) {
-				// Do a batch existence check for user pages and talkpages
-				$linkBatch = new LinkBatch();
+				// Do a batch existence check for user pages and talkpages.
+				$linkBatch = $this->linkBatchFactory->newLinkBatch();
 				for ( $i = $this->mRange[0]; $i <= $this->mRange[1]; $i++ ) {
 					$file = $this->mHist[$i];
-					$user = $file->getUser( 'text' );
-					$linkBatch->add( NS_USER, $user );
-					$linkBatch->add( NS_USER_TALK, $user );
+					$uploader = $file->getUploader( File::FOR_THIS_USER, $this->getAuthority() );
+					if ( $uploader ) {
+						$linkBatch->add( NS_USER, $uploader->getName() );
+						$linkBatch->add( NS_USER_TALK, $uploader->getName() );
+					}
 				}
 				$linkBatch->execute();
 			}
+
+			// Batch-format comments
+			$comments = [];
+			for ( $i = $this->mRange[0]; $i <= $this->mRange[1]; $i++ ) {
+				$file = $this->mHist[$i];
+				$comments[$i] = $file->getDescription(
+					File::FOR_THIS_USER,
+					$this->getAuthority()
+				) ?: '';
+			}
+			$formattedComments = MediaWikiServices::getInstance()
+				->getCommentFormatter()
+				->formatStrings( $comments, $this->getTitle() );
 
 			$list = new ImageHistoryList( $this->mImagePage );
 			# Generate prev/next links
@@ -121,12 +147,12 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 			// Skip rows there just for paging links
 			for ( $i = $this->mRange[0]; $i <= $this->mRange[1]; $i++ ) {
 				$file = $this->mHist[$i];
-				$s .= $list->imageHistoryLine( !$file->isOld(), $file );
+				$s .= $list->imageHistoryLine( !$file->isOld(), $file, $formattedComments[$i] );
 			}
 			$s .= $list->endImageHistoryList( $navLink );
 
 			if ( $list->getPreventClickjacking() ) {
-				$this->preventClickjacking();
+				$this->setPreventClickjacking( true );
 			}
 		}
 		return $s;
@@ -172,40 +198,40 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 		if ( $numRows ) {
 			# Index value of top item in the list
 			$firstIndex = $this->mIsBackwards ?
-				$this->mHist[$numRows - 1]->getTimestamp() : $this->mHist[0]->getTimestamp();
+				[ $this->mHist[$numRows - 1]->getTimestamp() ] : [ $this->mHist[0]->getTimestamp() ];
 			# Discard the extra result row if there is one
 			if ( $numRows > $this->mLimit && $numRows > 1 ) {
 				if ( $this->mIsBackwards ) {
 					# Index value of item past the index
-					$this->mPastTheEndIndex = $this->mHist[0]->getTimestamp();
+					$this->mPastTheEndIndex = [ $this->mHist[0]->getTimestamp() ];
 					# Index value of bottom item in the list
-					$lastIndex = $this->mHist[1]->getTimestamp();
+					$lastIndex = [ $this->mHist[1]->getTimestamp() ];
 					# Display range
 					$this->mRange = [ 1, $numRows - 1 ];
 				} else {
 					# Index value of item past the index
-					$this->mPastTheEndIndex = $this->mHist[$numRows - 1]->getTimestamp();
+					$this->mPastTheEndIndex = [ $this->mHist[$numRows - 1]->getTimestamp() ];
 					# Index value of bottom item in the list
-					$lastIndex = $this->mHist[$numRows - 2]->getTimestamp();
+					$lastIndex = [ $this->mHist[$numRows - 2]->getTimestamp() ];
 					# Display range
 					$this->mRange = [ 0, $numRows - 2 ];
 				}
 			} else {
-				# Setting indexes to an empty string means that they will be
+				# Setting indexes to an empty array means that they will be
 				# omitted if they would otherwise appear in URLs. It just so
 				# happens that this  is the right thing to do in the standard
 				# UI, in all the relevant cases.
-				$this->mPastTheEndIndex = '';
+				$this->mPastTheEndIndex = [];
 				# Index value of bottom item in the list
 				$lastIndex = $this->mIsBackwards ?
-					$this->mHist[0]->getTimestamp() : $this->mHist[$numRows - 1]->getTimestamp();
+					[ $this->mHist[0]->getTimestamp() ] : [ $this->mHist[$numRows - 1]->getTimestamp() ];
 				# Display range
 				$this->mRange = [ 0, $numRows - 1 ];
 			}
 		} else {
-			$firstIndex = '';
-			$lastIndex = '';
-			$this->mPastTheEndIndex = '';
+			$firstIndex = [];
+			$lastIndex = [];
+			$this->mPastTheEndIndex = [];
 		}
 		if ( $this->mIsBackwards ) {
 			$this->mIsFirst = ( $numRows < $queryLimit );
@@ -223,8 +249,17 @@ class ImageHistoryPseudoPager extends ReverseChronologicalPager {
 
 	/**
 	 * @param bool $enable
+	 * @deprecated since 1.38, use ::setPreventClickjacking()
 	 */
 	protected function preventClickjacking( $enable = true ) {
+		$this->preventClickjacking = $enable;
+	}
+
+	/**
+	 * @param bool $enable
+	 * @since 1.38
+	 */
+	protected function setPreventClickjacking( bool $enable ) {
 		$this->preventClickjacking = $enable;
 	}
 

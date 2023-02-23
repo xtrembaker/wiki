@@ -1,5 +1,6 @@
 <?php
 
+use MediaWiki\MainConfigNames;
 use Wikimedia\TestingAccessWrapper;
 
 /**
@@ -10,7 +11,7 @@ use Wikimedia\TestingAccessWrapper;
  * @covers SpecialWatchlist
  */
 class SpecialWatchlistTest extends SpecialPageTestBase {
-	public function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 		$this->tablesUsed = [ 'watchlist' ];
 		$this->setTemporaryHook(
@@ -18,42 +19,50 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 			null
 		);
 
-		$this->setMwGlobals(
-			'wgDefaultUserOptions',
-			[
-				'extendwatchlist' => 1,
-				'watchlistdays' => 3.0,
-				'watchlisthideanons' => 0,
-				'watchlisthidebots' => 0,
-				'watchlisthideliu' => 0,
-				'watchlisthideminor' => 0,
-				'watchlisthideown' => 0,
-				'watchlisthidepatrolled' => 0,
-				'watchlisthidecategorization' => 1,
-				'watchlistreloadautomatically' => 0,
-				'watchlistunwatchlinks' => 0,
-			]
-		);
+		$this->overrideConfigValues( [
+			MainConfigNames::DefaultUserOptions =>
+				[
+					'extendwatchlist' => 1,
+					'watchlistdays' => 3.0,
+					'watchlisthideanons' => 0,
+					'watchlisthidebots' => 0,
+					'watchlisthideliu' => 0,
+					'watchlisthideminor' => 0,
+					'watchlisthideown' => 0,
+					'watchlisthidepatrolled' => 1,
+					'watchlisthidecategorization' => 0,
+					'watchlistreloadautomatically' => 0,
+					'watchlistunwatchlinks' => 0,
+					'timecorrection' => '0'
+				],
+			MainConfigNames::WatchlistExpiry => true
+		] );
 	}
 
 	/**
 	 * Returns a new instance of the special page under test.
 	 *
-	 * @return SpecialPage
+	 * @return SpecialWatchlist
 	 */
 	protected function newSpecialPage() {
-		return new SpecialWatchlist();
+		$services = $this->getServiceContainer();
+		return new SpecialWatchlist(
+			$services->getWatchedItemStore(),
+			$services->getWatchlistManager(),
+			$services->getDBLoadBalancer(),
+			$services->getUserOptionsLookup()
+		);
 	}
 
 	public function testNotLoggedIn_throwsException() {
-		$this->setExpectedException( UserNotLoggedIn::class );
+		$this->expectException( UserNotLoggedIn::class );
 		$this->executeSpecialPage();
 	}
 
 	public function testUserWithNoWatchedItems_displaysNoWatchlistMessage() {
 		$user = new TestUser( __METHOD__ );
 		list( $html, ) = $this->executeSpecialPage( '', null, 'qqx', $user->getUser() );
-		$this->assertContains( '(nowatchlist)', $html );
+		$this->assertStringContainsString( '(nowatchlist)', $html );
 	}
 
 	/**
@@ -65,6 +74,7 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 		// $defaults and $allFalse are just to make the expected values below
 		// shorter by hiding the background.
 
+		/** @var SpecialWatchlist $page */
 		$page = TestingAccessWrapper::newFromObject(
 			$this->newSpecialPage()
 		);
@@ -75,26 +85,26 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 		$wikiDefaults = $page->getDefaultOptions()->getAllValues();
 
 		switch ( $expectedValuesDefaults ) {
-		case 'allFalse':
-			$allFalse = $wikiDefaults;
+			case 'allFalse':
+				$allFalse = $wikiDefaults;
 
-			foreach ( $allFalse as $key => $value ) {
-				if ( $value === true ) {
-					$allFalse[$key] = false;
+				foreach ( $allFalse as $key => $value ) {
+					if ( $value === true ) {
+						$allFalse[$key] = false;
+					}
 				}
-			}
 
-			// This is not exposed on the form (only in preferences) so it
-			// respects the preference.
-			$allFalse['extended'] = true;
+				// This is not exposed on the form (only in preferences) so it
+				// respects the preference.
+				$allFalse['extended'] = true;
 
-			$expectedValues += $allFalse;
-			break;
-		case 'wikiDefaults':
-			$expectedValues += $wikiDefaults;
-			break;
-		default:
-			$this->fail( "Unknown \$expectedValuesDefaults: $expectedValuesDefaults" );
+				$expectedValues += $allFalse;
+				break;
+			case 'wikiDefaults':
+				$expectedValues += $wikiDefaults;
+				break;
+			default:
+				$this->fail( "Unknown \$expectedValuesDefaults: $expectedValuesDefaults" );
 		}
 
 		$page = TestingAccessWrapper::newFromObject(
@@ -106,8 +116,9 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 		$fauxRequest = new FauxRequest( $inputParams, /* $wasPosted= */ false );
 		$user = $this->getTestUser()->getUser();
 
+		$userOptionsManager = $this->getServiceContainer()->getUserOptionsManager();
 		foreach ( $preferences as $key => $value ) {
-			$user->setOption( $key, $value );
+			$userOptionsManager->setOption( $user, $key, $value );
 		}
 
 		$context->setRequest( $fauxRequest );
@@ -139,14 +150,14 @@ class SpecialWatchlistTest extends SpecialPageTestBase {
 				],
 			],
 
-			'first two same as prefs, second two overriden' => [
+			'first two same as prefs, second two overridden' => [
 				'expectedValuesDefaults' => 'wikiDefaults',
 				'expectedValues' => [
 					// First two same as prefs
 					'hideminor' => true,
 					'hidebots' => false,
 
-					// Second two overriden
+					// Second two overridden
 					'hideanons' => false,
 					'hideliu' => true,
 					'userExpLevel' => 'registered'

@@ -11,22 +11,11 @@
 body.mw-mmv-lightbox-open {
 	overflow-y: auto;
 
-	/* stylelint-disable selector-max-id */
-	#mw-page-base,
-	#mw-head-base,
-	#mw-navigation,
-	#content,
-	#footer,
-	#globalWrapper { // monobook
-		/** Stop the article from scrolling in the background - skin-specific but works in any browser */
+	// Stop the article from scrolling in the background
+	> *:not( .mw-notification-area-overlay ) {
 		display: none;
 	}
-	/* stylelint-enable selector-max-id */
 
-	> * {
-		/** Stop the article from scrolling in the background - works with any skin but needs modern browser */
-		display: none;
-	}
 	> .mw-mmv-overlay,
 	> .mw-mmv-wrapper {
 		display: block;
@@ -43,18 +32,26 @@ body.mw-mmv-lightbox-open {
 		line-height: inherit;
 	}
 
-	.mw-mmv-view-expanded.mw-ui-icon:before {
+	.mw-mmv-view-expanded .mw-ui-icon:before {
 		/* @embed */
 		background-image: url( img/expand.svg );
 	}
 
-	.mw-mmv-view-config.mw-ui-icon:before {
+	.mw-mmv-view-config .mw-ui-icon:before {
 		/* @embed */
 		background-image: url( img/gear.svg );
+		margin-right: 0;
 		opacity: 0.75;
 
 		&:hover {
 			opacity: 1;
+		}
+	}
+
+	.mw-mmv-view-config {
+
+		.mw-ui-icon span {
+			display: none;
 		}
 	}
 }

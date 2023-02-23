@@ -39,7 +39,7 @@ use Psr\Log\NullLogger;
  * @since 1.21
  */
 class RedisConnectionPool implements LoggerAwareInterface {
-	/** @var string Connection timeout in seconds */
+	/** @var int Connection timeout in seconds */
 	protected $connectTimeout;
 	/** @var string Read timeout in seconds */
 	protected $readTimeout;
@@ -55,7 +55,10 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	/** @var int Current idle pool size */
 	protected $idlePoolSize = 0;
 
-	/** @var array (server name => ((connection info array),...) */
+	/**
+	 * @var array (server name => ((connection info array),...)
+	 * @phan-var array<string,array{conn:Redis,free:bool}[]>
+	 */
 	protected $connections = [];
 	/** @var array (server name => UNIX timestamp) */
 	protected $downServers = [];
@@ -64,7 +67,7 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	protected static $instances = [];
 
 	/** integer; seconds to cache servers as "down". */
-	const SERVER_DOWN_TTL = 30;
+	private const SERVER_DOWN_TTL = 30;
 
 	/**
 	 * @var LoggerInterface
@@ -77,7 +80,7 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	 * @throws Exception
 	 */
 	protected function __construct( array $options, $id ) {
-		if ( !class_exists( 'Redis' ) ) {
+		if ( !class_exists( Redis::class ) ) {
 			throw new RuntimeException(
 				__CLASS__ . ' requires a Redis client library. ' .
 				'See https://www.mediawiki.org/wiki/Redis#Setup' );
@@ -169,9 +172,9 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	 *
 	 * @param string $server A hostname/port combination or the absolute path of a UNIX socket.
 	 *                       If a hostname is specified but no port, port 6379 will be used.
-	 * @param LoggerInterface|null $logger PSR-3 logger intance. [optional]
+	 * @param LoggerInterface|null $logger PSR-3 logger instance. [optional]
 	 * @return RedisConnRef|Redis|bool Returns false on failure
-	 * @throws MWException
+	 * @throws InvalidArgumentException
 	 */
 	public function getConnection( $server, LoggerInterface $logger = null ) {
 		// The above @return also documents 'Redis' for convenience with IDEs.
@@ -224,11 +227,22 @@ class RedisConnectionPool implements LoggerAwareInterface {
 		} else {
 			// TCP connection
 			if ( preg_match( '/^\[(.+)\]:(\d+)$/', $server, $m ) ) {
-				list( $host, $port ) = [ $m[1], (int)$m[2] ]; // (ip, port)
-			} elseif ( preg_match( '/^([^:]+):(\d+)$/', $server, $m ) ) {
-				list( $host, $port ) = [ $m[1], (int)$m[2] ]; // (ip or path, port)
+				// (ip, port)
+				list( $host, $port ) = [ $m[1], (int)$m[2] ];
+			} elseif ( preg_match( '/^((?:[\w]+\:\/\/)?[^:]+):(\d+)$/', $server, $m ) ) {
+				// (ip, uri or path, port)
+				list( $host, $port ) = [ $m[1], (int)$m[2] ];
+				if (
+					substr( $host, 0, 6 ) === 'tls://'
+					&& version_compare( phpversion( 'redis' ), '5.0.0' ) < 0
+				) {
+					throw new RuntimeException(
+						'A newer version of the Redis client library is required to use TLS. ' .
+						'See https://www.mediawiki.org/wiki/Redis#Setup' );
+				}
 			} else {
-				list( $host, $port ) = [ $server, 6379 ]; // (ip or path, port)
+				// (ip or path, port)
+				list( $host, $port ) = [ $server, 6379 ];
 			}
 		}
 
@@ -268,15 +282,11 @@ class RedisConnectionPool implements LoggerAwareInterface {
 			return false;
 		}
 
-		if ( $conn ) {
-			$conn->setOption( Redis::OPT_READ_TIMEOUT, $this->readTimeout );
-			$conn->setOption( Redis::OPT_SERIALIZER, $this->serializer );
-			$this->connections[$server][] = [ 'conn' => $conn, 'free' => false ];
+		$conn->setOption( Redis::OPT_READ_TIMEOUT, $this->readTimeout );
+		$conn->setOption( Redis::OPT_SERIALIZER, $this->serializer );
+		$this->connections[$server][] = [ 'conn' => $conn, 'free' => false ];
 
-			return new RedisConnRef( $this, $server, $conn, $logger );
-		} else {
-			return false;
-		}
+		return new RedisConnRef( $this, $server, $conn, $logger );
 	}
 
 	/**
@@ -389,9 +399,9 @@ class RedisConnectionPool implements LoggerAwareInterface {
 	}
 
 	/**
-	 * Make sure connections are closed for sanity
+	 * Make sure connections are closed
 	 */
-	function __destruct() {
+	public function __destruct() {
 		foreach ( $this->connections as $server => &$serverConnections ) {
 			foreach ( $serverConnections as $key => &$connection ) {
 				try {

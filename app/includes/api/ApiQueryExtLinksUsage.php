@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Copyright © 2006 Yuri Astrakhan "<Firstname><Lastname>@gmail.com"
  *
@@ -20,11 +21,20 @@
  * @file
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use Wikimedia\ParamValidator\ParamValidator;
+use Wikimedia\ParamValidator\TypeDef\IntegerDef;
+
 /**
  * @ingroup API
  */
 class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 
+	/**
+	 * @param ApiQuery $query
+	 * @param string $moduleName
+	 */
 	public function __construct( ApiQuery $query, $moduleName ) {
 		parent::__construct( $query, $moduleName, 'eu' );
 	}
@@ -42,7 +52,7 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 	}
 
 	/**
-	 * @param ApiPageSet $resultPageSet
+	 * @param ApiPageSet|null $resultPageSet
 	 * @return void
 	 */
 	private function run( $resultPageSet = null ) {
@@ -52,11 +62,11 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 		$query = $params['query'];
 		$protocol = self::getProtocolPrefix( $params['protocol'] );
 
-		$this->addTables( [ 'page', 'externallinks' ] );
-		$this->addWhere( 'page_id=el_from' );
+		$this->addTables( [ 'externallinks', 'page' ] );
+		$this->addJoinConds( [ 'page' => [ 'JOIN', 'page_id=el_from' ] ] );
 
 		$miser_ns = [];
-		if ( $this->getConfig()->get( 'MiserMode' ) ) {
+		if ( $this->getConfig()->get( MainConfigNames::MiserMode ) ) {
 			$miser_ns = $params['namespace'] ?: [];
 		} else {
 			$this->addWhereFld( 'page_namespace', $params['namespace'] );
@@ -102,12 +112,12 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 		$this->addOption( 'ORDER BY', $orderBy );
 		$this->addFields( $orderBy ); // Make sure
 
-		$prop = array_flip( $params['prop'] );
+		$prop = array_fill_keys( $params['prop'], true );
 		$fld_ids = isset( $prop['ids'] );
 		$fld_title = isset( $prop['title'] );
 		$fld_url = isset( $prop['url'] );
 
-		if ( is_null( $resultPageSet ) ) {
+		if ( $resultPageSet === null ) {
 			$this->addFields( [
 				'page_id',
 				'page_namespace',
@@ -120,6 +130,9 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 
 		$limit = $params['limit'];
 		$this->addOption( 'LIMIT', $limit + 1 );
+
+		// T244254: Avoid MariaDB deciding to scan all of `page`.
+		$this->addOption( 'STRAIGHT_JOIN' );
 
 		if ( $params['continue'] !== null ) {
 			$cont = explode( '|', $params['continue'] );
@@ -137,6 +150,11 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 		$res = $this->select( __METHOD__ );
 
 		$result = $this->getResult();
+
+		if ( $resultPageSet === null ) {
+			$this->executeGenderCacheFromResultWrapper( $res, __METHOD__ );
+		}
+
 		$count = 0;
 		foreach ( $res as $row ) {
 			if ( ++$count > $limit ) {
@@ -150,7 +168,7 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 				continue;
 			}
 
-			if ( is_null( $resultPageSet ) ) {
+			if ( $resultPageSet === null ) {
 				$vals = [
 					ApiResult::META_TYPE => 'assoc',
 				];
@@ -179,7 +197,7 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 			}
 		}
 
-		if ( is_null( $resultPageSet ) ) {
+		if ( $resultPageSet === null ) {
 			$result->addIndexedTagName( [ 'query', $this->getModuleName() ],
 				$this->getModulePrefix() );
 		}
@@ -196,9 +214,9 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 	public function getAllowedParams() {
 		$ret = [
 			'prop' => [
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_DFLT => 'ids|title|url',
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_DEFAULT => 'ids|title|url',
+				ParamValidator::PARAM_TYPE => [
 					'ids',
 					'title',
 					'url'
@@ -209,25 +227,25 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 				ApiBase::PARAM_HELP_MSG => 'api-help-param-continue',
 			],
 			'protocol' => [
-				ApiBase::PARAM_TYPE => self::prepareProtocols(),
-				ApiBase::PARAM_DFLT => '',
+				ParamValidator::PARAM_TYPE => self::prepareProtocols(),
+				ParamValidator::PARAM_DEFAULT => '',
 			],
 			'query' => null,
 			'namespace' => [
-				ApiBase::PARAM_ISMULTI => true,
-				ApiBase::PARAM_TYPE => 'namespace'
+				ParamValidator::PARAM_ISMULTI => true,
+				ParamValidator::PARAM_TYPE => 'namespace'
 			],
 			'limit' => [
-				ApiBase::PARAM_DFLT => 10,
-				ApiBase::PARAM_TYPE => 'limit',
-				ApiBase::PARAM_MIN => 1,
-				ApiBase::PARAM_MAX => ApiBase::LIMIT_BIG1,
-				ApiBase::PARAM_MAX2 => ApiBase::LIMIT_BIG2
+				ParamValidator::PARAM_DEFAULT => 10,
+				ParamValidator::PARAM_TYPE => 'limit',
+				IntegerDef::PARAM_MIN => 1,
+				IntegerDef::PARAM_MAX => ApiBase::LIMIT_BIG1,
+				IntegerDef::PARAM_MAX2 => ApiBase::LIMIT_BIG2
 			],
 			'expandurl' => false,
 		];
 
-		if ( $this->getConfig()->get( 'MiserMode' ) ) {
+		if ( $this->getConfig()->get( MainConfigNames::MiserMode ) ) {
 			$ret['namespace'][ApiBase::PARAM_HELP_MSG_APPEND] = [
 				'api-help-param-limited-in-miser-mode',
 			];
@@ -237,9 +255,10 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 	}
 
 	public static function prepareProtocols() {
-		global $wgUrlProtocols;
+		$urlProtocols = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::UrlProtocols );
 		$protocols = [ '' ];
-		foreach ( $wgUrlProtocols as $p ) {
+		foreach ( $urlProtocols as $p ) {
 			if ( $p !== '//' ) {
 				$protocols[] = substr( $p, 0, strpos( $p, ':' ) );
 			}
@@ -250,10 +269,11 @@ class ApiQueryExtLinksUsage extends ApiQueryGeneratorBase {
 
 	public static function getProtocolPrefix( $protocol ) {
 		// Find the right prefix
-		global $wgUrlProtocols;
-		if ( $protocol && !in_array( $protocol, $wgUrlProtocols ) ) {
-			foreach ( $wgUrlProtocols as $p ) {
-				if ( substr( $p, 0, strlen( $protocol ) ) === $protocol ) {
+		$urlProtocols = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::UrlProtocols );
+		if ( $protocol && !in_array( $protocol, $urlProtocols ) ) {
+			foreach ( $urlProtocols as $p ) {
+				if ( str_starts_with( $p, $protocol ) ) {
 					$protocol = $p;
 					break;
 				}

@@ -23,6 +23,8 @@
  * @author Antoine Musso <hashar@free.fr>
  */
 
+use MediaWiki\Settings\SettingsBuilder;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -54,6 +56,12 @@ class GetConfiguration extends Maintenance {
 		$this->addOption( 'iregex', 'same as --regex but case insensitive', false, true );
 		$this->addOption( 'settings', 'Space-separated list of wg* variables', false, true );
 		$this->addOption( 'format', implode( ', ', self::$outFormats ), false, true );
+		$this->addOption(
+			'json-partial-output-on-error',
+			'Use JSON_PARTIAL_OUTPUT_ON_ERROR flag with json_encode(). This allows for partial response to ' .
+			'be output in case of an exception while serializing to JSON. If an error occurs, ' .
+			'the wgGetConfigurationJsonErrorOccurred field is set in the output.'
+		);
 	}
 
 	public function validateParamsAndArgs() {
@@ -83,15 +91,18 @@ class GetConfiguration extends Maintenance {
 
 	/**
 	 * finalSetup() since we need MWException
+	 *
+	 * @param SettingsBuilder|null $settingsBuilder
 	 */
-	public function finalSetup() {
-		parent::finalSetup();
+	public function finalSetup( SettingsBuilder $settingsBuilder = null ) {
+		parent::finalSetup( $settingsBuilder );
 
 		$this->regex = $this->getOption( 'regex' ) ?: $this->getOption( 'iregex' );
 		if ( $this->regex ) {
 			$this->regex = '/' . $this->regex . '/';
 			if ( $this->hasOption( 'iregex' ) ) {
-				$this->regex .= 'i'; # case insensitive regex
+				# case insensitive regex
+				$this->regex .= 'i';
 			}
 		}
 
@@ -114,14 +125,13 @@ class GetConfiguration extends Maintenance {
 		// Settings we will display
 		$res = [];
 
-		# Sane default: dump any wg / wmg variable
+		# Default: dump any wg / wmg variable
 		if ( !$this->regex && !$this->getOption( 'settings' ) ) {
 			$this->regex = '/^wm?g/';
 		}
 
 		# Filter out globals based on the regex
 		if ( $this->regex ) {
-			$res = [];
 			foreach ( $GLOBALS as $name => $value ) {
 				if ( preg_match( $this->regex, $name ) ) {
 					$res[$name] = $value;
@@ -138,7 +148,6 @@ class GetConfiguration extends Maintenance {
 
 		ksort( $res );
 
-		$out = null;
 		switch ( strtolower( $this->getOption( 'format' ) ) ) {
 			case 'serialize':
 			case 'php':
@@ -149,6 +158,10 @@ class GetConfiguration extends Maintenance {
 				break;
 			case 'json':
 				$out = FormatJson::encode( $res );
+				if ( !$out && $this->getOption( 'json-partial-output-on-error' ) ) {
+					$res['wgGetConfigurationJsonErrorOccurred'] = true;
+					$out = json_encode( $res, JSON_PARTIAL_OUTPUT_ON_ERROR );
+				}
 				break;
 			default:
 				throw new MWException( "Invalid serialization format given." );
@@ -165,7 +178,8 @@ class GetConfiguration extends Maintenance {
 	protected function formatVarDump( $res ) {
 		$ret = '';
 		foreach ( $res as $key => $value ) {
-			ob_start(); # intercept var_dump() output
+			# intercept var_dump() output
+			ob_start();
 			print "\${$key} = ";
 			var_dump( $value );
 			# grab var_dump() output and discard it from the output buffer

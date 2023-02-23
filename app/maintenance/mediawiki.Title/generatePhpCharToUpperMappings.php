@@ -22,6 +22,7 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
 use MediaWiki\Shell\Shell;
 
 require_once __DIR__ . '/../Maintenance.php';
@@ -40,7 +41,7 @@ class GeneratePhpCharToUpperMappings extends Maintenance {
 	}
 
 	public function execute() {
-		global $wgContLang, $IP;
+		global $IP;
 
 		$data = [];
 
@@ -51,12 +52,13 @@ class GeneratePhpCharToUpperMappings extends Maintenance {
 			->limits( [ 'memory' => 1024 * 1024 ] )
 			->execute();
 
-		if ( $result->getExitcode() !== 0 ) {
+		if ( $result->getExitCode() !== 0 ) {
 			$this->output( $result->getStderr() );
 			return;
 		}
 
 		$jsUpperChars = json_decode( $result->getStdout() );
+		'@phan-var string[] $jsUpperChars';
 
 		for ( $i = 0; $i <= 0x10ffff; $i++ ) {
 			if ( $i >= 0xd800 && $i <= 0xdfff ) {
@@ -64,13 +66,13 @@ class GeneratePhpCharToUpperMappings extends Maintenance {
 				continue;
 			}
 			$char = \UtfNormal\Utils::codepointToUtf8( $i );
-			$phpUpper = $wgContLang->ucfirst( $char );
+			$phpUpper = MediaWikiServices::getInstance()->getContentLanguage()->ucfirst( $char );
 			$jsUpper = $jsUpperChars[$i];
 			if ( $jsUpper !== $phpUpper ) {
 				if ( $char === $phpUpper ) {
-					// Optimisation: Use the empty string to signal "leave character unchanged".
+					// Optimisation: Use 0 to signal "leave character unchanged".
 					// Reduces the transfer size by ~50%. Reduces browser memory cost as well.
-					$data[$char] = '';
+					$data[$char] = 0;
 				} else {
 					$data[$char] = $phpUpper;
 				}

@@ -22,11 +22,11 @@
 
 namespace MediaWiki\Block;
 
-use IContextSource;
+use MediaWiki\User\UserIdentity;
 
 /**
  * System blocks are temporary blocks that are created on enforcement (e.g.
- * from IP blacklists) and are not saved to the database. The target of a
+ * from IP lists) and are not saved to the database. The target of a
  * system block is an IP address. System blocks do not give rise to
  * autoblocks and are not tracked with cookies.
  *
@@ -59,10 +59,10 @@ class SystemBlock extends AbstractBlock {
 
 	/**
 	 * Get the system block type, if any. A SystemBlock can have the following types:
-	 * - 'proxy': the IP is blacklisted in $wgProxyList
-	 * - 'dnsbl': the IP is associated with a blacklisted domain in $wgDnsBlacklistUrls
+	 * - 'proxy': the IP is listed in $wgProxyList
+	 * - 'dnsbl': the IP is associated with a listed domain in $wgDnsBlacklistUrls
 	 * - 'wgSoftBlockRanges': the IP is covered by $wgSoftBlockRanges
-	 * - 'global-block': for backwards compatability with the UserIsBlockedGlobally hook
+	 * - 'global-block': for backwards compatibility with the UserIsBlockedGlobally hook
 	 *
 	 * @since 1.29
 	 * @return string|null
@@ -74,17 +74,8 @@ class SystemBlock extends AbstractBlock {
 	/**
 	 * @inheritDoc
 	 */
-	public function getPermissionsError( IContextSource $context ) {
-		$params = $this->getBlockErrorParams( $context );
-
-		// TODO: Clean up error messages params so we don't have to do this (T227174)
-		$params[ 4 ] = $this->getSystemBlockType();
-
-		$msg = 'systemblockedtext';
-
-		array_unshift( $params, $msg );
-
-		return $params;
+	public function getIdentifier( $wikiId = self::LOCAL ) {
+		return $this->getSystemBlockType();
 	}
 
 	/**
@@ -105,4 +96,25 @@ class SystemBlock extends AbstractBlock {
 		}
 	}
 
+	/**
+	 * @inheritDoc
+	 */
+	public function getBy( $wikiId = self::LOCAL ): int {
+		$this->assertWiki( $wikiId );
+		return 0;
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getByName() {
+		return '';
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function getBlocker(): ?UserIdentity {
+		return null;
+	}
 }

@@ -1,10 +1,10 @@
 {
 	"@metadata": {
 		"authors": [
-			"Toliño",
-			"Xosé",
 			"Banjo",
-			"Elisardojm"
+			"Elisardojm",
+			"Toliño",
+			"Xosé"
 		]
 	},
 	"skinname-monobook": "MonoBook",
@@ -16,5 +16,7 @@
 	"monobook-jumptosearch": "Saltar á procura",
 	"monobook-more-actions": "Máis",
 	"monobook-notifications-link": "Notificacións ($1)",
-	"monobook-notifications-link-none": "Notificacións"
+	"monobook-notifications-link-none": "Notificacións",
+	"monobook-view-history": "Historial",
+	"monobook-action-undelete": "Restaurar {{PLURAL:$1|unha edición|$1 edicións}}"
 }

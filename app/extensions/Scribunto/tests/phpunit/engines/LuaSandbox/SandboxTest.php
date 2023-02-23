@@ -1,9 +1,10 @@
 <?php
 
 /**
- * @covers Scribunto_LuaSandboxEngine
+ * @covers \MediaWiki\Extension\Scribunto\Engines\LuaSandbox\LuaSandboxEngine
  */
-class Scribunto_LuaSandboxTest extends Scribunto_LuaEngineUnitTestBase {
+class LuaSandboxTest extends Scribunto_LuaEngineUnitTestBase {
+	/** @inheritDoc */
 	protected static $moduleName = 'SandboxTests';
 
 	public static function suite( $className ) {
@@ -17,10 +18,6 @@ class Scribunto_LuaSandboxTest extends Scribunto_LuaEngineUnitTestBase {
 	}
 
 	public function testArgumentParsingTime() {
-		if ( !wfGetRusage() ) {
-			$this->markTestSkipped( "getrusage is not available" );
-		}
-
 		$engine = $this->getEngine();
 		$parser = $engine->getParser();
 		$pp = $parser->getPreprocessor();
@@ -95,7 +92,8 @@ class Scribunto_LuaSandboxTest extends Scribunto_LuaEngineUnitTestBase {
 	}
 
 	private function getRuTime() {
-		$ru = wfGetRusage();
+		// RUSAGE_SELF = 0
+		$ru = getrusage( 0 );
 		return $ru['ru_utime.tv_sec'] + $ru['ru_utime.tv_usec'] / 1e6 +
 			$ru['ru_stime.tv_sec'] + $ru['ru_stime.tv_usec'] / 1e6;
 	}

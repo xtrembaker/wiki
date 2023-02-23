@@ -21,12 +21,10 @@
 	"config-page-install": "Instalēt",
 	"config-page-complete": "Pabeigts!",
 	"config-page-restart": "Pārstartēt instalāciju",
-	"config-page-readme": "Lasīt mani",
 	"config-page-releasenotes": "Informācija par laidienu",
 	"config-page-copying": "Kopē",
 	"config-restart": "Jā, restartēt",
 	"config-env-php": "PHP $1 ir uzstādīts.",
-	"config-env-hhvm": "HHVM $1 ir uzstādīts.",
 	"config-apcu": "[https://www.php.net/apcu APCu] ir uzstādīts",
 	"config-diff3-bad": "GNU diff3 nav atrasts.",
 	"config-db-name": "Datubāzes nosaukums:",
@@ -51,7 +49,6 @@
 	"config-admin-name-blank": "Ievadiet administratora lietotājvārdu.",
 	"config-admin-email": "E-pasta adrese:",
 	"config-email-settings": "E-pasta iestatījumi",
-	"config-logo": "Logo URL:",
 	"config-cc-again": "Izvēlies vēlreiz...",
 	"config-memcached-servers": "Memcached serveri:",
 	"config-extensions": "Paplašinājumi",
@@ -60,5 +57,5 @@
 	"config-help": "palīdzība",
 	"config-help-tooltip": "uzspiediet, lai izvērstu",
 	"mainpagetext": "<strong>MediaWiki veiksmīgi instalēts.</strong>",
-	"mainpagedocfooter": "Izlasi [https://meta.wikimedia.org/wiki/Help:Contents Lietotāja pamācību], lai iegūtu vairāk informācijas par Wiki programmatūras lietošanu.\n\n== Pirmie soļi ==\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:Configuration_settings Konfigurācijas iespēju saraksts]\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:FAQ MediaWiki J&A]\n* [https://lists.wikimedia.org/mailman/listinfo/mediawiki-announce Parakstīties uz paziņojumiem par jaunām MediaWiki versijām]"
+	"mainpagedocfooter": "Izlasi [https://meta.wikimedia.org/wiki/Help:Contents Lietotāja pamācību], lai iegūtu vairāk informācijas par Wiki programmatūras lietošanu.\n\n== Pirmie soļi ==\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:Configuration_settings Konfigurācijas iespēju saraksts]\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:FAQ MediaWiki J&A]\n* [https://lists.wikimedia.org/postorius/lists/mediawiki-announce.lists.wikimedia.org/ Parakstīties uz paziņojumiem par jaunām MediaWiki versijām]"
 }

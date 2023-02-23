@@ -21,6 +21,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -55,10 +57,11 @@ class MigrateFileRepoLayout extends Maintenance {
 
 		$be = $repo->getBackend();
 		if ( $be instanceof FileBackendDBRepoWrapper ) {
-			$be = $be->getInternalBackend(); // avoid path translations for this script
+			// avoid path translations for this script
+			$be = $be->getInternalBackend();
 		}
 
-		$dbw = $repo->getMasterDB();
+		$dbw = $repo->getPrimaryDB();
 
 		$origBase = $be->getContainerStoragePath( "{$repo->getName()}-original" );
 		$startTime = wfTimestampNow();
@@ -103,7 +106,7 @@ class MigrateFileRepoLayout extends Maintenance {
 					}
 
 					$status = $be->prepare( [
-						'dir' => dirname( $dpath ), 'bypassReadOnly' => 1 ] );
+						'dir' => dirname( $dpath ), 'bypassReadOnly' => true ] );
 					if ( !$status->isOK() ) {
 						$this->error( print_r( $status->getErrors(), true ) );
 					}
@@ -136,7 +139,7 @@ class MigrateFileRepoLayout extends Maintenance {
 					}
 
 					$status = $be->prepare( [
-						'dir' => dirname( $dpath ), 'bypassReadOnly' => 1 ] );
+						'dir' => dirname( $dpath ), 'bypassReadOnly' => true ] );
 					if ( !$status->isOK() ) {
 						$this->error( print_r( $status->getErrors(), true ) );
 					}
@@ -194,7 +197,7 @@ class MigrateFileRepoLayout extends Maintenance {
 				}
 
 				$status = $be->prepare( [
-					'dir' => dirname( $dpath ), 'bypassReadOnly' => 1 ] );
+					'dir' => dirname( $dpath ), 'bypassReadOnly' => true ] );
 				if ( !$status->isOK() ) {
 					$this->error( print_r( $status->getErrors(), true ) );
 				}
@@ -217,16 +220,20 @@ class MigrateFileRepoLayout extends Maintenance {
 	}
 
 	protected function getRepo() {
-		return RepoGroup::singleton()->getLocalRepo();
+		return MediaWikiServices::getInstance()->getRepoGroup()->getLocalRepo();
 	}
 
+	/**
+	 * @param array[] $ops
+	 * @param FileBackend $be
+	 */
 	protected function runBatch( array $ops, FileBackend $be ) {
 		$this->output( "Migrating file batch:\n" );
 		foreach ( $ops as $op ) {
 			$this->output( "\"{$op['img']}\" (dest: {$op['dst']})\n" );
 		}
 
-		$status = $be->doOperations( $ops, [ 'bypassReadOnly' => 1 ] );
+		$status = $be->doOperations( $ops, [ 'bypassReadOnly' => true ] );
 		if ( !$status->isOK() ) {
 			$this->output( print_r( $status->getErrors(), true ) );
 		}

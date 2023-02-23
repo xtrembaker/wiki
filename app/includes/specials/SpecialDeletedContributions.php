@@ -22,7 +22,15 @@
  */
 
 use MediaWiki\Block\DatabaseBlock;
-use MediaWiki\MediaWikiServices;
+use MediaWiki\MainConfigNames;
+use MediaWiki\Permissions\PermissionManager;
+use MediaWiki\Revision\RevisionFactory;
+use MediaWiki\User\UserFactory;
+use MediaWiki\User\UserNamePrefixSearch;
+use MediaWiki\User\UserNameUtils;
+use MediaWiki\User\UserRigorOptions;
+use Wikimedia\IPUtils;
+use Wikimedia\Rdbms\ILoadBalancer;
 
 /**
  * Implements Special:DeletedContributions to display archived revisions
@@ -32,24 +40,77 @@ class SpecialDeletedContributions extends SpecialPage {
 	/** @var FormOptions */
 	protected $mOpts;
 
-	function __construct() {
+	/** @var PermissionManager */
+	private $permissionManager;
+
+	/** @var ILoadBalancer */
+	private $loadBalancer;
+
+	/** @var CommentStore */
+	private $commentStore;
+
+	/** @var RevisionFactory */
+	private $revisionFactory;
+
+	/** @var NamespaceInfo */
+	private $namespaceInfo;
+
+	/** @var UserFactory */
+	private $userFactory;
+
+	/** @var UserNameUtils */
+	private $userNameUtils;
+
+	/** @var UserNamePrefixSearch */
+	private $userNamePrefixSearch;
+
+	/**
+	 * @param PermissionManager $permissionManager
+	 * @param ILoadBalancer $loadBalancer
+	 * @param CommentStore $commentStore
+	 * @param RevisionFactory $revisionFactory
+	 * @param NamespaceInfo $namespaceInfo
+	 * @param UserFactory $userFactory
+	 * @param UserNameUtils $userNameUtils
+	 * @param UserNamePrefixSearch $userNamePrefixSearch
+	 */
+	public function __construct(
+		PermissionManager $permissionManager,
+		ILoadBalancer $loadBalancer,
+		CommentStore $commentStore,
+		RevisionFactory $revisionFactory,
+		NamespaceInfo $namespaceInfo,
+		UserFactory $userFactory,
+		UserNameUtils $userNameUtils,
+		UserNamePrefixSearch $userNamePrefixSearch
+	) {
 		parent::__construct( 'DeletedContributions', 'deletedhistory' );
+		$this->permissionManager = $permissionManager;
+		$this->loadBalancer = $loadBalancer;
+		$this->commentStore = $commentStore;
+		$this->revisionFactory = $revisionFactory;
+		$this->namespaceInfo = $namespaceInfo;
+		$this->userFactory = $userFactory;
+		$this->userNameUtils = $userNameUtils;
+		$this->userNamePrefixSearch = $userNamePrefixSearch;
 	}
 
 	/**
 	 * Special page "deleted user contributions".
 	 * Shows a list of the deleted contributions of a user.
 	 *
-	 * @param string $par (optional) user name of the user for which to show the contributions
+	 * @param string|null $par user name of the user for which to show the contributions
 	 */
-	function execute( $par ) {
+	public function execute( $par ) {
 		$this->setHeaders();
 		$this->outputHeader();
 		$this->checkPermissions();
-		$this->addHelpLink( 'Help:User contributions' );
-
 		$out = $this->getOutput();
-		$out->setPageTitle( $this->msg( 'deletedcontributions-title' ) );
+		$out->addModuleStyles( [
+			'mediawiki.interface.helpers.styles',
+			'mediawiki.special.changeslist',
+		] );
+		$this->addHelpLink( 'Help:User contributions' );
 
 		$opts = new FormOptions();
 
@@ -58,11 +119,12 @@ class SpecialDeletedContributions extends SpecialPage {
 		$opts->add( 'limit', 20 );
 
 		$opts->fetchValuesFromRequest( $this->getRequest() );
-		$opts->validateIntBounds( 'limit', 0, $this->getConfig()->get( 'QueryPageDefaultLimit' ) );
+		$opts->validateIntBounds( 'limit', 0,
+			$this->getConfig()->get( MainConfigNames::QueryPageDefaultLimit ) );
 
 		if ( $par !== null ) {
 			// Beautify the username
-			$par = User::getCanonicalName( $par, false );
+			$par = $this->userNameUtils->getCanonical( $par, UserRigorOptions::RIGOR_NONE );
 			$opts->setValue( 'target', (string)$par );
 		}
 
@@ -80,7 +142,7 @@ class SpecialDeletedContributions extends SpecialPage {
 			return;
 		}
 
-		$userObj = User::newFromName( $target, false );
+		$userObj = $this->userFactory->newFromName( $target, UserRigorOptions::RIGOR_NONE );
 		if ( !$userObj ) {
 			$this->getForm();
 
@@ -89,12 +151,22 @@ class SpecialDeletedContributions extends SpecialPage {
 		$this->getSkin()->setRelevantUser( $userObj );
 
 		$target = $userObj->getName();
+
 		$out->addSubtitle( $this->getSubTitle( $userObj ) );
+		$out->setPageTitle( $this->msg( 'deletedcontributions-title', $target ) );
 
 		$this->getForm();
 
-		$pager = new DeletedContribsPager( $this->getContext(), $target, $opts->getValue( 'namespace' ),
-			$this->getLinkRenderer() );
+		$pager = new DeletedContribsPager(
+			$this->getContext(),
+			$this->commentStore,
+			$this->getHookContainer(),
+			$this->getLinkRenderer(),
+			$this->loadBalancer,
+			$this->revisionFactory,
+			$target,
+			$opts->getValue( 'namespace' )
+		);
 		if ( !$pager->getNumRows() ) {
 			$out->addWikiMsg( 'nocontribs' );
 
@@ -114,7 +186,7 @@ class SpecialDeletedContributions extends SpecialPage {
 
 		# If there were contributions, and it was a valid user or IP, show
 		# the appropriate "footer" message - WHOIS tools, etc.
-		$message = IP::isIPAddress( $target ) ?
+		$message = IPUtils::isIPAddress( $target ) ?
 			'sp-contributions-footer-anon' :
 			'sp-contributions-footer';
 
@@ -131,7 +203,7 @@ class SpecialDeletedContributions extends SpecialPage {
 	 * @param User $userObj User object for the target
 	 * @return string Appropriately-escaped HTML to be output literally
 	 */
-	function getSubTitle( $userObj ) {
+	private function getSubTitle( $userObj ) {
 		$linkRenderer = $this->getLinkRenderer();
 		if ( $userObj->isAnon() ) {
 			$user = htmlspecialchars( $userObj->getName() );
@@ -142,7 +214,12 @@ class SpecialDeletedContributions extends SpecialPage {
 		$nt = $userObj->getUserPage();
 		$talk = $nt->getTalkPage();
 		if ( $talk ) {
-			$tools = SpecialContributions::getUserLinks( $this, $userObj );
+			$tools = SpecialContributions::getUserLinks(
+				$this,
+				$userObj,
+				$this->permissionManager,
+				$this->getHookRunner()
+			);
 
 			$contributionsLink = $linkRenderer->makeKnownLink(
 				SpecialPage::getTitleFor( 'Contributions', $nt->getDBkey() ),
@@ -161,10 +238,10 @@ class SpecialDeletedContributions extends SpecialPage {
 
 			// Show a note if the user is blocked and display the last block log entry.
 			$block = DatabaseBlock::newFromTarget( $userObj, $userObj );
-			if ( !is_null( $block ) && $block->getType() != DatabaseBlock::TYPE_AUTO ) {
+			if ( $block !== null && $block->getType() != DatabaseBlock::TYPE_AUTO ) {
 				if ( $block->getType() == DatabaseBlock::TYPE_RANGE ) {
-					$nt = MediaWikiServices::getInstance()->getNamespaceInfo()->
-						getCanonicalName( NS_USER ) . ':' . $block->getTarget();
+					$nt = $this->namespaceInfo->getCanonicalName( NS_USER )
+						. ':' . $block->getTargetName();
 				}
 
 				// LogEventsList::showLogExtract() wants the first parameter by ref
@@ -193,7 +270,7 @@ class SpecialDeletedContributions extends SpecialPage {
 	/**
 	 * Generates the namespace selector form with hidden attributes.
 	 */
-	function getForm() {
+	private function getForm() {
 		$opts = $this->mOpts;
 
 		$formDescriptor = [
@@ -217,7 +294,7 @@ class SpecialDeletedContributions extends SpecialPage {
 			->setWrapperLegendMsg( 'sp-contributions-search' )
 			->setSubmitTextMsg( 'sp-contributions-submit' )
 			// prevent setting subpage and 'target' parameter at the same time
-			->setAction( $this->getPageTitle()->getLocalURL() )
+			->setTitle( $this->getPageTitle() )
 			->setMethod( 'get' )
 			->prepareForm()
 			->displayForm( false );
@@ -232,13 +309,14 @@ class SpecialDeletedContributions extends SpecialPage {
 	 * @return string[] Matching subpages
 	 */
 	public function prefixSearchSubpages( $search, $limit, $offset ) {
-		$user = User::newFromName( $search );
-		if ( !$user ) {
+		$search = $this->userNameUtils->getCanonical( $search );
+		if ( !$search ) {
 			// No prefix suggestion for invalid user
 			return [];
 		}
 		// Autocomplete subpage as user list - public to allow caching
-		return UserNamePrefixSearch::search( 'public', $search, $limit, $offset );
+		return $this->userNamePrefixSearch
+			->search( UserNamePrefixSearch::AUDIENCE_PUBLIC, $search, $limit, $offset );
 	}
 
 	protected function getGroupName() {

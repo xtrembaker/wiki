@@ -2,7 +2,7 @@
 
 /**
  * Utility for exporting site entries to XML.
- * For the output file format, see docs/sitelist.txt and docs/sitelist-1.0.xsd.
+ * For the output file format, see docs/sitelist.md and docs/sitelist-1.0.xsd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,6 +38,7 @@ class SiteExporter {
 	 * @param resource $sink A file handle open for writing
 	 */
 	public function __construct( $sink ) {
+		// phpcs:ignore MediaWiki.Usage.ForbiddenFunctions.is_resource
 		if ( !is_resource( $sink ) || get_resource_type( $sink ) !== 'stream' ) {
 			throw new InvalidArgumentException( '$sink must be a file handle' );
 		}

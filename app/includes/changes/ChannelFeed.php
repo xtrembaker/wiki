@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Copyright © 2004 Brion Vibber <brion@pobox.com>
  * https://www.mediawiki.org/
@@ -21,9 +22,13 @@
  * @file
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+
 /**
  * Class to support the outputting of syndication feeds in Atom and RSS format.
  *
+ * @stable to extend
  * @ingroup Feed
  */
 abstract class ChannelFeed extends FeedItem {
@@ -32,14 +37,19 @@ abstract class ChannelFeed extends FeedItem {
 	protected $templateParser;
 
 	/**
+	 * @stable to call
+	 *
 	 * @param string|Title $title Feed's title
 	 * @param string $description
 	 * @param string $url URL uniquely designating the feed.
 	 * @param string $date Feed's date
 	 * @param string $author Author's user name
 	 * @param string $comments
+	 *
 	 */
-	function __construct( $title, $description, $url, $date = '', $author = '', $comments = '' ) {
+	public function __construct(
+		$title, $description, $url, $date = '', $author = '', $comments = ''
+	) {
 		parent::__construct( $title, $description, $url, $date, $author, $comments );
 		$this->templateParser = new TemplateParser();
 	}
@@ -81,20 +91,20 @@ abstract class ChannelFeed extends FeedItem {
 	 * but can also be called separately.
 	 */
 	public function httpHeaders() {
-		global $wgOut, $wgVaryOnXFP;
-
+		global $wgOut;
+		$varyOnXFP = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::VaryOnXFP );
 		# We take over from $wgOut, excepting its cache header info
 		$wgOut->disable();
 		$mimetype = $this->contentType();
 		header( "Content-type: $mimetype; charset=UTF-8" );
 
-		// Set a sane filename
-		$exts = MediaWiki\MediaWikiServices::getInstance()->getMimeAnalyzer()
-			->getExtensionsForType( $mimetype );
-		$ext = $exts ? strtok( $exts, ' ' ) : 'xml';
+		// Set a sensible filename
+		$mimeAnalyzer = MediaWikiServices::getInstance()->getMimeAnalyzer();
+		$ext = $mimeAnalyzer->getExtensionFromMimeTypeOrNull( $mimetype ) ?? 'xml';
 		header( "Content-Disposition: inline; filename=\"feed.{$ext}\"" );
 
-		if ( $wgVaryOnXFP ) {
+		if ( $varyOnXFP ) {
 			$wgOut->addVaryHeader( 'X-Forwarded-Proto' );
 		}
 		$wgOut->sendCacheControl();
@@ -102,6 +112,8 @@ abstract class ChannelFeed extends FeedItem {
 
 	/**
 	 * Return an internet media type to be sent in the headers.
+	 *
+	 * @stable to override
 	 *
 	 * @return string
 	 */

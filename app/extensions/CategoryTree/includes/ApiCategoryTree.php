@@ -1,6 +1,16 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
+namespace MediaWiki\Extension\CategoryTree;
+
+use ApiBase;
+use ApiMain;
+use Config;
+use ConfigFactory;
+use FormatJson;
+use MediaWiki\Languages\LanguageConverterFactory;
+use Title;
+use WANObjectCache;
+use Wikimedia\ParamValidator\ParamValidator;
 
 /**
  * This program is free software; you can redistribute it and/or modify
@@ -20,6 +30,35 @@ use MediaWiki\MediaWikiServices;
  */
 
 class ApiCategoryTree extends ApiBase {
+	/** @var ConfigFactory */
+	private $configFactory;
+
+	/** @var LanguageConverterFactory */
+	private $languageConverterFactory;
+
+	/** @var WANObjectCache */
+	private $wanCache;
+
+	/**
+	 * @param ApiMain $main
+	 * @param string $action
+	 * @param ConfigFactory $configFactory
+	 * @param LanguageConverterFactory $languageConverterFactory
+	 * @param WANObjectCache $wanCache
+	 */
+	public function __construct(
+		ApiMain $main,
+		$action,
+		ConfigFactory $configFactory,
+		LanguageConverterFactory $languageConverterFactory,
+		WANObjectCache $wanCache
+	) {
+		parent::__construct( $main, $action );
+		$this->configFactory = $configFactory;
+		$this->languageConverterFactory = $languageConverterFactory;
+		$this->wanCache = $wanCache;
+	}
+
 	/**
 	 * @inheritDoc
 	 */
@@ -43,7 +82,7 @@ class ApiCategoryTree extends ApiBase {
 
 		$ct = new CategoryTree( $options );
 		$depth = CategoryTree::capDepth( $ct->getOption( 'mode' ), $depth );
-		$ctConfig = MediaWikiServices::getInstance()->getConfigFactory()->makeConfig( 'categorytree' );
+		$ctConfig = $this->configFactory->makeConfig( 'categorytree' );
 		$html = $this->getHTML( $ct, $title, $depth, $ctConfig );
 
 		$this->getMain()->setCacheMode( 'public' );
@@ -80,38 +119,29 @@ class ApiCategoryTree extends ApiBase {
 	 * @return string HTML
 	 */
 	private function getHTML( CategoryTree $ct, Title $title, $depth, Config $ctConfig ) {
-		global $wgMemc;
+		$langConv = $this->languageConverterFactory->getLanguageConverter();
 
-		$mckey = ObjectCache::getLocalClusterInstance()->makeKey(
-			'ajax-categorytree',
-			md5( $title->getDBkey() ),
-			md5( $ct->getOptionsAsCacheKey( $depth ) ),
-			$this->getLanguage()->getCode(),
-			MediaWikiServices::getInstance()->getContentLanguage()->getExtraHashOptions(),
-			$ctConfig->get( 'RenderHashAppend' )
+		return $this->wanCache->getWithSetCallback(
+			$this->wanCache->makeKey(
+				'categorytree-html-ajax',
+				md5( $title->getDBkey() ),
+				md5( $ct->getOptionsAsCacheKey( $depth ) ),
+				$this->getLanguage()->getCode(),
+				$langConv->getExtraHashOptions(),
+				$ctConfig->get( 'RenderHashAppend' )
+			),
+			$this->wanCache::TTL_DAY,
+			static function () use ( $ct, $title, $depth ) {
+				return trim( $ct->renderChildren( $title, $depth ) );
+			},
+			[
+				'touchedCallback' => function () {
+					$timestamp = $this->getConditionalRequestData( 'last-modified' );
+
+					return $timestamp ? wfTimestamp( TS_UNIX, $timestamp ) : null;
+				}
+			]
 		);
-
-		$touched = $this->getConditionalRequestData( 'last-modified' );
-		if ( $touched ) {
-			$mcvalue = $wgMemc->get( $mckey );
-			if ( $mcvalue && $touched <= $mcvalue['timestamp'] ) {
-				$html = $mcvalue['value'];
-			}
-		}
-
-		if ( !isset( $html ) ) {
-			$html = $ct->renderChildren( $title, $depth );
-
-			$wgMemc->set(
-				$mckey,
-				[
-					'timestamp' => wfTimestampNow(),
-					'value' => $html
-				],
-				86400
-			);
-		}
-		return trim( $html );
 	}
 
 	/**
@@ -120,11 +150,11 @@ class ApiCategoryTree extends ApiBase {
 	public function getAllowedParams() {
 		return [
 			'category' => [
-				ApiBase::PARAM_TYPE => 'string',
-				ApiBase::PARAM_REQUIRED => true,
+				ParamValidator::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_REQUIRED => true,
 			],
 			'options' => [
-				ApiBase::PARAM_TYPE => 'string',
+				ParamValidator::PARAM_TYPE => 'string',
 			],
 		];
 	}

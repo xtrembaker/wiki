@@ -1,8 +1,5 @@
 <?php
 /**
- * Internationalisation code.
- * See https://www.mediawiki.org/wiki/Special:MyLanguage/Localisation for more information.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -19,49 +16,47 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Language
- */
-
-/**
- * @defgroup Language Language
  */
 
 namespace MediaWiki\Languages;
 
+use BagOStuff;
 use HashBagOStuff;
-use Hooks;
 use MediaWiki\Config\ServiceOptions;
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\HookContainer\HookRunner;
+use MediaWiki\MainConfigNames;
 use MediaWikiTitleCodec;
 use MWException;
-use Wikimedia\Assert\Assert;
 
 /**
- * @ingroup Language
- *
  * A service that provides utilities to do with language names and codes.
  *
+ * See https://www.mediawiki.org/wiki/Special:MyLanguage/Localisation for more information.
+ *
  * @since 1.34
+ * @ingroup Language
  */
 class LanguageNameUtils {
 	/**
 	 * Return autonyms in getLanguageName(s).
 	 */
-	const AUTONYMS = null;
+	public const AUTONYMS = null;
 
 	/**
 	 * Return all known languages in getLanguageName(s).
 	 */
-	const ALL = 'all';
+	public const ALL = 'all';
 
 	/**
 	 * Return in getLanguageName(s) only the languages that are defined by MediaWiki.
 	 */
-	const DEFINED = 'mw';
+	public const DEFINED = 'mw';
 
 	/**
 	 * Return in getLanguageName(s) only the languages for which we have at least some localisation.
 	 */
-	const SUPPORTED = 'mwfile';
+	public const SUPPORTED = 'mwfile';
 
 	/** @var ServiceOptions */
 	private $options;
@@ -78,17 +73,25 @@ class LanguageNameUtils {
 	 */
 	private $validCodeCache = [];
 
+	/**
+	 * @internal For use by ServiceWiring
+	 */
 	public const CONSTRUCTOR_OPTIONS = [
-		'ExtraLanguageNames',
-		'UsePigLatinVariant',
+		MainConfigNames::ExtraLanguageNames,
+		MainConfigNames::UsePigLatinVariant,
 	];
+
+	/** @var HookRunner */
+	private $hookRunner;
 
 	/**
 	 * @param ServiceOptions $options
+	 * @param HookContainer $hookContainer
 	 */
-	public function __construct( ServiceOptions $options ) {
+	public function __construct( ServiceOptions $options, HookContainer $hookContainer ) {
 		$options->assertRequiredOptions( self::CONSTRUCTOR_OPTIONS );
 		$this->options = $options;
+		$this->hookRunner = new HookRunner( $hookContainer );
 	}
 
 	/**
@@ -98,7 +101,7 @@ class LanguageNameUtils {
 	 * @param string $code Language tag (in lower case)
 	 * @return bool Whether language is supported
 	 */
-	public function isSupportedLanguage( $code ) {
+	public function isSupportedLanguage( string $code ): bool {
 		if ( !$this->isValidBuiltInCode( $code ) ) {
 			return false;
 		}
@@ -118,10 +121,10 @@ class LanguageNameUtils {
 	 *
 	 * @param string $code
 	 *
-	 * @return bool
+	 * @return bool False if the language code contains dangerous characters, e.g. HTML special
+	 *  characters or characters illegal in MediaWiki titles.
 	 */
-	public function isValidCode( $code ) {
-		Assert::parameterType( 'string', $code, '$code' );
+	public function isValidCode( string $code ): bool {
 		if ( !isset( $this->validCodeCache[$code] ) ) {
 			// People think language codes are HTML-safe, so enforce it.  Ideally we should only
 			// allow a-zA-Z0-9- but .+ and other chars are often used for {{int:}} hacks.  See bugs
@@ -129,7 +132,9 @@ class LanguageNameUtils {
 			$this->validCodeCache[$code] =
 				// Protect against path traversal
 				strcspn( $code, ":/\\\000&<>'\"" ) === strlen( $code ) &&
-				!preg_match( MediaWikiTitleCodec::getTitleInvalidRegex(), $code );
+				!preg_match( MediaWikiTitleCodec::getTitleInvalidRegex(), $code ) &&
+				// libicu sets ULOC_FULLNAME_CAPACITY to 157; stay comfortably lower
+				strlen( $code ) <= 128;
 		}
 		return $this->validCodeCache[$code];
 	}
@@ -141,9 +146,7 @@ class LanguageNameUtils {
 	 * @param string $code
 	 * @return bool
 	 */
-	public function isValidBuiltInCode( $code ) {
-		Assert::parameterType( 'string', $code, '$code' );
-
+	public function isValidBuiltInCode( string $code ): bool {
 		return (bool)preg_match( '/^[a-z0-9-]{2,}$/', $code );
 	}
 
@@ -154,7 +157,7 @@ class LanguageNameUtils {
 	 *
 	 * @return bool
 	 */
-	public function isKnownLanguageTag( $tag ) {
+	public function isKnownLanguageTag( string $tag ): bool {
 		// Quick escape for invalid input to avoid exceptions down the line when code tries to
 		// process tags which are not valid at all.
 		if ( !$this->isValidBuiltInCode( $tag ) ) {
@@ -186,12 +189,13 @@ class LanguageNameUtils {
 			$this->languageNameCache = new HashBagOStuff( [ 'maxKeys' => 20 ] );
 		}
 
-		$ret = $this->languageNameCache->get( $cacheKey );
-		if ( !$ret ) {
-			$ret = $this->getLanguageNamesUncached( $inLanguage, $include );
-			$this->languageNameCache->set( $cacheKey, $ret );
-		}
-		return $ret;
+		return $this->languageNameCache->getWithSetCallback(
+			$cacheKey,
+			BagOStuff::TTL_INDEFINITE,
+			function () use ( $inLanguage, $include ) {
+				return $this->getLanguageNamesUncached( $inLanguage, $include );
+			}
+		);
 	}
 
 	/**
@@ -210,11 +214,12 @@ class LanguageNameUtils {
 
 		if ( $inLanguage !== self::AUTONYMS ) {
 			# TODO: also include for self::AUTONYMS, when this code is more efficient
-			Hooks::run( 'LanguageGetTranslatedLanguageNames', [ &$names, $inLanguage ] );
+			// @phan-suppress-next-line PhanTypeMismatchArgumentNullable False positive
+			$this->hookRunner->onLanguageGetTranslatedLanguageNames( $names, $inLanguage );
 		}
 
-		$mwNames = $this->options->get( 'ExtraLanguageNames' ) + Data\Names::$names;
-		if ( $this->options->get( 'UsePigLatinVariant' ) ) {
+		$mwNames = $this->options->get( MainConfigNames::ExtraLanguageNames ) + Data\Names::$names;
+		if ( $this->options->get( MainConfigNames::UsePigLatinVariant ) ) {
 			// Pig Latin (for variant development)
 			$mwNames['en-x-piglatin'] = 'Igpay Atinlay';
 		}
@@ -298,7 +303,7 @@ class LanguageNameUtils {
 	public function getMessagesFileName( $code ) {
 		global $IP;
 		$file = $this->getFileName( "$IP/languages/messages/Messages", $code, '.php' );
-		Hooks::run( 'Language::getMessagesFileName', [ $code, &$file ] );
+		$this->hookRunner->onLanguage__getMessagesFileName( $code, $file );
 		return $file;
 	}
 

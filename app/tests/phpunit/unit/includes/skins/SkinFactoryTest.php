@@ -1,82 +1,160 @@
 <?php
 
+use Psr\Container\ContainerInterface;
+use Wikimedia\ObjectFactory\ObjectFactory;
+
+/**
+ * @covers SkinFactory
+ */
 class SkinFactoryTest extends \MediaWikiUnitTestCase {
 
-	/**
-	 * @covers SkinFactory::register
-	 */
-	public function testRegister() {
-		$factory = new SkinFactory();
-		$factory->register( 'fallback', 'Fallback', function () {
-			return new SkinFallback();
-		} );
-		$this->assertTrue( true ); // No exception thrown
-		$this->setExpectedException( InvalidArgumentException::class );
+	private function createSkinFactory( $service = null, $options = [] ): SkinFactory {
+		$objectFactory = $service
+			? new ObjectFactory( $service )
+			: new ObjectFactory( $this->createMock( ContainerInterface::class ) );
+
+		return new SkinFactory( $objectFactory, $options );
+	}
+
+	public function testRegisterWithInvalidCallable() {
+		$factory = $this->createSkinFactory();
+
+		$this->expectException( InvalidArgumentException::class );
 		$factory->register( 'invalid', 'Invalid', 'Invalid callback' );
 	}
 
-	/**
-	 * @covers SkinFactory::makeSkin
-	 */
+	public function testRegisterWithCallable() {
+		$factory = $this->createSkinFactory();
+		$instance = new SkinFallback();
+
+		$factory->register( 'fallback', 'Fallback', static function () use ( $instance ) {
+			return $instance;
+		}, true );
+
+		$this->assertSame( $instance, $factory->makeSkin( 'fallback' ) );
+	}
+
+	public function testRegisterWithSpec() {
+		$factory = $this->createSkinFactory();
+		$factory->register( 'fallback', 'Fallback', [
+			'class' => SkinFallback::class
+		], true );
+
+		$this->assertInstanceOf( SkinFallback::class, $factory->makeSkin( 'fallback' ) );
+	}
+
 	public function testMakeSkinWithNoBuilders() {
-		$factory = new SkinFactory();
-		$this->setExpectedException( SkinException::class );
+		$factory = $this->createSkinFactory();
+		$this->expectException( SkinException::class );
 		$factory->makeSkin( 'nobuilderregistered' );
 	}
 
-	/**
-	 * @covers SkinFactory::makeSkin
-	 */
 	public function testMakeSkinWithInvalidCallback() {
-		$factory = new SkinFactory();
-		$factory->register( 'unittest', 'Unittest', function () {
-			return true; // Not a Skin object
+		$factory = $this->createSkinFactory();
+		$factory->register( 'unittest', 'Unittest', static function () {
+			// Not a Skin object
+			return true;
 		} );
-		$this->setExpectedException( UnexpectedValueException::class );
+		$this->expectException( UnexpectedValueException::class );
 		$factory->makeSkin( 'unittest' );
 	}
 
-	/**
-	 * @covers SkinFactory::makeSkin
-	 */
 	public function testMakeSkinWithValidCallback() {
-		$factory = new SkinFactory();
-		$factory->register( 'testfallback', 'TestFallback', function () {
+		$factory = $this->createSkinFactory();
+		$factory->register( 'testfallback', 'TestFallback', static function () {
 			return new SkinFallback();
 		} );
 
 		$skin = $factory->makeSkin( 'testfallback' );
-		$this->assertInstanceOf( Skin::class, $skin );
 		$this->assertInstanceOf( SkinFallback::class, $skin );
 		$this->assertEquals( 'fallback', $skin->getSkinName() );
 	}
 
-	/**
-	 * @covers Skin::__construct
-	 * @covers Skin::getSkinName
-	 */
-	public function testGetSkinName() {
-		$skin = new SkinFallback();
-		$this->assertEquals( 'fallback', $skin->getSkinName(), 'Default' );
-		$skin = new SkinFallback( 'testname' );
-		$this->assertEquals( 'testname', $skin->getSkinName(), 'Constructor argument' );
+	public function testMakeSkinWithValidSpec() {
+		$serviceInstance = (object)[];
+
+		$serviceContainer = $this->createMock( ContainerInterface::class );
+		$serviceContainer->method( 'has' )->willReturn( true );
+		$serviceContainer->method( 'get' )->willReturn( $serviceInstance );
+
+		$args = [];
+		$factory = $this->createSkinFactory( $serviceContainer );
+		$factory->register( 'testfallback', 'TestFallback', [
+			'factory' => static function ( $service, $options ) use ( &$args ) {
+				$args = [ $service, $options ];
+				return new SkinFallback();
+			},
+			'services' => [
+				'testservice'
+			]
+		] );
+
+		$skin = $factory->makeSkin( 'testfallback' );
+		$this->assertInstanceOf( SkinFallback::class, $skin );
+		$this->assertEquals( 'fallback', $skin->getSkinName() );
+		$this->assertSame( 'testfallback', $args[1]['name'] );
+		$this->assertSame( $serviceInstance, $args[0] );
 	}
 
-	/**
-	 * @covers SkinFactory::getSkinNames
-	 */
+	public function testRegisterReplaces() {
+		$factory = $this->createSkinFactory();
+
+		$s1 = $this->createMock( Skin::class );
+		$factory->register( 'foo', 'Skin 1',
+			static function () use ( $s1 ) {
+				return $s1;
+			},
+			true
+		);
+		$this->assertEquals( [ 'foo'  => 'Skin 1' ], $factory->getSkinNames() );
+		$this->assertSame( $s1, $factory->makeSkin( 'foo' ) );
+		$this->assertSame( [], $factory->getAllowedSkins(), 'skipped' );
+
+		// Skippable state from previous register() call must not leak to replacement
+		$s2 = $this->createMock( Skin::class );
+		$factory->register( 'foo', 'Skin 2',
+			static function () use ( $s2 ) {
+				return $s2;
+			}
+		);
+		$this->assertEquals( [ 'foo'  => 'Skin 2' ], $factory->getSkinNames() );
+		$this->assertSame( $s2, $factory->makeSkin( 'foo' ) );
+		$this->assertSame( [ 'foo'  => 'Skin 2' ], $factory->getAllowedSkins(), 'not skipped' );
+	}
+
 	public function testGetSkinNames() {
-		$factory = new SkinFactory();
-		// A fake callback we can use that will never be called
-		$callback = function () {
-			// NOP
-		};
-		$factory->register( 'skin1', 'Skin1', $callback );
-		$factory->register( 'skin2', 'Skin2', $callback );
+		$factory = $this->createSkinFactory();
+		$factory->register( 'skin1', 'Skin1', [] );
+		$factory->register( 'skin2', 'Skin2', [] );
+
 		$names = $factory->getSkinNames();
-		$this->assertArrayHasKey( 'skin1', $names );
-		$this->assertArrayHasKey( 'skin2', $names );
 		$this->assertEquals( 'Skin1', $names['skin1'] );
 		$this->assertEquals( 'Skin2', $names['skin2'] );
+	}
+
+	public function testGetAllowedSkins() {
+		$sf = $this->createSkinFactory( null, [ 'quux' ] );
+		$sf->register( 'foo', 'Foo', [] );
+		$sf->register( 'apioutput', 'ApiOutput', [], true );
+
+		// Skippable state is unspecified here and must inherit from site config,
+		// which we seeded with 'quux', and thus skipped from allowed skins.
+		$sf->register( 'quux', 'Quux', [] );
+
+		$sf->register( 'fallback', 'Fallback', [], true );
+		$sf->register( 'bar', 'Barbar', [] );
+
+		$this->assertEquals(
+			[ 'foo' => 'Foo', 'bar' => 'Barbar' ],
+			$sf->getAllowedSkins()
+		);
+	}
+
+	public function testGetAllowedSkinsEmpty() {
+		$sf = $this->createSkinFactory();
+		$sf->register( 'apioutput', 'ApiOutput', [], true );
+		$sf->register( 'fallback', 'Fallback', [], true );
+
+		$this->assertEquals( [], $sf->getAllowedSkins() );
 	}
 }

@@ -37,9 +37,9 @@ class HTTPFileStreamer {
 	protected $streamMimeFunc;
 
 	// Do not send any HTTP headers unless requested by caller (e.g. body only)
-	const STREAM_HEADLESS = 1;
+	public const STREAM_HEADLESS = 1;
 	// Do not try to tear down any PHP output buffers
-	const STREAM_ALLOW_OB = 2;
+	public const STREAM_ALLOW_OB = 2;
 
 	/**
 	 * Takes HTTP headers in a name => value format and converts them to the weird format
@@ -95,10 +95,10 @@ class HTTPFileStreamer {
 		}
 
 		$headerFunc = ( $flags & self::STREAM_HEADLESS )
-			? function ( $header ) {
+			? static function ( $header ) {
 				// no-op
 			}
-			: function ( $header ) {
+			: static function ( $header ) {
 				is_int( $header ) ? HttpStatus::header( $header ) : header( $header );
 			};
 
@@ -136,6 +136,7 @@ class HTTPFileStreamer {
 		if ( isset( $optHeaders['if-modified-since'] ) ) {
 			$modsince = preg_replace( '/;.*$/', '', $optHeaders['if-modified-since'] );
 			if ( $mtimeCT->getTimestamp( TS_UNIX ) <= strtotime( $modsince ) ) {
+				// @phan-suppress-next-line PhanTypeMismatchArgumentInternal Scalar okay with php8.1
 				ini_set( 'zlib.output_compression', 0 );
 				$headerFunc( 304 );
 				return true; // ok
@@ -231,11 +232,11 @@ class HTTPFileStreamer {
 			if ( $start === '' && $end === '' ) {
 				$absRange = [ 0, $size - 1 ];
 			} elseif ( $start === '' ) {
-				$absRange = [ $size - $end, $size - 1 ];
+				$absRange = [ $size - (int)$end, $size - 1 ];
 			} elseif ( $end === '' ) {
-				$absRange = [ $start, $size - 1 ];
+				$absRange = [ (int)$start, $size - 1 ];
 			} else {
-				$absRange = [ $start, $end ];
+				$absRange = [ (int)$start, (int)$end ];
 			}
 			if ( $absRange[0] >= 0 && $absRange[1] >= $absRange[0] ) {
 				if ( $absRange[0] < $size ) {
@@ -269,7 +270,7 @@ class HTTPFileStreamer {
 	 */
 	protected static function contentTypeFromPath( $filename ) {
 		$ext = strrchr( $filename, '.' );
-		$ext = $ext === false ? '' : strtolower( substr( $ext, 1 ) );
+		$ext = $ext ? strtolower( substr( $ext, 1 ) ) : '';
 
 		switch ( $ext ) {
 			case 'gif':

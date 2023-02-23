@@ -1,15 +1,18 @@
 <?php
+
+use MediaWiki\MainConfigNames;
+
 /**
  * @group HKDF
  * @covers CryptHKDF
  * @covers MWCryptHKDF
  */
-class MWCryptHKDFTest extends MediaWikiTestCase {
+class MWCryptHKDFTest extends MediaWikiIntegrationTestCase {
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 
-		$this->setMwGlobals( 'wgSecretKey', '5bf1945342e67799cb50704a7fa19ac6' );
+		$this->overrideConfigValue( MainConfigNames::SecretKey, '5bf1945342e67799cb50704a7fa19ac6' );
 	}
 
 	/**
@@ -40,7 +43,6 @@ class MWCryptHKDFTest extends MediaWikiTestCase {
 	 * Test vectors from Appendix A on https://tools.ietf.org/html/rfc5869
 	 */
 	public static function providerRfc5869() {
-		// phpcs:disable Generic.Files.LineLength
 		return [
 			// A.1
 			[

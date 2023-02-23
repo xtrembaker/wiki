@@ -122,16 +122,16 @@
 			}
 		} );
 
-		this.embedTextHtml.on( 'copy', function () {
-			mw.mmv.actionLogger.log( 'embed-html-copied' );
-		} );
-
 		this.embedTextWikitext = new mw.widgets.CopyTextLayout( {
 			help: mw.message( 'multimediaviewer-embed-explanation' ).text(),
 			helpInline: true,
 			align: 'top',
 			multiline: true,
 			textInput: {
+				// The following classes are used here:
+				// * mw-editfont-monospace
+				// * mw-editfont-sans-serif
+				// * mw-editfont-serif
 				classes: [ 'mw-editfont-' + mw.user.options.get( 'editfont' ) ],
 				placeholder: mw.message( 'multimediaviewer-reuse-loading-placeholder' ).text(),
 				autosize: true,
@@ -140,10 +140,6 @@
 			button: {
 				title: mw.msg( 'multimediaviewer-reuse-copy-embed' )
 			}
-		} );
-
-		this.embedTextWikitext.on( 'copy', function () {
-			mw.mmv.actionLogger.log( 'embed-wikitext-copied' );
 		} );
 
 		$container.append(
@@ -200,20 +196,12 @@
 			'default'
 		);
 
-		this.embedSizeSwitchWikitext.getMenu().on( 'select', function ( item ) {
-			mw.mmv.actionLogger.log( 'embed-select-menu-wikitext-' + item.data.name );
-		} );
-
 		// Html sizes pulldown menu
 		this.embedSizeSwitchHtml = this.utils.createPulldownMenu(
 			[ 'small', 'medium', 'large', 'original' ],
 			[],
 			'original'
 		);
-
-		this.embedSizeSwitchHtml.getMenu().on( 'select', function ( item ) {
-			mw.mmv.actionLogger.log( 'embed-select-menu-html-' + item.data.name );
-		} );
 
 		this.embedSizeSwitchHtmlLayout = new OO.ui.FieldLayout( this.embedSizeSwitchHtml, { align: 'top' } );
 		this.embedSizeSwitchWikitextLayout = new OO.ui.FieldLayout( this.embedSizeSwitchWikitext, { align: 'top' } );
@@ -267,8 +255,6 @@
 	 */
 	EP.handleTypeSwitch = function ( item ) {
 		var value = item.getData();
-
-		mw.mmv.actionLogger.log( 'embed-switched-to-' + value );
 
 		if ( value === 'html' ) {
 			this.currentMainEmbedText = this.embedTextHtml;

@@ -55,7 +55,7 @@
 		},
 		"requires": {
 			"type": "object",
-			"description": "Indicates what versions of PHP, MediaWiki core or extensions are required. This syntax may be extended in the future, for example to check dependencies between other services.",
+			"description": "Indicates what versions of PHP, MediaWiki core, extensions or skins are required. This syntax may be extended in the future, for example to check dependencies between other services.",
 			"additionalProperties": false,
 			"properties": {
 				"MediaWiki": {
@@ -81,7 +81,7 @@
 						"^ext-": {
 							"type": "string",
 							"description": "Required PHP extension.",
-							"enum": ["*"]
+							"enum": [ "*" ]
 						}
 					}
 				},
@@ -92,6 +92,44 @@
 				"skins": {
 					"type": "object",
 					"description": "Set of version constraint strings against specific skins."
+				}
+			}
+		},
+		"suggests": {
+			"type": "object",
+			"description": "Indicates what versions of PHP and MediaWiki extensions or skins are optional suggestions. This syntax may be extended in the future, for example to check dependencies between other services.",
+			"additionalProperties": false,
+			"properties": {
+				"platform": {
+					"type": "object",
+					"description": "Indicates optional version constraints against platform services.",
+					"additionalProperties": false,
+					"properties": {
+						"php": {
+							"type": "string",
+							"description": "Optional version constraint string against PHP."
+						},
+						"ability-shell": {
+							"type": "boolean",
+							"default": false,
+							"description": "Whether this extension requires shell access."
+						}
+					},
+					"patternProperties": {
+						"^ext-": {
+							"type": "string",
+							"description": "Optional PHP extension.",
+							"enum": [ "*" ]
+						}
+					}
+				},
+				"extensions": {
+					"type": "object",
+					"description": "Set of optional version constraint strings against specific extensions."
+				},
+				"skins": {
+					"type": "object",
+					"description": "Set of optional version constraint strings against specific skins."
 				}
 			}
 		},
@@ -123,7 +161,7 @@
 						"^ext-": {
 							"type": "string",
 							"description": "Required PHP extension.",
-							"enum": ["*"]
+							"enum": [ "*" ]
 						}
 					}
 				},
@@ -164,7 +202,7 @@
 					"type": "object",
 					"anyOf": [
 						{
-							"description": "A ResourceLoaderFileModule definition",
+							"description": "A FileModule definition",
 							"additionalProperties": false,
 							"properties": {
 								"localBasePath": {
@@ -184,7 +222,7 @@
 									"description": "Path to a file containing a JavaScript \"skip function\", if desired."
 								},
 								"scripts": {
-									"type": ["string", "array"],
+									"type": [ "string", "array" ],
 									"description": "Scripts to always include (array of file paths)",
 									"items": {
 										"type": "string"
@@ -221,28 +259,21 @@
 									}
 								},
 								"debugScripts": {
-									"type": ["string", "array"],
+									"type": [ "string", "array" ],
 									"description": "Scripts to include in debug contexts",
 									"items": {
 										"type": "string"
 									}
 								},
-								"loaderScripts": {
-									"type": ["string", "array"],
-									"description": "Scripts to include in the startup module",
-									"items": {
-										"type": "string"
-									}
-								},
 								"dependencies": {
-									"type": ["string", "array"],
+									"type": [ "string", "array" ],
 									"description": "Modules which must be loaded before this module",
 									"items": {
 										"type": "string"
 									}
 								},
 								"styles": {
-									"type": ["string", "array", "object"],
+									"type": [ "string", "array", "object" ],
 									"description": "Styles to always load",
 									"items": {
 										"type": "string"
@@ -264,7 +295,7 @@
 									}
 								},
 								"messages": {
-									"type": ["string", "array"],
+									"type": [ "string", "array" ],
 									"description": "Messages to always load",
 									"items": {
 										"type": "string"
@@ -272,26 +303,26 @@
 								},
 								"group": {
 									"type": "string",
-									"description": "Group which this module should be loaded together with"
+									"description": "Group with which this module should be loaded"
 								},
 								"deprecated": {
-									"type": ["object", "string", "boolean"],
+									"type": [ "object", "string", "boolean" ],
 									"description": "Whether the module is deprecated and usage is discouraged. Either a boolean, or a string or an object with key message can be used to customise deprecation message."
 								},
 								"position": {
 									"type": "string",
-									"description": "Position on the page to load this module at",
+									"description": "Position on the page to load this module at (unused since MediaWiki 1.29)",
 									"enum": [
 										"bottom",
 										"top"
 									]
 								},
 								"templates": {
-									"type": ["object", "array"],
+									"type": [ "object", "array" ],
 									"description": "Templates to be loaded for client-side usage"
 								},
 								"targets": {
-									"type": ["string", "array"],
+									"type": [ "string", "array" ],
 									"description": "ResourceLoader target the module can run on",
 									"items": {
 										"type": "string"
@@ -302,32 +333,39 @@
 									"description": "Whether to skip CSSJanus LTR-to-RTL flipping for this module. Recommended for styles imported from libraries that already properly handle their RTL styles. Default is false, meaning CSSJanus will be applied on RTL-mode output."
 								},
 								"packageFiles": {
-									"type": ["object", "array"],
-									"description": "Package files that can be require()d"
+									"type": [ "string", "array" ],
+									"description": "Package files that can be require()d",
+									"items": {
+										"type": [ "string", "object" ]
+									}
+								},
+								"es6": {
+									"type": "boolean",
+									"description": "Whether this module requires an ES6-capable browser. If set to true, loading this module in a non-ES6 browser will cause an error. Using ES6 syntax in modules is not yet supported, but will be in the near future. Default is false."
 								}
 							}
 						},
 						{
-							"description": "A ResourceLoaderWikiModule definition",
+							"description": "A WikiModule definition",
 							"additionalProperties": false,
 							"properties": {
 								"class": {
-									"enum": ["ResourceLoaderWikiModule"]
+									"type": "string"
 								},
 								"group": {
 									"type": "string",
-									"description": "Group which this module should be loaded together with"
+									"description": "Group with which this module should be loaded"
 								},
 								"position": {
 									"type": "string",
-									"description": "Position on the page to load this module at",
+									"description": "Position on the page to load this module at (unused since MediaWiki 1.29)",
 									"enum": [
 										"bottom",
 										"top"
 									]
 								},
 								"targets": {
-									"type": ["string", "array"],
+									"type": [ "string", "array" ],
 									"description": "ResourceLoader target the module can run on",
 									"items": {
 										"type": "string"
@@ -335,12 +373,14 @@
 								},
 								"scripts": {
 									"type": "array",
+									"description": "A list of on-wiki pages containing JavaScript that should be loaded",
 									"items": {
 										"type": "string"
 									}
 								},
 								"styles": {
 									"type": "array",
+									"description": "A list of on-wiki pages containing CSS that should be loaded",
 									"items": {
 										"type": "string"
 									}
@@ -348,11 +388,15 @@
 							}
 						},
 						{
-							"description": "A ResourceLoaderImageModule definition",
+							"description": "An ImageModule definition",
 							"additionalProperties": false,
 							"properties": {
 								"class": {
-									"enum": ["ResourceLoaderImageModule"]
+									"type": "string"
+								},
+								"localBasePath": {
+									"type": "string",
+									"description": "Base path to prepend to all local paths. Defaults to $IP"
 								},
 								"defaultColor": {
 									"type": "string"
@@ -382,6 +426,8 @@
 									"type": "object"
 								},
 								"position": {
+									"type": "string",
+									"description": "Position on the page to load this module at (unused since MediaWiki 1.29)",
 									"enum": [
 										"top",
 										"bottom"
@@ -390,14 +436,14 @@
 							}
 						},
 						{
-							"description": "An arbitrary ResourceLoaderModule definition",
+							"description": "An arbitrary ResourceLoader Module definition by class",
 							"properties": {
 								"class": {
 									"type": "string",
 									"pattern": "^(?!ResourceLoader(File|Image|Wiki)Module).*$"
 								}
 							},
-							"required": ["class"]
+							"required": [ "class" ]
 						}
 					]
 				}
@@ -411,9 +457,95 @@
 			"type": "object",
 			"description": "ResourceLoader sources to register"
 		},
+		"SkinLessImportPaths": {
+			"type": "object",
+			"description": "Path to the skin-specific LESS import directory, keyed by skin name. Can be used to define skin-specific LESS variables."
+		},
 		"QUnitTestModule": {
 			"type": "object",
-			"description": "A ResourceLoaderFileModule definition registered only when wgEnableJavaScriptTest is true."
+			"description": "A ResourceLoader FileModule definition registered only when wgEnableJavaScriptTest is true.",
+			"additionalProperties": false,
+			"properties": {
+				"localBasePath": {
+					"type": "string",
+					"description": "Prefix for local paths to files in $options, relative to extension directory"
+				},
+				"remoteExtPath": {
+					"type": "string",
+					"description": "Prefix for URLs to files in $options, relative to $wgExtensionAssetsPath"
+				},
+				"remoteSkinPath": {
+					"type": "string",
+					"description": "Prefix for URLs to files in $options, relative to $wgStylePath"
+				},
+				"scripts": {
+					"type": [ "string", "array" ],
+					"description": "Scripts to include (array of file paths)",
+					"items": {
+						"type": "string"
+					}
+				},
+				"packageFiles": {
+					"type": [ "string", "array" ],
+					"description": "Package files that can be require()d",
+					"items": {
+						"type": [ "string", "object" ]
+					}
+				},
+				"dependencies": {
+					"type": [ "string", "array" ],
+					"description": "Modules which must be loaded before this module",
+					"items": {
+						"type": "string"
+					}
+				},
+				"styles": {
+					"type": [ "string", "array", "object" ],
+					"description": "Styles to load",
+					"items": {
+						"type": "string"
+					}
+				},
+				"templates": {
+					"type": [ "object", "array" ],
+					"description": "Templates to be loaded for client-side usage",
+					"items": {
+						"type": "string"
+					}
+				},
+				"messages": {
+					"type": [ "string", "array" ],
+					"description": "Messages to load",
+					"items": {
+						"type": "string"
+					}
+				}
+			}
+		},
+		"MessagePosterModule": {
+			"type": "object",
+			"description": "Additional JavaScript files and modules that will register content models with mw.messagePoster.factory.",
+			"additionalProperties": false,
+			"properties": {
+				"localBasePath": {
+					"type": "string",
+					"description": "Prefix for local paths to files in $options, relative to extension directory"
+				},
+				"scripts": {
+					"type": "array",
+					"description": "Scripts to include as array of file paths",
+					"items": {
+						"type": "string"
+					}
+				},
+				"dependencies": {
+					"type": "array",
+					"description": "Modules which must load before these files",
+					"items": {
+						"type": "string"
+					}
+				}
+			}
 		},
 		"ConfigRegistry": {
 			"type": "object",
@@ -484,7 +616,7 @@
 						"type": "string"
 					},
 					"protection": {
-						"type": ["string", "array"],
+						"type": [ "string", "array" ],
 						"description": "Userright(s) required to edit in this namespace"
 					},
 					"capitallinkoverride": {
@@ -495,9 +627,19 @@
 						"type": "boolean",
 						"description": "Whether the namespace is conditional upon configuration and should not be registered (requires separate registration via a hook)",
 						"default": false
+					},
+					"movable": {
+						"type": "boolean",
+						"description": "Whether it is possible to move pages in this namespace",
+						"default": true
+					},
+					"includable": {
+						"type": "boolean",
+						"description": "Whether it is possible to include/transclude pages in this namespace",
+						"default": true
 					}
 				},
-				"required": ["id", "constant", "name"]
+				"required": [ "id", "constant", "name" ]
 			}
 		},
 		"TrackingCategories": {
@@ -598,10 +740,19 @@
 		},
 		"ContentHandlers": {
 			"type": "object",
-			"description": "Mapping of model ID to class name",
+			"description": "Mapping of model ID to class name or an ObjectFactory specification.",
 			"patternProperties": {
 				"^[A-Za-z]+$": {
-					"type": "string"
+					"oneOf": [
+						{
+							"type": "string",
+							"description": "Class name of the ContentHandler."
+						},
+						{
+							"type": "object",
+							"description": "ObjectFactory specification of the ContentHandler."
+						}
+					]
 				}
 			}
 		},
@@ -655,9 +806,129 @@
 		"AutoloadClasses": {
 			"type": "object"
 		},
+		"TestAutoloadNamespaces": {
+			"type": "object",
+			"description": "Mapping of PSR-4 compliant namespace to directory for autoloading to be used in tests",
+			"patternProperties": {
+				"^[A-Za-z0-9\\\\]+\\\\$": {
+					"type": "string"
+				}
+			},
+			"additionalProperties": false
+		},
+		"TestAutoloadClasses": {
+			"type": "object"
+		},
 		"Hooks": {
-			"type": [ "string", "object" ],
-			"description": "Hooks this extension uses (mapping of hook name to callback)"
+			"type": "object",
+			"description": "Hooks this extension uses (mapping of hook name to callback)",
+			"additionalProperties": {
+				"oneOf": [
+					{
+						"type": "string",
+						"description": "A global function name, static function name, or the name of a property in HookHandlers"
+					},
+					{
+						"type": "object",
+						"description": "A handler specification",
+						"properties": {
+							"handler": {
+								"type": "string",
+								"description": "The name of a property in HookHandlers"
+							},
+							"deprecated": {
+								"type": "boolean",
+								"description": "The deprecation acknowledgement flag for the handler. If this is true, calls will be filtered if the relevant hook is deprecated."
+							}
+						},
+						"required": [
+							"handler"
+						]
+					},
+					{
+						"type": "array",
+						"description": "An ordered array of handlers",
+						"items": {
+							"oneOf": [
+								{
+									"type": "string",
+									"description": "A global function name, static function name, or the name of a property in HookHandlers"
+								},
+								{
+									"type": "object",
+									"description": "A handler specification",
+									"properties": {
+										"handler": {
+											"type": "string",
+											"description": "The name of a property in HookHandlers"
+										},
+										"deprecated": {
+											"type": "boolean",
+											"description": "The deprecation acknowledgement flag for the handler. If this is true, calls will be filtered if the relevant hook is deprecated."
+										}
+									},
+									"required": [
+										"handler"
+									]
+								}
+							]
+						}
+					}
+				]
+			}
+		},
+		"HookHandlers": {
+			"type": "object",
+			"description": "ObjectFactory specifications for new-style hook handlers",
+			"additionalProperties": {
+				"type": "object",
+				"properties": {
+					"factory": {
+						"type": [ "string", "array" ],
+						"description": "A factory function to be called to create the handler for this hook"
+					},
+					"class": {
+						"type": "string",
+						"description": "The fully-qualified class name of the handler. This should be omitted if a factory is specified."
+					},
+					"args": {
+						"type": "array",
+						"description": "The arguments passed to the handler constructor or factory"
+					},
+					"services": {
+						"type": "array",
+						"description": "If supplied and non-empty, the named services are requested from the service container and prepended before 'args'."
+					},
+					"optional_services": {
+						"type": "array",
+						"description": "If supplied and non-empty, the named services are requested from the service container and appended after 'services' if the services are available; null is passed if the services are not available."
+					}
+				}
+			}
+		},
+		"DeprecatedHooks": {
+			"type": "object",
+			"description": "Hooks which are defined and deprecated by the extension",
+			"additionalProperties": {
+				"type": "object",
+				"properties": {
+					"deprecatedVersion": {
+						"type": "string",
+						"description": "The version in which the hook was deprecated"
+					},
+					"component": {
+						"type": "string",
+						"description": "The component to which the deprecated version relates. If omitted, the extension name will be used."
+					},
+					"silent": {
+						"type": "boolean",
+						"description": "If true, no warning is raised when the hook is called or when a handler is declared. However, call filtering is still activated."
+					}
+				},
+				"required": [
+					"deprecatedVersion"
+				]
+			}
 		},
 		"JobClasses": {
 			"type": "object",
@@ -721,18 +992,20 @@
 			"type": "object"
 		},
 		"ValidSkinNames": {
-			"type": "object"
+			"type": "object",
+			"description": "Mapping of skin canonical names to PHP class name using the Object Factory specification. Or historically, the human readable name of the skin."
 		},
 		"FeedClasses": {
 			"type": "object",
 			"description": "Available feeds objects"
 		},
 		"SkinOOUIThemes": {
-			"type": "object"
+			"type": "object",
+			"description": "Map of skin names to OOUI themes to use. Same format as MediaWiki\\ResourceLoader\\OOUIModule::$builtinSkinThemeMap."
 		},
 		"OOUIThemePaths": {
 			"type": "object",
-			"description": "Map of custom OOUI theme names to paths to load them from. Same format as ResourceLoaderOOUIModule::$builtinThemePaths.",
+			"description": "Map of custom OOUI theme names to paths to load them from. Same format as MediaWiki\\ResourceLoader\\OOUIModule::$builtinThemePaths.",
 			"patternProperties": {
 				"^[A-Za-z]+$": {
 					"type": "object",
@@ -807,7 +1080,8 @@
 								"array_replace_recursive",
 								"array_plus_2d",
 								"array_plus",
-								"array_merge"
+								"array_merge",
+								"provide_default"
 							],
 							"default": "array_merge"
 						}
@@ -819,9 +1093,200 @@
 			"type": "array",
 			"description": "DEPRECATED: Parser test suite files to be run by parserTests.php when no specific filename is passed to it"
 		},
+		"SearchMappings": {
+			"type": "object",
+			"description": "Mapping of search canonical names (used in $wgSearchType and $wgSearchTypeAlternatives) using the Object Factory specification"
+		},
 		"ServiceWiringFiles": {
 			"type": "array",
 			"description": "List of service wiring files to be loaded by the default instance of MediaWikiServices"
+		},
+		"RestRoutes": {
+			"type": "array",
+			"description": "List of route specifications to be added to the REST API",
+			"items": {
+				"type": "object",
+				"properties": {
+					"method": {
+						"oneOf": [
+							{
+								"type": "string",
+								"description": "The HTTP method name"
+							},
+							{
+								"type": "array",
+								"items": {
+									"type": "string",
+									"description": "An acceptable HTTP method name"
+								}
+							}
+						]
+					},
+					"path": {
+						"type": "string",
+						"description": "The path template. This should start with an initial slash, designating the root of the REST API. Path parameters are enclosed in braces, for example /endpoint/{param}."
+					},
+					"factory": {
+						"type": [ "string", "array" ],
+						"description": "A factory function to be called to create the handler for this route"
+					},
+					"class": {
+						"type": "string",
+						"description": "The fully-qualified class name of the handler. This should be omitted if a factory is specified."
+					},
+					"args": {
+						"type": "array",
+						"description": "The arguments passed to the handler constructor or factory"
+					},
+					"services": {
+						"type": "array",
+						"description": "If supplied and non-empty, the named services are requested from the service container and prepended before 'args'."
+					}
+				}
+			}
+		},
+		"ParsoidModules": {
+			"type": "array",
+			"description": "List of extension modules to be registered with the Parsoid wikitext parser",
+			"items": {
+				"oneOf": [
+					{
+						"type": "string",
+						"description": "The fully-qualified name of a class implementing Wikimedia\\Parsoid\\Ext\\ExtensionModule"
+					},
+					{
+						"type": "object",
+						"description": "Object factory specification for a class implementing Wikimedia\\Parsoid\\Ext\\ExtensionModule",
+						"properties": {
+							"factory": {
+								"type": [ "string", "array" ],
+								"description": "A factory function to be called to create an ExtensionModule. This should be omitted if a class is specified."
+							}
+						},
+						"required": [ "factory" ]
+					},
+					{
+						"type": "object",
+						"description": "Object factory specification for a class implementing Wikimedia\\Parsoid\\Ext\\ExtensionModule",
+						"properties": {
+							"class": {
+								"type": "string",
+								"description": "The fully-qualified class name of a class implemeting Wikimedia\\Parsoid\\Ext\\ExtensionModule. This should be omitted if a factory is specified."
+							}
+						},
+						"required": [ "class" ]
+					},
+					{
+						"type": "object",
+						"description": "A Parsoid extension module configuration array",
+						"properties": {
+							"class": {
+								"type": "null",
+								"description": "This property must not be present in a configuration array"
+							},
+							"factory": {
+								"type": "null",
+								"description": "This property must not be present in a configuration array"
+							},
+							"domProcessors": {
+								"type": "array",
+								"items": {
+									"description": "Object factory specification of a class implementing Wikimedia\\Parsoid\\Ext\\DOMProcessor"
+								}
+							},
+							"styles": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"description": "Additional ResourceLoader styles to include"
+								}
+							},
+							"annotations": {
+								"type": "array",
+								"items": {
+									"type": "string",
+									"description": "The name of an annotation tag"
+								}
+							},
+							"tags": {
+								"type": "array",
+								"items": {
+									"type": "object",
+									"description": "An extension tag",
+									"properties": {
+										"name": {
+											"type": "string",
+											"description": "The name of the extension tag"
+										},
+										"handler": {
+											"description": "An object factory specification of a class extending Wikimedia\\Parsoid\\Ext\\ExtensionTagHandler"
+										},
+										"options": {
+											"type": "object",
+											"description": "Additional Parsoid processing configuration for this extension tag"
+										}
+									},
+									"required": [ "name" ]
+								}
+							}
+						}
+					}
+				]
+			}
+		},
+		"TempUserSerialProviders": {
+			"type": "object",
+			"description": "Map of temporary user serial provider type name to ObjectFactory spec",
+			"patternProperties": {
+				".*": {
+					"type": "object",
+					"properties": {
+						"factory": {
+							"type": [ "string", "array" ],
+							"description": "A factory function"
+						},
+						"class": {
+							"type": "string",
+							"description": "The fully-qualified class name of the handler. This should be omitted if a factory is specified."
+						},
+						"args": {
+							"type": "array",
+							"description": "The arguments passed to the constructor or factory"
+						},
+						"services": {
+							"type": "array",
+							"description": "If supplied and non-empty, the named services are requested from the service container and prepended before 'args'."
+						}
+					}
+				}
+			}
+		},
+		"TempUserSerialMappings": {
+			"type": "object",
+			"description": "Map of temporary user serial map type name to ObjectFactory spec",
+			"patternProperties": {
+				".*": {
+					"type": "object",
+					"properties": {
+						"factory": {
+							"type": [ "string", "array" ],
+							"description": "A factory function"
+						},
+						"class": {
+							"type": "string",
+							"description": "The fully-qualified class name of the handler. This should be omitted if a factory is specified."
+						},
+						"args": {
+							"type": "array",
+							"description": "The arguments passed to the constructor or factory"
+						},
+						"services": {
+							"type": "array",
+							"description": "If supplied and non-empty, the named services are requested from the service container and prepended before 'args'."
+						}
+					}
+				}
+			}
 		},
 		"load_composer_autoloader": {
 			"type": "boolean",

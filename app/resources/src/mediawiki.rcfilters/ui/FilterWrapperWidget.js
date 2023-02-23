@@ -83,11 +83,8 @@ FilterWrapperWidget = function MwRcfiltersUiFilterWrapperWidget(
 		.addClass( 'mw-rcfilters-ui-filterWrapperWidget-top' );
 
 	$bottom = $( '<div>' )
-		.addClass( OO.ui.isMobile() ?
-			'mw-rcfilters-ui-filterWrapperWidget-bottom ' +
-			'mw-rcfilters-ui-filterWrapperWidget-bottom-mobile' :
-			'mw-rcfilters-ui-filterWrapperWidget-bottom'
-		)
+		.addClass( 'mw-rcfilters-ui-filterWrapperWidget-bottom' )
+		.addClass( OO.ui.isMobile() ? 'mw-rcfilters-ui-filterWrapperWidget-bottom-mobile' : '' )
 		.append(
 			this.showNewChangesLink.$element,
 			this.numChangesAndDateWidget.$element
@@ -137,10 +134,10 @@ FilterWrapperWidget.prototype.onShowNewChangesClick = function () {
 FilterWrapperWidget.prototype.onNewChangesExist = function ( newChangesExist ) {
 	if ( newChangesExist ) {
 		this.showNewChangesLink.setLabel(
-			mw.message(
+			mw.msg(
 				'rcfilters-show-new-changes',
 				this.changesListModel.getNextFromFormatted()
-			).text()
+			)
 		);
 	}
 	this.showNewChangesLink.toggle( newChangesExist );

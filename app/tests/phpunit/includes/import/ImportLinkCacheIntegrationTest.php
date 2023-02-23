@@ -1,7 +1,5 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
-
 /**
  * Integration test that checks import success and
  * LinkCache integration.
@@ -13,11 +11,11 @@ use MediaWiki\MediaWikiServices;
  *
  * @author mwjames
  */
-class ImportLinkCacheIntegrationTest extends MediaWikiTestCase {
+class ImportLinkCacheIntegrationTest extends MediaWikiIntegrationTestCase {
 
 	private $importStreamSource;
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 
 		$file = dirname( __DIR__ ) . '/../data/import/ImportLinkCacheIntegrationTest.xml';
@@ -33,25 +31,19 @@ class ImportLinkCacheIntegrationTest extends MediaWikiTestCase {
 		$this->doImport( $this->importStreamSource );
 
 		// Imported title
-		$loremIpsum = Title::newFromText( 'Lorem ipsum' );
+		$loremIpsum = Title::makeTitle( NS_MAIN, 'Lorem ipsum' );
 
 		$this->assertSame(
 			$loremIpsum->getArticleID(),
 			$loremIpsum->getArticleID( Title::GAID_FOR_UPDATE )
 		);
 
-		$categoryLoremIpsum = Title::newFromText( 'Category:Lorem ipsum' );
+		$categoryLoremIpsum = Title::makeTitle( NS_CATEGORY, 'Lorem ipsum' );
 
 		$this->assertSame(
 			$categoryLoremIpsum->getArticleID(),
 			$categoryLoremIpsum->getArticleID( Title::GAID_FOR_UPDATE )
 		);
-
-		$page = new WikiPage( $loremIpsum );
-		$page->doDeleteArticle( 'import test: delete page' );
-
-		$page = new WikiPage( $categoryLoremIpsum );
-		$page->doDeleteArticle( 'import test: delete page' );
 	}
 
 	/**
@@ -61,14 +53,14 @@ class ImportLinkCacheIntegrationTest extends MediaWikiTestCase {
 		$this->doImport( $this->importStreamSource );
 
 		// ReImported title
-		$loremIpsum = Title::newFromText( 'Lorem ipsum' );
+		$loremIpsum = Title::makeTitle( NS_MAIN, 'Lorem ipsum' );
 
 		$this->assertSame(
 			$loremIpsum->getArticleID(),
 			$loremIpsum->getArticleID( Title::GAID_FOR_UPDATE )
 		);
 
-		$categoryLoremIpsum = Title::newFromText( 'Category:Lorem ipsum' );
+		$categoryLoremIpsum = Title::makeTitle( NS_CATEGORY, 'Lorem ipsum' );
 
 		$this->assertSame(
 			$categoryLoremIpsum->getArticleID(),
@@ -77,10 +69,9 @@ class ImportLinkCacheIntegrationTest extends MediaWikiTestCase {
 	}
 
 	private function doImport( $importStreamSource ) {
-		$importer = new WikiImporter(
-			$importStreamSource->value,
-			MediaWikiServices::getInstance()->getMainConfig()
-		);
+		$importer = $this->getServiceContainer()
+			->getWikiImporterFactory()
+			->getWikiImporter( $importStreamSource->value );
 		$importer->setDebug( true );
 
 		$reporter = new ImportReporter(

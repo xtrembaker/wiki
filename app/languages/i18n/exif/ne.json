@@ -1,10 +1,13 @@
 {
 	"@metadata": {
 		"authors": [
+			"Bada Kaji",
 			"Bhawani Gautam",
 			"Krish Dulal",
 			"Nirjal stha",
 			"RajeshPandey",
+			"पर्वत सुबेदी",
+			"बडा काजी",
 			"बिप्लब आनन्द",
 			"राम प्रसाद जोशी",
 			"सरोज कुमार ढकाल"
@@ -29,7 +32,7 @@
 	"exif-jpeginterchangeformatlength": "JPEG आँकड़ाको बाइट",
 	"exif-whitepoint": "सेतो बिंदु क्रोम्यासिटी(chromaticity)",
 	"exif-primarychromaticities": "क्रोमेटिसिटीज अफ प्राईमरिटीज",
-	"exif-ycbcrcoefficients": "रङ स्पेस परिवर्तन म्याट्रिक्स गुणाङ्क",
+	"exif-ycbcrcoefficients": "रङ्ग स्पेस परिवर्तन म्याट्रिक्स गुणाङ्क",
 	"exif-referenceblackwhite": "कालो र सेतो सन्दर्भ मानहरूको जोडी",
 	"exif-datetime": "फाइल परिवर्तन मिति तथा समय",
 	"exif-imagedescription": "चित्र नाम",
@@ -334,9 +337,9 @@
 	"exif-dc-coverage": "मेडियाको स्पाटिएल(आयाम) वा टेम्पोरल(काल) सान्दर्भिकता",
 	"exif-dc-date": "मिति(हरू)",
 	"exif-dc-publisher": "प्रकाशक",
-	"exif-dc-relation": "सम्वन्धित मेडिया",
+	"exif-dc-relation": "सम्वन्धित मिडिया",
 	"exif-dc-rights": "अधिकारहरू",
-	"exif-dc-source": "स्रोत मेडिया",
+	"exif-dc-source": "स्रोत मिडिया",
 	"exif-dc-type": "मेडियाको प्रकार",
 	"exif-rating-rejected": "अस्विकृत",
 	"exif-isospeedratings-overflow": "६५५३५ भन्दा ठूलो",

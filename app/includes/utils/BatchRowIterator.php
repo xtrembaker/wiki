@@ -3,11 +3,6 @@
 use Wikimedia\Rdbms\IDatabase;
 
 /**
- * Allows iterating a large number of rows in batches transparently.
- * By default when iterated over returns the full query result as an
- * array of rows.  Can be wrapped in RecursiveIteratorIterator to
- * collapse those arrays into a single stream of rows queried in batches.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -26,59 +21,67 @@ use Wikimedia\Rdbms\IDatabase;
  * @file
  * @ingroup Maintenance
  */
+
+/**
+ * Allows iterating a large number of rows in batches transparently.
+ * By default when iterated over returns the full query result as an
+ * array of rows.  Can be wrapped in RecursiveIteratorIterator to
+ * collapse those arrays into a single stream of rows queried in batches.
+ *
+ * @newable
+ */
 class BatchRowIterator implements RecursiveIterator {
 
 	/**
-	 * @var IDatabase $db The database to read from
+	 * @var IDatabase The database to read from
 	 */
 	protected $db;
 
 	/**
-	 * @var string|array $table The name or names of the table to read from
+	 * @var string|array The name or names of the table to read from
 	 */
 	protected $table;
 
 	/**
-	 * @var array $primaryKey The name of the primary key(s)
+	 * @var array The name of the primary key(s)
 	 */
 	protected $primaryKey;
 
 	/**
-	 * @var int $batchSize The number of rows to fetch per iteration
+	 * @var int The number of rows to fetch per iteration
 	 */
 	protected $batchSize;
 
 	/**
-	 * @var array $conditions Array of strings containing SQL conditions
-	 *  to add to the query
+	 * @var array Array of strings containing SQL conditions to add to the query
 	 */
 	protected $conditions = [];
 
 	/**
-	 * @var array $joinConditions
+	 * @var array
 	 */
 	protected $joinConditions = [];
 
 	/**
-	 * @var array $fetchColumns List of column names to select from the
-	 *  table suitable for use with IDatabase::select()
+	 * @var array List of column names to select from the table suitable for use
+	 *  with IDatabase::select()
 	 */
 	protected $fetchColumns;
 
 	/**
-	 * @var string $orderBy SQL Order by condition generated from $this->primaryKey
+	 * @var string SQL Order by condition generated from $this->primaryKey
 	 */
 	protected $orderBy;
 
 	/**
-	 * @var array $current The current iterator value
+	 * @var array The current iterator value
 	 */
 	private $current = [];
 
 	/**
-	 * @var int key 0-indexed number of pages fetched since self::reset()
+	 * @var int 0-indexed number of pages fetched since self::reset()
 	 */
-	private $key;
+	private $key = -1;
 
 	/**
 	 * @var array Additional query options
@@ -86,6 +89,13 @@ class BatchRowIterator implements RecursiveIterator {
 	protected $options = [];
 
 	/**
+	 * @var string|null For debugging which method is using this class.
+	 */
+	protected $caller;
+
+	/**
+	 * @stable to call
+	 *
 	 * @param IDatabase $db The database to read from
 	 * @param string|array $table The name or names of the table to read from
 	 * @param string|array $primaryKey The name or names of the primary key columns
@@ -145,6 +155,20 @@ class BatchRowIterator implements RecursiveIterator {
 	}
 
 	/**
+	 * Use ->setCaller( __METHOD__ ) to indicate which code is using this
+	 * class. Only used in debugging output.
+	 * @since 1.36
+	 *
+	 * @param string $caller
+	 * @return self
+	 */
+	public function setCaller( $caller ) {
+		$this->caller = $caller;
+
+		return $this;
+	}
+
+	/**
 	 * Extracts the primary key(s) from a database row.
 	 *
 	 * @param stdClass $row An individual database row from this iterator
@@ -162,21 +186,21 @@ class BatchRowIterator implements RecursiveIterator {
 	/**
 	 * @return array The most recently fetched set of rows from the database
 	 */
-	public function current() {
+	public function current(): array {
 		return $this->current;
 	}
 
 	/**
 	 * @return int 0-indexed count of the page number fetched
 	 */
-	public function key() {
+	public function key(): int {
 		return $this->key;
 	}
 
 	/**
-	 * Reset the iterator to the begining of the table.
+	 * Reset the iterator to the beginning of the table.
 	 */
-	public function rewind() {
+	public function rewind(): void {
 		$this->key = -1; // self::next() will turn this into 0
 		$this->current = [];
 		$this->next();
@@ -185,33 +209,38 @@ class BatchRowIterator implements RecursiveIterator {
 	/**
 	 * @return bool True when the iterator is in a valid state
 	 */
-	public function valid() {
+	public function valid(): bool {
 		return (bool)$this->current;
 	}
 
 	/**
 	 * @return bool True when this result set has rows
 	 */
-	public function hasChildren() {
+	public function hasChildren(): bool {
 		return $this->current && count( $this->current );
 	}
 
 	/**
-	 * @return RecursiveIterator
+	 * @return null|RecursiveIterator
 	 */
-	public function getChildren() {
+	public function getChildren(): ?RecursiveIterator {
 		return new NotRecursiveIterator( new ArrayIterator( $this->current ) );
 	}
 
 	/**
 	 * Fetch the next set of rows from the database.
 	 */
-	public function next() {
+	public function next(): void {
+		$caller = __METHOD__;
+		if ( (string)$this->caller !== '' ) {
+			$caller .= " (for {$this->caller})";
+		}
+
 		$res = $this->db->select(
 			$this->table,
 			$this->fetchColumns,
 			$this->buildConditions(),
-			__METHOD__,
+			$caller,
 			[
 				'LIMIT' => $this->batchSize,
 				'ORDER BY' => $this->orderBy,

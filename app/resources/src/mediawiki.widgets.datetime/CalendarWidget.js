@@ -202,7 +202,6 @@
 		return this.selected;
 	};
 
-	// eslint-disable-next-line valid-jsdoc
 	/**
 	 * Set the selected dates
 	 *
@@ -253,7 +252,6 @@
 		return this.focusedDate;
 	};
 
-	// eslint-disable-next-line valid-jsdoc
 	/**
 	 * Set the currently-focused date
 	 *
@@ -472,11 +470,12 @@
 	 * Handles day button click
 	 *
 	 * @protected
-	 * @param {OO.ui.ButtonWidget} $button
+	 * @param {OO.ui.ButtonWidget} button
 	 */
-	mw.widgets.datetime.CalendarWidget.prototype.onDayClick = function ( $button ) {
-		this.setFocusedDate( $button.getData() );
-		this.setSelected( [ $button.getData() ] );
+	mw.widgets.datetime.CalendarWidget.prototype.onDayClick = function ( button ) {
+		var data = button.getData();
+		this.setFocusedDate( data );
+		this.setSelected( [ data ] );
 		if ( !this.$widget || OO.ui.contains( this.$element[ 0 ], document.activeElement, true ) ) {
 			this.$element.trigger( 'focus' );
 		}

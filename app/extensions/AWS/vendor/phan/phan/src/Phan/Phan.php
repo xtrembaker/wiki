@@ -47,7 +47,7 @@ use function realpath;
 use function sort;
 use function sprintf;
 use function str_replace;
-use function var_export;
+use function var_representation;
 
 use const EXIT_FAILURE;
 use const EXIT_SUCCESS;
@@ -190,6 +190,8 @@ class Phan implements IgnoredFilesFilterInterface
      * @see \Phan\CodeBase
      *
      * @throws Exception if analysis fails unrecoverably or in an unexpected way
+     *
+     * @suppress PhanPluginRemoveDebugAny
      */
     public static function analyzeFileList(
         CodeBase $code_base,
@@ -209,7 +211,8 @@ class Phan implements IgnoredFilesFilterInterface
             echo \implode("\n", $file_path_list) . (count($file_path_list) > 0 ? "\n" : "");
             exit(EXIT_SUCCESS);
         }
-        if (Config::getValue('language_server_use_pcntl_fallback')) {
+        if (CLI::isDaemonOrLanguageServer() &&
+            Config::getValue('language_server_use_pcntl_fallback')) {
             // The PCNTL fallback generates cyclic references (to the CodeBase instance which references many other things) in createRestorePoint,
             // so we need to garbage collect that.
             // This is probably the only part of the code which generates cyclic references
@@ -230,6 +233,11 @@ class Phan implements IgnoredFilesFilterInterface
         FileCache::setMaxCacheSize(FileCache::MINIMUM_CACHE_SIZE);
         self::checkForSlowPHPOptions();
         Config::warnIfInvalid();
+        if (Config::getValue('processes') !== 1) {
+            if (!\extension_loaded('pcntl')) {
+                throw new AssertionError('The pcntl extension must be loaded in order for Phan to be able to fork.');
+            }
+        }
         self::loadConfiguredPHPExtensionStubs($code_base);
         $is_daemon_request = Config::getValue('daemonize_socket') || Config::getValue('daemonize_tcp');
         $language_server_config = Config::getValue('language_server_config');
@@ -416,6 +424,7 @@ class Phan implements IgnoredFilesFilterInterface
     private static function checkForOptionsConflictingWithServerModes(): void
     {
         if (Config::isIssueFixingPluginEnabled()) {
+            // @phan-suppress-next-line PhanPluginRemoveDebugCall
             fwrite(STDERR, "Cannot use --automatic-fix in daemon mode or with the language server\n");
             exit(EXIT_FAILURE);
         }
@@ -740,6 +749,7 @@ class Phan implements IgnoredFilesFilterInterface
     {
         $encoded_signatures = json_encode($code_base->exportFunctionAndMethodSet(), JSON_PRETTY_PRINT);
         if (!file_put_contents($filename, $encoded_signatures)) {
+            // @phan-suppress-next-line PhanPluginRemoveDebugCall
             fprintf(STDERR, "Could not save contents to path '%s'\n", $filename);
             return EXIT_FAILURE;
         }
@@ -750,6 +760,7 @@ class Phan implements IgnoredFilesFilterInterface
     {
         $memory = memory_get_usage() / 1024 / 1024;
         $peak   = memory_get_peak_usage() / 1024 / 1024;
+        // @phan-suppress-next-line PhanPluginRemoveDebugCall
         fwrite(STDERR, sprintf("Memory usage after analysis completed: %.02dMB/%.02dMB\n", $memory, $peak));
     }
 
@@ -794,6 +805,7 @@ class Phan implements IgnoredFilesFilterInterface
         }
         // We warn about Xdebug in src/codebase.php, so skip that check here.
         if ($warned) {
+            // @phan-suppress-next-line PhanPluginRemoveDebugCall
             fwrite(STDERR, "(The above warning(s) about slow PHP settings can be disabled by setting 'skip_slow_php_options_warning' to true in .phan/config.php)\n");
         }
     }
@@ -813,11 +825,11 @@ class Phan implements IgnoredFilesFilterInterface
                 continue;
             }
             if (!is_string($path_to_extension)) {
-                throw new \InvalidArgumentException("Invalid autoload_internal_extension_signatures: path for $extension_name is not a string: value: " . var_export($path_to_extension, true));
+                throw new \InvalidArgumentException("Invalid autoload_internal_extension_signatures: path for $extension_name is not a string: value: " . var_representation($path_to_extension));
             }
             $path_to_extension = Config::projectPath($path_to_extension);
             if (!is_file($path_to_extension)) {
-                throw new \InvalidArgumentException("Invalid autoload_internal_extension_signatures: path for $extension_name is not a file: value: " . var_export($path_to_extension, true));
+                throw new \InvalidArgumentException("Invalid autoload_internal_extension_signatures: path for $extension_name is not a file: value: " . var_representation($path_to_extension));
             }
             Analysis::parseFile($code_base, $path_to_extension, false, null, true);
         }

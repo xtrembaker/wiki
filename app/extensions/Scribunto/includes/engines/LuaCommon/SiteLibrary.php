@@ -3,13 +3,17 @@
 use MediaWiki\MediaWikiServices;
 
 class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
+	/** @var string|null */
 	private static $namespacesCacheLang = null;
+	/** @var array[]|null */
 	private static $namespacesCache = null;
+	/** @var array[] */
 	private static $interwikiMapCache = [];
+	/** @var int[][] */
 	private $pagesInCategoryCache = [];
 
 	public function register() {
-		global $wgContLang, $wgNamespaceAliases;
+		global $wgNamespaceAliases;
 
 		$lib = [
 			'getNsIndex' => [ $this, 'getNsIndex' ],
@@ -19,40 +23,43 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 			'interwikiMap' => [ $this, 'interwikiMap' ],
 		];
 		$parser = $this->getParser();
+		$services = MediaWikiServices::getInstance();
+		$contLang = $services->getContentLanguage();
 		$info = [
 			'siteName' => $GLOBALS['wgSitename'],
 			'server' => $GLOBALS['wgServer'],
 			'scriptPath' => $GLOBALS['wgScriptPath'],
 			'stylePath' => $GLOBALS['wgStylePath'],
 			'currentVersion' => SpecialVersion::getVersion(
-				'', $parser ? $parser->getTargetLanguage() : $wgContLang
+				'', $parser ? $parser->getTargetLanguage() : $contLang
 			),
 		];
 
-		if ( !self::$namespacesCache || self::$namespacesCacheLang !== $wgContLang->getCode() ) {
+		if ( !self::$namespacesCache || self::$namespacesCacheLang !== $contLang->getCode() ) {
 			$namespaces = [];
 			$namespacesByName = [];
-			foreach ( $wgContLang->getFormattedNamespaces() as $ns => $title ) {
-				$canonical = MWNamespace::getCanonicalName( $ns );
+			$namespaceInfo = $services->getNamespaceInfo();
+			foreach ( $contLang->getFormattedNamespaces() as $ns => $title ) {
+				$canonical = $namespaceInfo->getCanonicalName( $ns );
 				$namespaces[$ns] = [
 					'id' => $ns,
 					'name' => $title,
 					'canonicalName' => strtr( $canonical, '_', ' ' ),
-					'hasSubpages' => MWNamespace::hasSubpages( $ns ),
-					'hasGenderDistinction' => MWNamespace::hasGenderDistinction( $ns ),
-					'isCapitalized' => MWNamespace::isCapitalized( $ns ),
-					'isContent' => MWNamespace::isContent( $ns ),
-					'isIncludable' => !MWNamespace::isNonincludable( $ns ),
-					'isMovable' => MWNamespace::isMovable( $ns ),
-					'isSubject' => MWNamespace::isSubject( $ns ),
-					'isTalk' => MWNamespace::isTalk( $ns ),
-					'defaultContentModel' => MWNamespace::getNamespaceContentModel( $ns ),
+					'hasSubpages' => $namespaceInfo->hasSubpages( $ns ),
+					'hasGenderDistinction' => $namespaceInfo->hasGenderDistinction( $ns ),
+					'isCapitalized' => $namespaceInfo->isCapitalized( $ns ),
+					'isContent' => $namespaceInfo->isContent( $ns ),
+					'isIncludable' => !$namespaceInfo->isNonincludable( $ns ),
+					'isMovable' => $namespaceInfo->isMovable( $ns ),
+					'isSubject' => $namespaceInfo->isSubject( $ns ),
+					'isTalk' => $namespaceInfo->isTalk( $ns ),
+					'defaultContentModel' => $namespaceInfo->getNamespaceContentModel( $ns ),
 					'aliases' => [],
 				];
 				if ( $ns >= NS_MAIN ) {
-					$namespaces[$ns]['subject'] = MWNamespace::getSubject( $ns );
-					$namespaces[$ns]['talk'] = MWNamespace::getTalk( $ns );
-					$namespaces[$ns]['associated'] = MWNamespace::getAssociated( $ns );
+					$namespaces[$ns]['subject'] = $namespaceInfo->getSubject( $ns );
+					$namespaces[$ns]['talk'] = $namespaceInfo->getTalk( $ns );
+					$namespaces[$ns]['associated'] = $namespaceInfo->getAssociated( $ns );
 				} else {
 					$namespaces[$ns]['subject'] = $ns;
 				}
@@ -62,7 +69,7 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 				}
 			}
 
-			$aliases = array_merge( $wgNamespaceAliases, $wgContLang->getNamespaceAliases() );
+			$aliases = array_merge( $wgNamespaceAliases, $contLang->getNamespaceAliases() );
 			foreach ( $aliases as $title => $ns ) {
 				if ( !isset( $namespacesByName[$title] ) && isset( $namespaces[$ns] ) ) {
 					$ct = count( $namespaces[$ns]['aliases'] );
@@ -74,7 +81,7 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 			$namespaces[NS_MAIN]['displayName'] = wfMessage( 'blanknamespace' )->inContentLanguage()->text();
 
 			self::$namespacesCache = $namespaces;
-			self::$namespacesCacheLang = $wgContLang->getCode();
+			self::$namespacesCacheLang = $contLang->getCode();
 		}
 		$info['namespaces'] = self::$namespacesCache;
 
@@ -112,11 +119,11 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 			$this->incrementExpensiveFunctionCount();
 			$category = Category::newFromTitle( $title );
 			$counts = [
-				'all' => (int)$category->getPageCount(),
-				'subcats' => (int)$category->getSubcatCount(),
-				'files' => (int)$category->getFileCount(),
+				'all' => $category->getMemberCount(),
+				'subcats' => $category->getSubcatCount(),
+				'files' => $category->getFileCount(),
+				'pages' => $category->getPageCount( Category::COUNT_CONTENT_PAGES ),
 			];
-			$counts['pages'] = $counts['all'] - $counts['subcats'] - $counts['files'];
 			$this->pagesInCategoryCache[$cacheKey] = $counts;
 		}
 		if ( $which === '*' ) {
@@ -159,11 +166,10 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 	 * @return int[]|bool[]
 	 */
 	public function getNsIndex( $name = null ) {
-		global $wgContLang;
 		$this->checkType( 'getNsIndex', 1, $name, 'string' );
 		// PHP call is case-insensitive but chokes on non-standard spaces/underscores.
 		$name = trim( preg_replace( '/[\s_]+/', '_', $name ), '_' );
-		return [ $wgContLang->getNsIndex( $name ) ];
+		return [ MediaWikiServices::getInstance()->getContentLanguage()->getNsIndex( $name ) ];
 	}
 
 	/**
@@ -177,15 +183,15 @@ class Scribunto_LuaSiteLibrary extends Scribunto_LuaLibraryBase {
 		$this->checkTypeOptional( 'interwikiMap', 1, $filter, 'string', null );
 		$local = null;
 		if ( $filter === 'local' ) {
-			$local = 1;
+			$local = true;
 		} elseif ( $filter === '!local' ) {
-			$local = 0;
+			$local = false;
 		} elseif ( $filter !== null ) {
 			throw new Scribunto_LuaError(
 				"bad argument #1 to 'interwikiMap' (unknown filter '$filter')"
 			);
 		}
-		$cacheKey = $filter === null ? 'null' : $filter;
+		$cacheKey = $filter ?? 'null';
 		if ( !isset( self::$interwikiMapCache[$cacheKey] ) ) {
 			// Not expensive because we can have a max of three cache misses in the
 			// entire page parse.

@@ -105,11 +105,7 @@ class OrderedStreamingForkController extends ForkController {
 		}
 		$this->feedChildren( $childSockets );
 		foreach ( $childSockets as $socket ) {
-			// if a child has already shutdown the sockets will be closed,
-			// closing a second time would raise a warning.
-			if ( is_resource( $socket ) ) {
-				fclose( $socket );
-			}
+			fclose( $socket );
 		}
 		return 'parent';
 	}
@@ -166,7 +162,7 @@ class OrderedStreamingForkController extends ForkController {
 					$this->updateAvailableSockets( $sockets, $used, $sockets ? 0 : 5 );
 				} while ( !$sockets );
 			}
-			if ( substr( $data, - 1 ) === "\n" ) {
+			if ( substr( $data, -1 ) === "\n" ) {
 				// Strip any final new line used to delimit lines of input.
 				// The last line of input might not have it, though.
 				$data = substr( $data, 0, -1 );

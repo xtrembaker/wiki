@@ -38,7 +38,7 @@ class RestbaseVirtualRESTService extends VirtualRESTService {
 	 *   - forwardCookies : cookies to forward to RESTBase/Parsoid (as a Cookie
 	 *                       header string) or false (optional)
 	 *                       Note: forwardCookies will in the future be a boolean
-	 *                       only, signifing request cookies should be forwarded
+	 *                       only, signifying request cookies should be forwarded
 	 *                       to the service; the current state is due to the way
 	 *                       VE handles this particular parameter
 	 *   - HTTPProxy      : HTTP proxy to use (optional)
@@ -61,6 +61,7 @@ class RestbaseVirtualRESTService extends VirtualRESTService {
 			'fixedUrl' => false,
 		], $params );
 		// Ensure that the url parameter has a trailing slash.
+		// @phan-suppress-next-line PhanTypeMismatchArgumentNullableInternal url has default value
 		if ( substr( $mparams['url'], -1 ) !== '/' ) {
 			$mparams['url'] .= '/';
 		}
@@ -68,13 +69,18 @@ class RestbaseVirtualRESTService extends VirtualRESTService {
 		// and trailing slash if present.  This lets us use
 		// $wgCanonicalServer as a default value, which is very convenient.
 		$mparams['domain'] = preg_replace(
-			'/^(https?:\/\/)?([^\/:]+?)(:\d+)?\/?$/',
-			'$2',
+			'/^((https?:)?\/\/)?([^\/:]+?)(:\d+)?\/?$/',
+			'$3',
+			// @phan-suppress-next-line PhanTypeMismatchArgumentNullableInternal domain has default value
 			$mparams['domain']
 		);
 		parent::__construct( $mparams );
 	}
 
+	/**
+	 * @inheritDoc
+	 * @phan-param array[] $reqs
+	 */
 	public function onRequests( array $reqs, Closure $idGenFunc ) {
 		if ( $this->params['parsoidCompat'] ) {
 			return $this->onParsoidRequests( $reqs, $idGenFunc );
@@ -112,7 +118,7 @@ class RestbaseVirtualRESTService extends VirtualRESTService {
 
 	/**
 	 * Remaps Parsoid v3 requests to RESTBase v1 requests.
-	 * @param array $reqs
+	 * @param array[] $reqs
 	 * @param Closure $idGeneratorFunc
 	 * @return array
 	 * @throws Exception

@@ -1,6 +1,6 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
+use MediaWiki\Revision\SlotRecord;
 use Psr\Log\NullLogger;
 
 /**
@@ -9,7 +9,7 @@ use Psr\Log\NullLogger;
  */
 class ImportableOldRevisionImporterTest extends MediaWikiIntegrationTestCase {
 
-	public function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
 
 		$this->tablesUsed[] = 'change_tag';
@@ -25,29 +25,34 @@ class ImportableOldRevisionImporterTest extends MediaWikiIntegrationTestCase {
 
 	/**
 	 * @covers ::import
-	 * @param $expectedTags
 	 * @dataProvider provideTestCases
 	 */
 	public function testImport( $expectedTags ) {
-		$services = MediaWikiServices::getInstance();
+		$services = $this->getServiceContainer();
 
 		$title = Title::newFromText( __CLASS__ . rand() );
 		$revision = new WikiRevision( $services->getMainConfig() );
 		$revision->setTitle( $title );
 		$revision->setTags( $expectedTags );
-		$revision->setText( "dummy edit" );
+		$content = ContentHandler::makeContent( 'dummy edit', $title );
+		$revision->setContent( SlotRecord::MAIN, $content );
 
 		$importer = new ImportableOldRevisionImporter(
 			true,
 			new NullLogger(),
-			$services->getDBLoadBalancer()
+			$services->getDBLoadBalancer(),
+			$services->getRevisionStore(),
+			$services->getSlotRoleRegistry(),
+			$services->getWikiPageFactory(),
+			$services->getPageUpdaterFactory(),
+			$services->getUserFactory()
 		);
 		$result = $importer->import( $revision );
 		$this->assertTrue( $result );
 
 		$page = WikiPage::factory( $title );
 		$tags = ChangeTags::getTags(
-			$services->getDBLoadBalancer()->getConnection( DB_MASTER ),
+			$services->getDBLoadBalancer()->getConnection( DB_PRIMARY ),
 			null,
 			$page->getLatest()
 		);

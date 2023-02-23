@@ -1,56 +1,43 @@
+'use strict';
+
 const assert = require( 'assert' );
-const CreateAccountPage = require( '../pageobjects/createaccount.page' );
-const PreferencesPage = require( '../pageobjects/preferences.page' );
+const CreateAccountPage = require( 'wdio-mediawiki/CreateAccountPage' );
 const UserLoginPage = require( 'wdio-mediawiki/LoginPage' );
 const Api = require( 'wdio-mediawiki/Api' );
 const Util = require( 'wdio-mediawiki/Util' );
 
 describe( 'User', function () {
-	let password, username;
+	let password, username, bot;
 
-	beforeEach( function () {
-		browser.deleteAllCookies();
+	before( async () => {
+		bot = await Api.bot();
+	} );
+
+	beforeEach( async function () {
+		await browser.deleteAllCookies();
 		username = Util.getTestString( 'User-' );
 		password = Util.getTestString();
 	} );
 
-	it( 'should be able to create account', function () {
+	it( 'should be able to create account', async function () {
 		// create
-		CreateAccountPage.createAccount( username, password );
+		await CreateAccountPage.createAccount( username, password );
 
 		// check
-		assert.strictEqual( CreateAccountPage.heading.getText(), `Welcome, ${username}!` );
+		assert.strictEqual( await CreateAccountPage.heading.getText(), `Welcome, ${username}!` );
 	} );
 
-	it( 'should be able to log in @daily', function () {
+	it( 'should be able to log in @daily', async function () {
 		// create
-		browser.call( function () {
-			return Api.createAccount( username, password );
-		} );
+		await Api.createAccount( bot, username, password );
 
 		// log in
-		UserLoginPage.login( username, password );
+		await UserLoginPage.login( username, password );
 
 		// check
-		assert.strictEqual( UserLoginPage.userPage.getText(), username );
-	} );
-
-	// Disabled due to flakiness (T199446)
-	it.skip( 'should be able to change preferences', function () {
-		var realName = Util.getTestString();
-
-		// create
-		browser.call( function () {
-			return Api.createAccount( username, password );
+		const actualUsername = await browser.execute( async () => {
+			return mw.config.get( 'wgUserName' );
 		} );
-
-		// log in
-		UserLoginPage.login( username, password );
-
-		// change
-		PreferencesPage.changeRealName( realName );
-
-		// check
-		assert.strictEqual( PreferencesPage.realName.getValue(), realName );
+		assert.strictEqual( await actualUsername, username );
 	} );
 } );

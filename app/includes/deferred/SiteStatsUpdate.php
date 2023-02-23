@@ -17,6 +17,7 @@
  *
  * @file
  */
+use MediaWiki\MainConfigNames;
 use MediaWiki\MediaWikiServices;
 use Wikimedia\Assert\Assert;
 use Wikimedia\Rdbms\IDatabase;
@@ -36,8 +37,11 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 	/** @var int */
 	protected $images = 0;
 
+	private const SHARDS_OFF = 1;
+	public const SHARDS_ON = 10;
+
 	/** @var string[] Map of (table column => counter type) */
-	private static $counters = [
+	private const COUNTERS = [
 		'ss_total_edits'   => 'edits',
 		'ss_total_pages'   => 'pages',
 		'ss_good_articles' => 'articles',
@@ -45,8 +49,10 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 		'ss_images'        => 'images'
 	];
 
-	// @todo deprecate this constructor
-	function __construct( $views, $edits, $good, $pages = 0, $users = 0 ) {
+	/**
+	 * @deprecated since 1.39 Use SiteStatsUpdate::factory() instead.
+	 */
+	public function __construct( $views, $edits, $good, $pages = 0, $users = 0 ) {
 		$this->edits = $edits;
 		$this->articles = $good;
 		$this->pages = $pages;
@@ -58,13 +64,21 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 		Assert::parameterType( __CLASS__, $update, '$update' );
 		'@phan-var SiteStatsUpdate $update';
 
-		foreach ( self::$counters as $field ) {
+		foreach ( self::COUNTERS as $field ) {
 			$this->$field += $update->$field;
 		}
 	}
 
 	/**
-	 * @param int[] $deltas Map of (counter type => integer delta)
+	 * @param int[] $deltas Map of (counter type => integer delta) e.g.
+	 * 		```
+	 * 		SiteStatsUpdate::factory( [
+	 *			'edits'    => 10,
+	 *			'articles' => 2,
+	 *			'pages'    => 7,
+	 *			'users'    => 5,
+	 *		] );
+	 * 		```
 	 * @return SiteStatsUpdate
 	 * @throws UnexpectedValueException
 	 */
@@ -72,12 +86,12 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 		$update = new self( 0, 0, 0 );
 
 		foreach ( $deltas as $name => $unused ) {
-			if ( !in_array( $name, self::$counters ) ) { // T187585
+			if ( !in_array( $name, self::COUNTERS ) ) { // T187585
 				throw new UnexpectedValueException( __METHOD__ . ": no field called '$name'" );
 			}
 		}
 
-		foreach ( self::$counters as $field ) {
+		foreach ( self::COUNTERS as $field ) {
 			$update->$field = $deltas[$field] ?? 0;
 		}
 
@@ -87,9 +101,11 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 	public function doUpdate() {
 		$services = MediaWikiServices::getInstance();
 		$stats = $services->getStatsdDataFactory();
+		$shards = $services->getMainConfig()->get( MainConfigNames::MultiShardSiteStats ) ?
+			self::SHARDS_ON : self::SHARDS_OFF;
 
 		$deltaByType = [];
-		foreach ( self::$counters as $type ) {
+		foreach ( self::COUNTERS as $type ) {
 			$delta = $this->$type;
 			if ( $delta !== 0 ) {
 				$stats->updateCount( "site.$type", $delta );
@@ -98,21 +114,47 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 		}
 
 		( new AutoCommitUpdate(
-			$services->getDBLoadBalancer()->getConnectionRef( DB_MASTER ),
+			$services->getDBLoadBalancer()->getConnectionRef( DB_PRIMARY ),
 			__METHOD__,
-			function ( IDatabase $dbw, $fname ) use ( $deltaByType ) {
+			static function ( IDatabase $dbw, $fname ) use ( $deltaByType, $shards ) {
 				$set = [];
-				foreach ( self::$counters as $column => $type ) {
+				$initValues = [];
+				if ( $shards > 1 ) {
+					$shard = mt_rand( 1, $shards );
+				} else {
+					$shard = 1;
+				}
+
+				$hasNegativeDelta = false;
+				foreach ( self::COUNTERS as $field => $type ) {
 					$delta = (int)$deltaByType[$type];
+					$initValues[$field] = $delta;
 					if ( $delta > 0 ) {
-						$set[] = "$column=$column+" . abs( $delta );
+						$set[] = "$field=" . $dbw->buildGreatest(
+							[ $field => $dbw->addIdentifierQuotes( $field ) . '+' . abs( $delta ) ],
+							0
+						);
 					} elseif ( $delta < 0 ) {
-						$set[] = "$column=$column-" . abs( $delta );
+						$hasNegativeDelta = true;
+						$set[] = "$field=" . $dbw->buildGreatest(
+							[ 'new' => $dbw->addIdentifierQuotes( $field ) . '-' . abs( $delta ) ],
+							0
+						);
 					}
 				}
 
 				if ( $set ) {
-					$dbw->update( 'site_stats', $set, [ 'ss_row_id' => 1 ], $fname );
+					if ( $hasNegativeDelta ) {
+						$dbw->update( 'site_stats', $set, [ 'ss_row_id' => $shard ], $fname );
+					} else {
+						$dbw->upsert(
+							'site_stats',
+							array_merge( [ 'ss_row_id' => $shard ], $initValues ),
+							'ss_row_id',
+							$set,
+							$fname
+						);
+					}
 				}
 			}
 		) )->doUpdate();
@@ -132,22 +174,20 @@ class SiteStatsUpdate implements DeferrableUpdate, MergeableUpdate {
 		$dbr = $services->getDBLoadBalancer()->getConnectionRef( DB_REPLICA, 'vslow' );
 		# Get non-bot users than did some recent action other than making accounts.
 		# If account creation is included, the number gets inflated ~20+ fold on enwiki.
-		$rcQuery = RecentChange::getQueryInfo();
-		$activeUsers = $dbr->selectField(
-			$rcQuery['tables'],
-			'COUNT( DISTINCT ' . $rcQuery['fields']['rc_user_text'] . ' )',
-			[
+		$activeUsers = $dbr->newSelectQueryBuilder()
+			->select( 'COUNT(DISTINCT rc_actor)' )
+			->from( 'recentchanges' )
+			->join( 'actor', 'actor', 'actor_id=rc_actor' )
+			->where( [
 				'rc_type != ' . $dbr->addQuotes( RC_EXTERNAL ), // Exclude external (Wikidata)
-				ActorMigration::newMigration()->isNotAnon( $rcQuery['fields']['rc_user'] ),
+				'actor_user IS NOT NULL',
 				'rc_bot' => 0,
 				'rc_log_type != ' . $dbr->addQuotes( 'newusers' ) . ' OR rc_log_type IS NULL',
 				'rc_timestamp >= ' . $dbr->addQuotes(
-					$dbr->timestamp( time() - $config->get( 'ActiveUserDays' ) * 24 * 3600 ) ),
-			],
-			__METHOD__,
-			[],
-			$rcQuery['joins']
-		);
+					$dbr->timestamp( time() - $config->get( MainConfigNames::ActiveUserDays ) * 24 * 3600 ) ),
+			] )
+			->caller( __METHOD__ )
+			->fetchField();
 		$dbw->update(
 			'site_stats',
 			[ 'ss_active_users' => intval( $activeUsers ) ],

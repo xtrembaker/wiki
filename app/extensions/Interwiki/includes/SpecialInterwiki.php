@@ -1,6 +1,19 @@
 <?php
 
+namespace MediaWiki\Extension\Interwiki;
+
+use Html;
+use HTMLForm;
+use Language;
+use LogPage;
 use MediaWiki\MediaWikiServices;
+use OutputPage;
+use PermissionsError;
+use ReadOnlyError;
+use SpecialPage;
+use Status;
+use Title;
+use WikiMap;
 
 /**
  * Implements Special:Interwiki
@@ -60,11 +73,10 @@ class SpecialInterwiki extends SpecialPage {
 	/**
 	 * Returns boolean whether the user can modify the data.
 	 * @param OutputPage|bool $out If $wgOut object given, it adds the respective error message.
-	 * @throws PermissionsError|ReadOnlyError
 	 * @return bool
+	 * @throws PermissionsError|ReadOnlyError
 	 */
 	public function canModify( $out = false ) {
-		global $wgInterwikiCache;
 		if ( !$this->getUser()->isAllowed( 'interwiki' ) ) {
 			// Check permissions
 			if ( $out ) {
@@ -72,15 +84,15 @@ class SpecialInterwiki extends SpecialPage {
 			}
 
 			return false;
-		} elseif ( $wgInterwikiCache ) {
+		} elseif ( $this->getConfig()->get( 'InterwikiCache' ) ) {
 			// Editing the interwiki cache is not supported
 			if ( $out ) {
 				$out->addWikiMsg( 'interwiki-cached' );
 			}
 
 			return false;
-		} elseif ( wfReadOnly() ) {
-			throw new ReadOnlyError;
+		} else {
+			$this->checkReadOnly();
 		}
 
 		return true;
@@ -107,6 +119,7 @@ class SpecialInterwiki extends SpecialPage {
 						'type' => 'text',
 						'label-message' => 'interwiki-prefix-label',
 						'name' => 'prefix',
+						'autofocus' => true,
 					],
 
 					'local' => [
@@ -130,7 +143,15 @@ class SpecialInterwiki extends SpecialPage {
 						'maxlength' => 200,
 						'name' => 'wpInterwikiURL',
 						'size' => 60,
-						'tabindex' => 1,
+					],
+
+					'api' => [
+						'type' => 'url',
+						'id' => 'mw-interwiki-api',
+						'label-message' => 'interwiki-api-label',
+						'maxlength' => 200,
+						'name' => 'wpInterwikiAPI',
+						'size' => 60,
 					],
 
 					'reason' => [
@@ -140,7 +161,6 @@ class SpecialInterwiki extends SpecialPage {
 						'maxlength' => 200,
 						'name' => 'wpInterwikiReason',
 						'size' => 60,
-						'tabindex' => 1,
 					],
 				];
 
@@ -181,8 +201,9 @@ class SpecialInterwiki extends SpecialPage {
 				$status->fatal( 'interwiki_editerror', $prefix );
 			} else {
 				$formDescriptor['url']['default'] = $row->iw_url;
-				$formDescriptor['url']['trans'] = $row->iw_trans;
-				$formDescriptor['url']['local'] = $row->iw_local;
+				$formDescriptor['api']['default'] = $row->iw_api;
+				$formDescriptor['trans']['default'] = $row->iw_trans;
+				$formDescriptor['local']['default'] = $row->iw_local;
 			}
 		}
 
@@ -202,7 +223,7 @@ class SpecialInterwiki extends SpecialPage {
 
 			$htmlForm->setSubmitTextMsg( $action !== 'add' ? $action : 'interwiki_addbutton' )
 				->setIntro( $this->msg( $action !== 'delete' ? "interwiki_{$action}intro" :
-					'interwiki_deleting', $prefix ) )
+					'interwiki_deleting', $prefix )->escaped() )
 				->show();
 		} else {
 			$htmlForm->suppressDefaultSubmit()
@@ -214,27 +235,26 @@ class SpecialInterwiki extends SpecialPage {
 	}
 
 	public function onSubmit( array $data ) {
-		global $wgInterwikiCentralInterlanguageDB;
-
 		$status = Status::newGood();
 		$request = $this->getRequest();
+		$config = $this->getConfig();
 		$prefix = $this->getRequest()->getVal( 'prefix', '' );
 		$do = $request->getVal( 'action' );
 		// Show an error if the prefix is invalid (only when adding one).
 		// Invalid characters for a title should also be invalid for a prefix.
 		// Whitespace, ':', '&' and '=' are invalid, too.
 		// (Bug 30599).
-		global $wgLegalTitleChars;
-		$validPrefixChars = preg_replace( '/[ :&=]/', '', $wgLegalTitleChars );
+		$validPrefixChars = preg_replace( '/[ :&=]/', '', Title::legalChars() );
 		if ( $do === 'add' && preg_match( "/\s|[^$validPrefixChars]/", $prefix ) ) {
 			$status->fatal( 'interwiki-badprefix', htmlspecialchars( $prefix ) );
 			return $status;
 		}
 		// Disallow adding local interlanguage definitions if using global
+		$interwikiCentralInterlanguageDB = $config->get( 'InterwikiCentralInterlanguageDB' );
 		if (
 			$do === 'add' && Language::fetchLanguageName( $prefix )
-			&& $wgInterwikiCentralInterlanguageDB !== wfWikiID()
-			&& $wgInterwikiCentralInterlanguageDB !== null
+			&& $interwikiCentralInterlanguageDB !== WikiMap::getCurrentWikiId()
+			&& $interwikiCentralInterlanguageDB !== null
 		) {
 			$status->fatal( 'interwiki-cannotaddlocallanguage', htmlspecialchars( $prefix ) );
 			return $status;
@@ -242,7 +262,7 @@ class SpecialInterwiki extends SpecialPage {
 		$reason = $data['reason'];
 		$selfTitle = $this->getPageTitle();
 		$lookup = MediaWikiServices::getInstance()->getInterwikiLookup();
-		$dbw = wfGetDB( DB_MASTER );
+		$dbw = wfGetDB( DB_PRIMARY );
 		switch ( $do ) {
 		case 'delete':
 			$dbw->delete( 'interwiki', [ 'iw_prefix' => $prefix ], __METHOD__ );
@@ -252,7 +272,13 @@ class SpecialInterwiki extends SpecialPage {
 			} else {
 				$this->getOutput()->addWikiMsg( 'interwiki_deleted', $prefix );
 				$log = new LogPage( 'interwiki' );
-				$log->addEntry( 'iw_delete', $selfTitle, $reason, [ $prefix ] );
+				$log->addEntry(
+					'iw_delete',
+					$selfTitle,
+					$reason,
+					[ $prefix ],
+					$this->getUser()
+				);
 				$lookup->invalidateCache( $prefix );
 			}
 			break;
@@ -260,13 +286,16 @@ class SpecialInterwiki extends SpecialPage {
 		case 'add':
 			$contLang = MediaWikiServices::getInstance()->getContentLanguage();
 			$prefix = $contLang->lc( $prefix );
+			// Fall through
 		case 'edit':
 			$theurl = $data['url'];
+			$api = $data['api'] ?? '';
 			$local = $data['local'] ? 1 : 0;
 			$trans = $data['trans'] ? 1 : 0;
 			$rows = [
 				'iw_prefix' => $prefix,
 				'iw_url' => $theurl,
+				'iw_api' => $api,
 				'iw_local' => $local,
 				'iw_trans' => $trans
 			];
@@ -296,7 +325,14 @@ class SpecialInterwiki extends SpecialPage {
 			} else {
 				$this->getOutput()->addWikiMsg( "interwiki_{$do}ed", $prefix );
 				$log = new LogPage( 'interwiki' );
-				$log->addEntry( 'iw_' . $do, $selfTitle, $reason, [ $prefix, $theurl, $trans, $local ] );
+				$log->addEntry(
+					'iw_' . $do,
+					$selfTitle,
+					$reason,
+					[ $prefix, $theurl, $trans, $local ],
+					$this->getUser()
+				);
+				// @phan-suppress-next-line PhanTypeMismatchArgumentNullable
 				$lookup->invalidateCache( $prefix );
 			}
 			break;
@@ -306,8 +342,6 @@ class SpecialInterwiki extends SpecialPage {
 	}
 
 	protected function showList() {
-		global $wgInterwikiCentralDB, $wgInterwikiCentralInterlanguageDB, $wgInterwikiViewOnly;
-
 		$canModify = $this->canModify();
 
 		// Build lists
@@ -315,10 +349,12 @@ class SpecialInterwiki extends SpecialPage {
 		$iwPrefixes = $lookup->getAllPrefixes( null );
 		$iwGlobalPrefixes = [];
 		$iwGlobalLanguagePrefixes = [];
-		if ( $wgInterwikiCentralDB !== null && $wgInterwikiCentralDB !== wfWikiID() ) {
+		$config = $this->getConfig();
+		$interwikiCentralDB = $config->get( 'InterwikiCentralDB' );
+		if ( $interwikiCentralDB !== null && $interwikiCentralDB !== WikiMap::getCurrentWikiId() ) {
 			// Fetch list from global table
-			$dbrCentralDB = wfGetDB( DB_REPLICA, [], $wgInterwikiCentralDB );
-			$res = $dbrCentralDB->select( 'interwiki', '*', false, __METHOD__ );
+			$dbrCentralDB = wfGetDB( DB_REPLICA, [], $interwikiCentralDB );
+			$res = $dbrCentralDB->select( 'interwiki', '*', [], __METHOD__ );
 			$retval = [];
 			foreach ( $res as $row ) {
 				$row = (array)$row;
@@ -331,13 +367,14 @@ class SpecialInterwiki extends SpecialPage {
 
 		// Almost the same loop as above, but for global inter*language* links, whereas the above is for
 		// global inter*wiki* links
-		$usingGlobalInterlangLinks = ( $wgInterwikiCentralInterlanguageDB !== null );
-		$isGlobalInterlanguageDB = ( $wgInterwikiCentralInterlanguageDB === wfWikiID() );
+		$interwikiCentralInterlanguageDB = $config->get( 'InterwikiCentralInterlanguageDB' );
+		$usingGlobalInterlangLinks = ( $interwikiCentralInterlanguageDB !== null );
+		$isGlobalInterlanguageDB = ( $interwikiCentralInterlanguageDB === WikiMap::getCurrentWikiId() );
 		$usingGlobalLanguages = $usingGlobalInterlangLinks && !$isGlobalInterlanguageDB;
 		if ( $usingGlobalLanguages ) {
 			// Fetch list from global table
-			$dbrCentralLangDB = wfGetDB( DB_REPLICA, [], $wgInterwikiCentralInterlanguageDB );
-			$res = $dbrCentralLangDB->select( 'interwiki', '*', false, __METHOD__ );
+			$dbrCentralLangDB = wfGetDB( DB_REPLICA, [], $interwikiCentralInterlanguageDB );
+			$res = $dbrCentralLangDB->select( 'interwiki', '*', [], __METHOD__ );
 			$retval2 = [];
 			foreach ( $res as $row ) {
 				$row = (array)$row;
@@ -372,7 +409,7 @@ class SpecialInterwiki extends SpecialPage {
 		$this->getOutput()->addWikiMsg( 'interwiki_intro' );
 
 		// Add 'view log' link when possible
-		if ( $wgInterwikiViewOnly === false ) {
+		if ( !$config->get( 'InterwikiViewOnly' ) ) {
 			$logLink = $this->getLinkRenderer()->makeLink(
 				SpecialPage::getTitleFor( 'Log', 'interwiki' ),
 				$this->msg( 'interwiki-logtext' )->text()
@@ -404,9 +441,7 @@ class SpecialInterwiki extends SpecialPage {
 
 		$this->getOutput()->addWikiMsg( 'interwiki-legend' );
 
-		if ( ( !is_array( $iwPrefixes ) || count( $iwPrefixes ) === 0 ) &&
-			( !is_array( $iwGlobalPrefixes ) || count( $iwGlobalPrefixes ) === 0 )
-		) {
+		if ( $iwPrefixes === [] && $iwGlobalPrefixes === [] ) {
 			// If the interwiki table(s) are empty, display an error message
 			$this->error( 'interwiki_error' );
 			return;
@@ -471,17 +506,16 @@ class SpecialInterwiki extends SpecialPage {
 
 	protected function makeTable( $canModify, $iwPrefixes ) {
 		// Output the existing Interwiki prefixes table header
-		$out = '';
-		$out .= Html::openElement(
+		$out = Html::openElement(
 			'table',
 			[ 'class' => 'mw-interwikitable wikitable sortable body' ]
 		) . "\n";
 		$out .= Html::openElement( 'thead' ) .
 			Html::openElement( 'tr', [ 'class' => 'interwikitable-header' ] ) .
-			Html::element( 'th', null, $this->msg( 'interwiki_prefix' )->text() ) .
-			Html::element( 'th', null, $this->msg( 'interwiki_url' )->text() ) .
-			Html::element( 'th', null, $this->msg( 'interwiki_local' )->text() ) .
-			Html::element( 'th', null, $this->msg( 'interwiki_trans' )->text() ) .
+			Html::element( 'th', [], $this->msg( 'interwiki_prefix' )->text() ) .
+			Html::element( 'th', [], $this->msg( 'interwiki_url' )->text() ) .
+			Html::element( 'th', [], $this->msg( 'interwiki_local' )->text() ) .
+			Html::element( 'th', [], $this->msg( 'interwiki_trans' )->text() ) .
 			( $canModify ?
 				Html::element(
 					'th',

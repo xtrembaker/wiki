@@ -2,14 +2,14 @@
 	"@metadata": {
 		"authors": [
 			"Airon90",
-			"Yekrats",
-			"KuboF",
 			"Fitoschido",
+			"KuboF",
+			"Mirin",
 			"Ochilov",
-			"Tlustulimu",
 			"Robin van der Vliet",
-			"YvesNevelsteen",
-			"Mirin"
+			"Tlustulimu",
+			"Yekrats",
+			"YvesNevelsteen"
 		]
 	},
 	"config-desc": "La instalilo de MediaWiki",
@@ -21,7 +21,7 @@
 	"config-your-language-help": "Elektu la lingvon kiun vi volas uzi dum la instalada procezo.",
 	"config-wiki-language": "Lingvo de la vikio:",
 	"config-wiki-language-help": "Elektu la ĉefe skribotan lingvon de la vikio.",
-	"config-back": "← Reen",
+	"config-back": "← Reveni",
 	"config-continue": "Daŭrigi →",
 	"config-page-language": "Lingvo",
 	"config-page-welcome": "Bonvenon al MediaWiki!",
@@ -33,7 +33,6 @@
 	"config-page-install": "Instali",
 	"config-page-complete": "Farite!",
 	"config-page-restart": "Restartigi la instaladon",
-	"config-page-readme": "Legu min",
 	"config-page-releasenotes": "Eldonaj notoj",
 	"config-page-copying": "Kopiado",
 	"config-page-upgradedoc": "Ĝisdatigado",
@@ -42,7 +41,6 @@
 	"config-env-good": "La medio estas kontrolita.\nVi povas instali MediaWiki.",
 	"config-env-bad": "La medio estas kontrolita.\nNe eblas instali MediaWiki.",
 	"config-env-php": "PHP $1 estas instalita.",
-	"config-env-hhvm": "HHVM $1 estas instalita.",
 	"config-memory-raised": "La parametro <code>memory_limit</code> de PHP estis $1, ŝanĝita al $2.",
 	"config-apc": "[https://www.php.net/apc APC] estas instalita",
 	"config-apcu": "[https://www.php.net/apcu APCu] estas instalita",
@@ -77,10 +75,10 @@
 	"config-ns-other": "Alio (specifi)",
 	"config-ns-other-default": "MiaVikio",
 	"config-admin-box": "Konto de administranto",
-	"config-admin-name": "Via uzantonomo:",
+	"config-admin-name": "Via uzantnomo:",
 	"config-admin-password": "Pasvorto:",
 	"config-admin-password-confirm": "Retajpu pasvorton:",
-	"config-admin-name-blank": "Enigu salutnomon de administranto.",
+	"config-admin-name-blank": "Enigu uzantnomon de administranto.",
 	"config-admin-password-blank": "Enigu pasvorton por la administra konto.",
 	"config-admin-password-mismatch": "La du pasvortojn enigitaj de vi ne estas egalaj.",
 	"config-admin-email": "Retpoŝtadreso:",
@@ -99,7 +97,6 @@
 	"config-upload-settings": "Alŝutado de bildoj kaj dosieroj",
 	"config-upload-enable": "Ebligi alŝutadon de dosieroj",
 	"config-upload-deleted": "Dosierujo por forigitaj dosieroj:",
-	"config-logo": "Retadreso de emblemo:",
 	"config-cc-again": "Reelekti...",
 	"config-extensions": "Kromprogramoj",
 	"config-skins": "Etosoj",
@@ -121,5 +118,5 @@
 	"config-extensions-requires": "$1 (postulas $2)",
 	"config-screenshot": "ekrankopio",
 	"mainpagetext": "'''MediaWiki estis sukcese instalita.'''",
-	"mainpagedocfooter": "Konsultu la [https://meta.wikimedia.org/wiki/MediaWiki_User%27s_Guide Gvidilon por uzantoj de MediaWiki] por informoj pri uzado de vikia programaro.\n\n==Kiel komenci==\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:Configuration_settings Listo de konfiguraĵoj] (angle)\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:FAQ MediaWiki Oftaj Demandoj] (angle)\n* [https://lists.wikimedia.org/mailman/listinfo/mediawiki-announce Anonco-dissendolisto pri MediaWiki] (angle)\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Localisation#Translation_resources Preklad MediaWiki do tvojho jazyka]"
+	"mainpagedocfooter": "Konsultu la [https://meta.wikimedia.org/wiki/MediaWiki_User%27s_Guide Gvidilon por uzantoj de MediaWiki] por informoj pri uzado de vikia programaro.\n\n==Kiel komenci==\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:Configuration_settings Listo de konfiguraĵoj] (angle)\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Manual:FAQ MediaWiki Oftaj Demandoj] (angle)\n* [https://lists.wikimedia.org/postorius/lists/mediawiki-announce.lists.wikimedia.org/ Anonco-dissendolisto pri MediaWiki] (angle)\n* [https://www.mediawiki.org/wiki/Special:MyLanguage/Localisation#Translation_resources Preklad MediaWiki do tvojho jazyka]"
 }

@@ -155,14 +155,14 @@
 	 */
 	function update( context, delayed ) {
 		function maybeFetch() {
-			var val = context.data.$textbox.val(),
-				cache = context.data.cache,
-				cacheHit;
-
 			if ( typeof context.config.update.before === 'function' ) {
 				context.config.update.before.call( context.data.$textbox );
 			}
 
+			var val = context.data.$textbox.val(),
+				cache = context.data.cache;
+
+			var cacheHit = false;
 			// Only fetch if the value in the textbox changed and is not empty, or if the results were hidden
 			// if the textbox is empty then clear the result div, but leave other settings intouched
 			if ( val.length === 0 ) {
@@ -230,65 +230,69 @@
 	 * Highlight a result in the results table
 	 *
 	 * @param {Object} context
-	 * @param {jQuery|string} result `<tr>` to highlight, or 'prev' or 'next'
+	 * @param {jQuery|string} $result `<tr>` to highlight, or 'prev' or 'next'
 	 * @param {boolean} updateTextbox If true, put the suggestion in the textbox
 	 */
-	function highlight( context, result, updateTextbox ) {
-		var selected = context.data.$container.find( '.suggestions-result-current' );
-		if ( !result.get || selected.get( 0 ) !== result.get( 0 ) ) {
-			if ( result === 'prev' ) {
-				if ( selected.hasClass( 'suggestions-special' ) ) {
-					result = context.data.$container.find( '.suggestions-result' ).last();
+	function highlight( context, $result, updateTextbox ) {
+		var $selected = context.data.$container.find( '.suggestions-result-current' );
+		if ( !$result.get || $selected.get( 0 ) !== $result.get( 0 ) ) {
+			if ( $result === 'prev' ) {
+				// eslint-disable-next-line no-jquery/no-class-state
+				if ( $selected.hasClass( 'suggestions-special' ) ) {
+					$result = context.data.$container.find( '.suggestions-result' ).last();
 				} else {
-					result = selected.prev();
-					if ( !( result.length && result.hasClass( 'suggestions-result' ) ) ) {
+					$result = $selected.prev();
+					// eslint-disable-next-line no-jquery/no-class-state
+					if ( !( $result.length && $result.hasClass( 'suggestions-result' ) ) ) {
 						// there is something in the DOM between selected element and the wrapper, bypass it
-						result = selected.parents( '.suggestions-results > *' ).prev().find( '.suggestions-result' ).eq( 0 );
+						$result = $selected.parents( '.suggestions-results > *' ).prev().find( '.suggestions-result' ).eq( 0 );
 					}
 
-					if ( selected.length === 0 ) {
+					if ( $selected.length === 0 ) {
 						// we are at the beginning, so lets jump to the last item
 						if ( context.data.$container.find( '.suggestions-special' ).html() !== '' ) {
-							result = context.data.$container.find( '.suggestions-special' );
+							$result = context.data.$container.find( '.suggestions-special' );
 						} else {
-							result = context.data.$container.find( '.suggestions-results .suggestions-result' ).last();
+							$result = context.data.$container.find( '.suggestions-results .suggestions-result' ).last();
 						}
 					}
 				}
-			} else if ( result === 'next' ) {
-				if ( selected.length === 0 ) {
+			} else if ( $result === 'next' ) {
+				if ( $selected.length === 0 ) {
 					// No item selected, go to the first one
-					result = context.data.$container.find( '.suggestions-results .suggestions-result' ).first();
-					if ( result.length === 0 && context.data.$container.find( '.suggestions-special' ).html() !== '' ) {
+					$result = context.data.$container.find( '.suggestions-results .suggestions-result' ).first();
+					if ( $result.length === 0 && context.data.$container.find( '.suggestions-special' ).html() !== '' ) {
 						// No suggestion exists, go to the special one directly
-						result = context.data.$container.find( '.suggestions-special' );
+						$result = context.data.$container.find( '.suggestions-special' );
 					}
 				} else {
-					result = selected.next();
-					if ( !( result.length && result.hasClass( 'suggestions-result' ) ) ) {
+					$result = $selected.next();
+					// eslint-disable-next-line no-jquery/no-class-state
+					if ( !( $result.length && $result.hasClass( 'suggestions-result' ) ) ) {
 						// there is something in the DOM between selected element and the wrapper, bypass it
-						result = selected.parents( '.suggestions-results > *' ).next().find( '.suggestions-result' ).eq( 0 );
+						$result = $selected.parents( '.suggestions-results > *' ).next().find( '.suggestions-result' ).eq( 0 );
 					}
 
-					if ( selected.hasClass( 'suggestions-special' ) ) {
-						result = $( [] );
+					// eslint-disable-next-line no-jquery/no-class-state
+					if ( $selected.hasClass( 'suggestions-special' ) ) {
+						$result = $( [] );
 					} else if (
-						result.length === 0 &&
+						$result.length === 0 &&
 						context.data.$container.find( '.suggestions-special' ).html() !== ''
 					) {
 						// We were at the last item, jump to the specials!
-						result = context.data.$container.find( '.suggestions-special' );
+						$result = context.data.$container.find( '.suggestions-special' );
 					}
 				}
 			}
-			selected.removeClass( 'suggestions-result-current' );
-			result.addClass( 'suggestions-result-current' );
+			$selected.removeClass( 'suggestions-result-current' );
+			$result.addClass( 'suggestions-result-current' );
 		}
 		if ( updateTextbox ) {
-			if ( result.length === 0 || result.is( '.suggestions-special' ) ) {
+			if ( $result.length === 0 || $result.is( '.suggestions-special' ) ) {
 				restore( context );
 			} else {
-				context.data.$textbox.val( result.data( 'text' ) );
+				context.data.$textbox.val( $result.data( 'text' ) );
 				// .val() doesn't call any event handlers, so
 				// let the world know what happened
 				context.data.$textbox.trigger( 'change' );
@@ -305,10 +309,6 @@
 	 * @param {Mixed} value Value to set property with
 	 */
 	function configure( context, property, value ) {
-		var newCSS,
-			$result, $results, $spanForWidth, childrenWidth,
-			regionIsFixed, regionPosition,
-			i, expWidth, maxWidth, text;
 
 		// Validate creation using fallback values
 		switch ( property ) {
@@ -332,7 +332,7 @@
 						// Rebuild the suggestions list
 						context.data.$container.show();
 						// Update the size and position of the list
-						regionIsFixed = ( function () {
+						var regionIsFixed = ( function () {
 							var $el = context.config.$region;
 							do {
 								if ( $el.css( 'position' ) === 'fixed' ) {
@@ -342,10 +342,10 @@
 							} while ( $el.length );
 							return false;
 						}() );
-						regionPosition = regionIsFixed ?
+						var regionPosition = regionIsFixed ?
 							context.config.$region[ 0 ].getBoundingClientRect() :
 							context.config.$region.offset();
-						newCSS = {
+						var newCSS = {
 							position: regionIsFixed ? 'fixed' : 'absolute',
 							top: regionPosition.top + context.config.$region.outerHeight(),
 							bottom: 'auto',
@@ -419,12 +419,12 @@
 						}
 
 						context.data.$container.css( newCSS );
-						$results = context.data.$container.children( '.suggestions-results' );
+						var $results = context.data.$container.children( '.suggestions-results' );
 						$results.empty();
-						expWidth = -1;
-						for ( i = 0; i < context.config.suggestions.length; i++ ) {
-							text = context.config.suggestions[ i ];
-							$result = $( '<div>' )
+						var expWidth = -1;
+						for ( var i = 0; i < context.config.suggestions.length; i++ ) {
+							var text = context.config.suggestions[ i ];
+							var $result = $( '<div>' )
 								.addClass( 'suggestions-result' )
 								.attr( 'rel', i )
 								.data( 'text', context.config.suggestions[ i ] )
@@ -461,8 +461,8 @@
 							//   still report the "trimmed" width. This should not be done in regular CSS
 							//   stylesheets as we don't want this rule to apply to other <span> elements, like
 							//   the ones generated by jquery.highlightText.
-							$spanForWidth = $result.wrapInner( '<span>' ).children();
-							childrenWidth = $spanForWidth.css( 'position', 'absolute' ).outerWidth();
+							var $spanForWidth = $result.wrapInner( '<span>' ).children();
+							var childrenWidth = $spanForWidth.css( 'position', 'absolute' ).outerWidth();
 							$spanForWidth.contents().unwrap();
 
 							if ( childrenWidth > $result.width() && childrenWidth > expWidth ) {
@@ -473,7 +473,7 @@
 
 						// Apply new width for results box, if any
 						if ( expWidth > context.data.$container.width() ) {
-							maxWidth = context.config.maxExpandFactor * context.data.$textbox.width();
+							var maxWidth = context.config.maxExpandFactor * context.data.$textbox.width();
 							context.data.$container.width( Math.min( expWidth, maxWidth ) );
 						}
 					}
@@ -508,9 +508,8 @@
 	 * @param {number} key Code of key pressed
 	 */
 	function keypress( e, context, key ) {
-		var selected,
-			// eslint-disable-next-line no-jquery/no-sizzle
-			wasVisible = context.data.$container.is( ':visible' ),
+		// eslint-disable-next-line no-jquery/no-sizzle
+		var wasVisible = context.data.$container.is( ':visible' ),
 			preventDefault = false;
 
 		switch ( key ) {
@@ -543,25 +542,25 @@
 			// Enter
 			case 13:
 				preventDefault = wasVisible;
-				selected = context.data.$container.find( '.suggestions-result-current' );
+				var $selected = context.data.$container.find( '.suggestions-result-current' );
 				hide( context );
-				if ( selected.length === 0 || context.data.selectedWithMouse ) {
+				if ( $selected.length === 0 || context.data.selectedWithMouse ) {
 					// If nothing is selected or if something was selected with the mouse
 					// cancel any current requests and allow the form to be submitted
 					// (simply don't prevent default behavior).
 					cancel( context );
 					preventDefault = false;
-				} else if ( selected.is( '.suggestions-special' ) ) {
+				} else if ( $selected.is( '.suggestions-special' ) ) {
 					if ( typeof context.config.special.select === 'function' ) {
 						// Allow the callback to decide whether to prevent default or not
-						if ( context.config.special.select.call( selected, context.data.$textbox, 'keyboard' ) === true ) {
+						if ( context.config.special.select.call( $selected, context.data.$textbox, 'keyboard' ) === true ) {
 							preventDefault = false;
 						}
 					}
 				} else {
 					if ( typeof context.config.result.select === 'function' ) {
 						// Allow the callback to decide whether to prevent default or not
-						if ( context.config.result.select.call( selected, context.data.$textbox, 'keyboard' ) === true ) {
+						if ( context.config.result.select.call( $selected, context.data.$textbox, 'keyboard' ) === true ) {
 							preventDefault = false;
 						}
 					}
@@ -583,11 +582,9 @@
 		var args = arguments;
 
 		$( this ).each( function () {
-			var context, key;
-
 			/* Construction and Loading */
 
-			context = $( this ).data( 'suggestions-context' );
+			var context = $( this ).data( 'suggestions-context' );
 			if ( context === undefined || context === null ) {
 				context = {
 					config: {
@@ -616,7 +613,7 @@
 			if ( args.length > 0 ) {
 				if ( typeof args[ 0 ] === 'object' ) {
 					// Apply set of properties
-					for ( key in args[ 0 ] ) {
+					for ( var key in args[ 0 ] ) {
 						configure( context, key, args[ 0 ][ key ] );
 					}
 				} else if ( typeof args[ 0 ] === 'string' ) {
@@ -644,7 +641,7 @@
 					visibleResults: 0,
 
 					// Suggestion the last mousedown event occurred on
-					mouseDownOn: $( [] ),
+					$mouseDownOn: $( [] ),
 					$textbox: $( this ),
 					selectedWithMouse: false
 				};
@@ -658,13 +655,13 @@
 							// textbox loses focus. Instead, listen for a mousedown followed
 							// by a mouseup on the same div.
 							.on( 'mousedown', function ( e ) {
-								context.data.mouseDownOn = $( e.target ).closest( '.suggestions-results .suggestions-result' );
+								context.data.$mouseDownOn = $( e.target ).closest( '.suggestions-results .suggestions-result' );
 							} )
 							.on( 'mouseup', function ( e ) {
 								var $result = $( e.target ).closest( '.suggestions-results .suggestions-result' ),
-									$other = context.data.mouseDownOn;
+									$other = context.data.$mouseDownOn;
 
-								context.data.mouseDownOn = $( [] );
+								context.data.$mouseDownOn = $( [] );
 								if ( $result.get( 0 ) !== $other.get( 0 ) ) {
 									return;
 								}
@@ -691,13 +688,13 @@
 							// textbox loses focus. Instead, listen for a mousedown followed
 							// by a mouseup on the same div.
 							.on( 'mousedown', function ( e ) {
-								context.data.mouseDownOn = $( e.target ).closest( '.suggestions-special' );
+								context.data.$mouseDownOn = $( e.target ).closest( '.suggestions-special' );
 							} )
 							.on( 'mouseup', function ( e ) {
 								var $special = $( e.target ).closest( '.suggestions-special' ),
-									$other = context.data.mouseDownOn;
+									$other = context.data.$mouseDownOn;
 
-								context.data.mouseDownOn = $( [] );
+								context.data.$mouseDownOn = $( [] );
 								if ( $special.get( 0 ) !== $other.get( 0 ) ) {
 									return;
 								}
@@ -761,7 +758,7 @@
 					.on( 'blur', function () {
 						// When losing focus because of a mousedown
 						// on a suggestion, don't hide the suggestions
-						if ( context.data.mouseDownOn.length > 0 ) {
+						if ( context.data.$mouseDownOn.length > 0 ) {
 							return;
 						}
 						hide( context );

@@ -1,8 +1,8 @@
 {
 	"@metadata": {
 		"authors": [
-			"Papuass",
-			"Edgars2007"
+			"Edgars2007",
+			"Papuass"
 		]
 	},
 	"multimediaviewer-file-page": "Doties uz atbilstošo faila lapu",
@@ -20,8 +20,6 @@
 	"multimediaviewer-permission-link": "skatīt noteikumus",
 	"multimediaviewer-permission-viewmore": "Skatīt vairāk",
 	"multimediaviewer-about-mmv": "Par šo saskarni",
-	"multimediaviewer-discuss-mmv": "Diskusija",
-	"multimediaviewer-help-mmv": "Palīdzība",
 	"multimediaviewer-optout-mmv": "Deaktivizēt Media Viewer",
 	"multimediaviewer-optin-mmv": "Aktivizēt multimediju skatīkli",
 	"multimediaviewer-optout-pending-mmv": "Atspējo multimediju skatīkli",

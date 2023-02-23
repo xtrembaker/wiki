@@ -25,9 +25,9 @@
 require_once __DIR__ . '/Maintenance.php';
 
 use MediaWiki\MediaWikiServices;
-use Wikimedia\Rdbms\IResultWrapper;
-use Wikimedia\Rdbms\IDatabase;
 use Wikimedia\Rdbms\DBQueryError;
+use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\IResultWrapper;
 
 /**
  * Maintenance script that sends SQL queries from the specified file to the database.
@@ -48,13 +48,14 @@ class MwSql extends Maintenance {
 		$this->addOption( 'wikidb',
 			'The database wiki ID to use if not the current one', false, true );
 		$this->addOption( 'replicadb',
-			'Replica DB server to use instead of the master DB (can be "any")', false, true );
+			'Replica DB server to use instead of the primary DB (can be "any")', false, true );
+		$this->setBatchSize( 100 );
 	}
 
 	public function execute() {
 		global $IP;
 
-		// We wan't to allow "" for the wikidb, meaning don't call select_db()
+		// We want to allow "" for the wikidb, meaning don't call select_db()
 		$wiki = $this->hasOption( 'wikidb' ) ? $this->getOption( 'wikidb' ) : false;
 		// Get the appropriate load balancer (for this wiki)
 		$lbFactory = MediaWikiServices::getInstance()->getDBLoadBalancerFactory();
@@ -64,7 +65,7 @@ class MwSql extends Maintenance {
 			$lb = $lbFactory->getMainLB( $wiki );
 		}
 		// Figure out which server to use
-		$replicaDB = $this->getOption( 'replicadb', $this->getOption( 'slave', '' ) );
+		$replicaDB = $this->getOption( 'replicadb', '' );
 		if ( $replicaDB === 'any' ) {
 			$index = DB_REPLICA;
 		} elseif ( $replicaDB !== '' ) {
@@ -80,15 +81,15 @@ class MwSql extends Maintenance {
 				$this->fatalError( "No replica DB server configured with the name '$replicaDB'." );
 			}
 		} else {
-			$index = DB_MASTER;
+			$index = DB_PRIMARY;
 		}
 
 		$db = $lb->getMaintenanceConnectionRef( $index, [], $wiki );
 		if ( $replicaDB != '' && $db->getLBInfo( 'master' ) !== null ) {
-			$this->fatalError( "The server selected ({$db->getServer()}) is not a replica DB." );
+			$this->fatalError( "Server {$db->getServerName()} is not a replica DB." );
 		}
 
-		if ( $index === DB_MASTER ) {
+		if ( $index === DB_PRIMARY ) {
 			$updater = DatabaseUpdater::newForDB( $db, true, $this );
 			$db->setSchemaVars( $updater->getSchemaVars() );
 		}
@@ -99,20 +100,19 @@ class MwSql extends Maintenance {
 				$this->fatalError( "Unable to open input file" );
 			}
 
-			$error = $db->sourceStream( $file, null, [ $this, 'sqlPrintResult' ] );
+			$error = $db->sourceStream( $file, null, [ $this, 'sqlPrintResult' ], __METHOD__ );
 			if ( $error !== true ) {
 				$this->fatalError( $error );
-			} else {
-				exit( 0 );
 			}
+			return;
 		}
 
 		if ( $this->hasOption( 'query' ) ) {
 			$query = $this->getOption( 'query' );
 			$res = $this->sqlDoQuery( $db, $query, /* dieOnError */ true );
-			wfWaitForSlaves();
-			if ( $this->hasOption( 'status' ) ) {
-				exit( $res ? 0 : 2 );
+			$lbFactory->waitForReplication();
+			if ( $this->hasOption( 'status' ) && !$res ) {
+				$this->fatalError( 'Failed.', 2 );
 			}
 			return;
 		}
@@ -133,6 +133,7 @@ class MwSql extends Maintenance {
 		$prompt = $newPrompt;
 		$doDie = !Maintenance::posix_isatty( 0 );
 		$res = 1;
+		$batchCount = 0;
 		while ( ( $line = Maintenance::readconsole( $prompt ) ) !== false ) {
 			if ( !$line ) {
 				# User simply pressed return key
@@ -148,18 +149,23 @@ class MwSql extends Maintenance {
 				continue;
 			}
 			if ( $historyFile ) {
-				# Delimiter is eated by streamStatementEnd, we add it
+				# Delimiter is eaten by streamStatementEnd, we add it
 				# up in the history (T39020)
 				readline_add_history( $wholeLine . ';' );
 				readline_write_history( $historyFile );
 			}
+			// @phan-suppress-next-line SecurityCheck-SQLInjection
 			$res = $this->sqlDoQuery( $db, $wholeLine, $doDie );
+			if ( $this->getBatchSize() && ++$batchCount >= $this->getBatchSize() ) {
+				$batchCount = 0;
+				$lbFactory->waitForReplication();
+			}
 			$prompt = $newPrompt;
 			$wholeLine = '';
 		}
-		wfWaitForSlaves();
-		if ( $this->hasOption( 'status' ) ) {
-			exit( $res ? 0 : 2 );
+		$lbFactory->waitForReplication();
+		if ( $this->hasOption( 'status' ) && !$res ) {
+			$this->fatalError( 'Failed.', 2 );
 		}
 	}
 
@@ -171,7 +177,7 @@ class MwSql extends Maintenance {
 	 */
 	protected function sqlDoQuery( IDatabase $db, $line, $dieOnError ) {
 		try {
-			$res = $db->query( $line );
+			$res = $db->query( $line, __METHOD__ );
 			return $this->sqlPrintResult( $res, $db );
 		} catch ( DBQueryError $e ) {
 			if ( $dieOnError ) {

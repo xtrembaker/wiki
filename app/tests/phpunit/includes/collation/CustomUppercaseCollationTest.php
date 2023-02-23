@@ -1,19 +1,24 @@
 <?php
 
 /**
+ * TODO convert to a Unit test
+ *
  * @covers CustomUppercaseCollation
  */
-class CustomUppercaseCollationTest extends MediaWikiTestCase {
+class CustomUppercaseCollationTest extends MediaWikiIntegrationTestCase {
 
-	public function setUp() {
-		$this->collation = new CustomUppercaseCollation( [
-			'D',
-			'C',
-			'Cs',
-			'B'
-		], Language::factory( 'en' ) );
-
+	protected function setUp(): void {
 		parent::setUp();
+		$this->collation = new CustomUppercaseCollation(
+			$this->getServiceContainer()->getLanguageFactory(),
+			[
+				'D',
+				'C',
+				'Cs',
+				'B'
+			],
+			'en' // digital transformation language
+		);
 	}
 
 	/**

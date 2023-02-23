@@ -35,6 +35,10 @@ require_once __DIR__ . '/Maintenance.php';
  */
 class UppercaseTitlesForUnicodeTransition extends Maintenance {
 
+	private const MOVE = 0;
+	private const INPLACE_MOVE = 1;
+	private const UPPERCASE = 2;
+
 	/** @var bool */
 	private $run = false;
 
@@ -98,7 +102,10 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 		$this->addOption( 'tag', 'Change tag to apply when moving pages.', false, true );
 		$this->addOption( 'tables', 'Comma-separated list of database tables to process.', false, true );
 		$this->addOption(
-			'userlist', 'Filename to which to output usernames needing rename.', false, true
+			'userlist', 'Filename to which to output usernames needing rename. ' .
+			'This file can then be used directly by renameInvalidUsernames.php maintenance script',
+			false,
+			true
 		);
 		$this->setBatchSize( 1000 );
 	}
@@ -107,12 +114,12 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 		$this->run = $this->getOption( 'run', false );
 
 		if ( $this->run ) {
-			$username = $this->getOption( 'user', 'Maintenance script' );
+			$username = $this->getOption( 'user', User::MAINTENANCE_SCRIPT_USER );
 			$steal = $this->getOption( 'steal', false );
 			$this->user = User::newSystemUser( $username, [ 'steal' => $steal ] );
 			if ( !$this->user ) {
 				$user = User::newFromName( $username );
-				if ( !$steal && $user && $user->isLoggedIn() ) {
+				if ( !$steal && $user && $user->isRegistered() ) {
 					$this->fatalError( "User $username already exists.\n"
 						. "Use --steal if you really want to steal it from the human who currently owns it."
 					);
@@ -169,16 +176,26 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 			$this->fatalError( "Charmap file $charmapFile did not contain any usable character mappings." );
 		}
 
-		$db = $this->getDB( $this->run ? DB_MASTER : DB_REPLICA );
-		$this->processTable( $db, true, 'page', 'page_namespace', 'page_title', [ 'page_id' ] );
-		$this->processTable( $db, true, 'image', NS_FILE, 'img_name', [] );
+		$db = $this->getDB( $this->run ? DB_PRIMARY : DB_REPLICA );
+
+		// Process inplace moves first, before actual moves, so mungeTitle() doesn't get confused
 		$this->processTable(
-			$db, false, 'archive', 'ar_namespace', 'ar_title', [ 'ar_timestamp', 'ar_id' ]
+			$db, self::INPLACE_MOVE, 'archive', 'ar_namespace', 'ar_title', [ 'ar_timestamp', 'ar_id' ]
 		);
-		$this->processTable( $db, false, 'filearchive', NS_FILE, 'fa_name', [ 'fa_timestamp', 'fa_id' ] );
-		$this->processTable( $db, false, 'logging', 'log_namespace', 'log_title', [ 'log_id' ] );
-		$this->processTable( $db, false, 'redirect', 'rd_namespace', 'rd_title', [ 'rd_from' ] );
-		$this->processTable( $db, false, 'protected_titles', 'pt_namespace', 'pt_title', [] );
+		$this->processTable(
+			$db, self::INPLACE_MOVE, 'filearchive', NS_FILE, 'fa_name', [ 'fa_timestamp', 'fa_id' ]
+		);
+		$this->processTable(
+			$db, self::INPLACE_MOVE, 'logging', 'log_namespace', 'log_title', [ 'log_id' ]
+		);
+		$this->processTable(
+			$db, self::INPLACE_MOVE, 'protected_titles', 'pt_namespace', 'pt_title', []
+		);
+		$this->processTable( $db, self::MOVE, 'page', 'page_namespace', 'page_title', [ 'page_id' ] );
+		$this->processTable( $db, self::MOVE, 'image', NS_FILE, 'img_name', [] );
+		$this->processTable(
+			$db, self::UPPERCASE, 'redirect', 'rd_namespace', 'rd_title', [ 'rd_from' ]
+		);
 		$this->processUsers( $db );
 	}
 
@@ -218,11 +235,11 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 			$nsinfo = MediaWikiServices::getInstance()->getNamespaceInfo();
 			$this->namespaces = array_filter(
 				array_keys( $nsinfo->getCanonicalNamespaces() ),
-				function ( $ns ) use ( $nsinfo ) {
+				static function ( $ns ) use ( $nsinfo ) {
 					return $nsinfo->isMovable( $ns ) && $nsinfo->isCapitalized( $ns );
 				}
 			);
-			usort( $this->namespaces, function ( $ns1, $ns2 ) use ( $nsinfo ) {
+			usort( $this->namespaces, static function ( $ns1, $ns2 ) use ( $nsinfo ) {
 				if ( $ns1 === $ns2 ) {
 					return 0;
 				}
@@ -291,15 +308,16 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 		if ( $this->isUserPage( $db, $newTitle->getNamespace(), $newTitle->getText() ) ) {
 			$munge = 'Target title\'s user exists';
 		} else {
-			$mp = new MovePage( $oldTitle, $newTitle );
-			$status = $mp->isValidMove();
-			if ( !$status->isOK() && $status->hasMessage( 'articleexists' ) ) {
+			$mpFactory = MediaWikiServices::getInstance()->getMovePageFactory();
+			$status = $mpFactory->newMovePage( $oldTitle, $newTitle )->isValidMove();
+			if ( !$status->isOK() && (
+				$status->hasMessage( 'articleexists' ) || $status->hasMessage( 'redirectexists' ) ) ) {
 				$munge = 'Target title exists';
 			}
 		}
 		if ( !$munge ) {
 			return true;
-		};
+		}
 
 		if ( $this->prefix !== null ) {
 			$newTitle = Title::makeTitle(
@@ -307,7 +325,16 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 				$this->prefix . $oldTitle->getPrefixedText() . ( $this->suffix ?? '' )
 			);
 		} elseif ( $this->suffix !== null ) {
-			$newTitle = Title::makeTitle( $newTitle->getNamespace(), $newTitle->getText() . $this->suffix );
+			$dbkey = $newTitle->getText();
+			$i = $newTitle->getNamespace() === NS_FILE ? strrpos( $dbkey, '.' ) : false;
+			if ( $i !== false ) {
+				$newTitle = Title::makeTitle(
+					$newTitle->getNamespace(),
+					substr( $dbkey, 0, $i ) . $this->suffix . substr( $dbkey, $i )
+				);
+			} else {
+				$newTitle = Title::makeTitle( $newTitle->getNamespace(), $dbkey . $this->suffix );
+			}
 		} else {
 			$this->error(
 				"Cannot move {$oldTitle->getPrefixedText()} → $nt: "
@@ -316,7 +343,7 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 			return false;
 		}
 
-		if ( !$newTitle->isValid() ) {
+		if ( !$newTitle->canExist() ) {
 			$this->error(
 				"Cannot move {$oldTitle->getPrefixedText()} → $nt: "
 				. "$munge and munged title '{$newTitle->getPrefixedText()}' is not valid"
@@ -357,12 +384,15 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 
 		$oldTitle = Title::makeTitle( $ns, $title );
 		$newTitle = Title::makeTitle( $ns, $this->charmap[$char] . mb_substr( $title, 1 ) );
+		$deletionReason = $this->shouldDelete( $db, $oldTitle, $newTitle );
 		if ( !$this->mungeTitle( $db, $oldTitle, $newTitle ) ) {
 			return false;
 		}
 
-		$mp = new MovePage( $oldTitle, $newTitle );
-		$status = $mp->isValidMove();
+		$services = MediaWikiServices::getInstance();
+		$mpFactory = $services->getMovePageFactory();
+		$movePage = $mpFactory->newMovePage( $oldTitle, $newTitle );
+		$status = $movePage->isValidMove();
 		if ( !$status->isOK() ) {
 			$this->error(
 				"Invalid move {$oldTitle->getPrefixedText()} → {$newTitle->getPrefixedText()}: "
@@ -375,28 +405,129 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 			$this->output(
 				"Would rename {$oldTitle->getPrefixedText()} → {$newTitle->getPrefixedText()}\n"
 			);
+			if ( $deletionReason ) {
+				$this->output(
+					"Would then delete {$newTitle->getPrefixedText()}: $deletionReason\n"
+				);
+			}
 			return true;
 		}
 
-		$status = $mp->move( $this->user, $this->reason, false, $this->tags );
+		$status = $movePage->move( $this->user, $this->reason, false, $this->tags );
 		if ( !$status->isOK() ) {
 			$this->error(
 				"Move {$oldTitle->getPrefixedText()} → {$newTitle->getPrefixedText()} failed: "
 				. $status->getMessage( false, false, 'en' )->useDatabase( false )->plain()
 			);
 		}
-		return $status->isOK();
+		$this->output( "Renamed {$oldTitle->getPrefixedText()} → {$newTitle->getPrefixedText()}\n" );
+
+		// The move created a log entry under the old invalid title. Fix it.
+		$db->update(
+			'logging',
+			[
+				'log_title' => $this->charmap[$char] . mb_substr( $title, 1 ),
+			],
+			[
+				'log_namespace' => $oldTitle->getNamespace(),
+				'log_title' => $oldTitle->getDBkey(),
+				'log_page' => $newTitle->getArticleID(),
+			],
+			__METHOD__
+		);
+
+		if ( $deletionReason !== null ) {
+			$page = $services->getWikiPageFactory()->newFromTitle( $newTitle );
+			$error = '';
+			$status = $page->doDeleteArticleReal(
+				$deletionReason,
+				$this->user,
+				false, // don't suppress
+				null, // unused
+				$error,
+				null, // unused
+				[], // tags
+				'delete',
+				true // immediate
+			);
+			if ( !$status->isOK() ) {
+				$this->error(
+					"Deletion of {$newTitle->getPrefixedText()} failed: "
+					. $status->getMessage( false, false, 'en' )->useDatabase( false )->plain()
+				);
+				return false;
+			}
+			$this->output( "Deleted {$newTitle->getPrefixedText()}\n" );
+		}
+
+		return true;
+	}
+
+	/**
+	 * Determine whether the old title should be deleted
+	 *
+	 * If it's already a redirect to the new title, or the old and new titles
+	 * are redirects to the same place, there's no point in keeping it.
+	 *
+	 * Note the caller will still rename it before deleting it, so the archive
+	 * and logging rows wind up in a sensible place.
+	 *
+	 * @param IDatabase $db
+	 * @param Title $oldTitle
+	 * @param Title $newTitle
+	 * @return string|null Deletion reason, or null if it shouldn't be deleted
+	 */
+	private function shouldDelete( IDatabase $db, Title $oldTitle, Title $newTitle ) {
+		$oldRow = $db->selectRow(
+			[ 'page', 'redirect' ],
+			[ 'ns' => 'rd_namespace', 'title' => 'rd_title' ],
+			[ 'page_namespace' => $oldTitle->getNamespace(), 'page_title' => $oldTitle->getDBkey() ],
+			__METHOD__,
+			[],
+			[ 'redirect' => [ 'JOIN', 'rd_from = page_id' ] ]
+		);
+		if ( !$oldRow ) {
+			// Not a redirect
+			return null;
+		}
+
+		if ( (int)$oldRow->ns === $newTitle->getNamespace() &&
+			$oldRow->title === $newTitle->getDBkey()
+		) {
+			return $this->reason . ", and found that [[{$oldTitle->getPrefixedText()}]] is "
+				. "already a redirect to [[{$newTitle->getPrefixedText()}]]";
+		} else {
+			$newRow = $db->selectRow(
+				[ 'page', 'redirect' ],
+				[ 'ns' => 'rd_namespace', 'title' => 'rd_title' ],
+				[ 'page_namespace' => $newTitle->getNamespace(), 'page_title' => $newTitle->getDBkey() ],
+				__METHOD__,
+				[],
+				[ 'redirect' => [ 'JOIN', 'rd_from = page_id' ] ]
+			);
+			if ( $newRow && $oldRow->ns === $newRow->ns && $oldRow->title === $newRow->title ) {
+				$nt = Title::makeTitle( $newRow->ns, $newRow->title );
+				return $this->reason . ", and found that [[{$oldTitle->getPrefixedText()}]] and "
+					. "[[{$newTitle->getPrefixedText()}]] both redirect to [[{$nt->getPrefixedText()}]].";
+			}
+		}
+
+		return null;
 	}
 
 	/**
 	 * Directly update a database row
 	 * @param IDatabase $db Database handle
+	 * @param int $op Operation to perform
+	 *  - self::INPLACE_MOVE: Directly update the database table to move the page
+	 *  - self::UPPERCASE: Rewrite the table to point to the new uppercase title
 	 * @param string $table
 	 * @param string|int $nsField
 	 * @param string $titleField
+	 * @param stdClass $row
 	 * @return bool|null True on success, false on error, null if skipped
 	 */
-	private function doUpdate( IDatabase $db, $table, $nsField, $titleField, $row ) {
+	private function doUpdate( IDatabase $db, $op, $table, $nsField, $titleField, $row ) {
 		$ns = is_int( $nsField ) ? $nsField : (int)$row->$nsField;
 		$title = $row->$titleField;
 
@@ -409,14 +540,9 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 			return false;
 		}
 
-		if ( $this->isUserPage( $db, $ns, $title ) ) {
-			$this->output( "... Skipping user page NS$ns $title\n" );
-			return null;
-		}
-
 		$oldTitle = Title::makeTitle( $ns, $title );
 		$newTitle = Title::makeTitle( $ns, $this->charmap[$char] . mb_substr( $title, 1 ) );
-		if ( !$this->mungeTitle( $db, $oldTitle, $newTitle ) ) {
+		if ( $op !== self::UPPERCASE && !$this->mungeTitle( $db, $oldTitle, $newTitle ) ) {
 			return false;
 		}
 
@@ -430,6 +556,8 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 				(array)$row,
 				__METHOD__
 			);
+			$r = json_encode( $row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+			$this->output( "Set $r to {$newTitle->getPrefixedText()}\n" );
 		} else {
 			$r = json_encode( $row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
 			$this->output( "Would set $r to {$newTitle->getPrefixedText()}\n" );
@@ -441,14 +569,17 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 	/**
 	 * Rename entries in other tables
 	 * @param IDatabase $db Database handle
-	 * @param bool $doMove Whether to use MovePage or direct table manipulation
+	 * @param int $op Operation to perform
+	 *  - self::MOVE: Use MovePage to move the page
+	 *  - self::INPLACE_MOVE: Directly update the database table to move the page
+	 *  - self::UPPERCASE: Rewrite the table to point to the new uppercase title
 	 * @param string $table
 	 * @param string|int $nsField
 	 * @param string $titleField
 	 * @param string[] $pkFields Additional fields to match a unique index
 	 *  starting with $nsField and $titleField.
 	 */
-	private function processTable( IDatabase $db, $doMove, $table, $nsField, $titleField, $pkFields ) {
+	private function processTable( IDatabase $db, $op, $table, $nsField, $titleField, $pkFields ) {
 		if ( $this->tables !== null && !in_array( $table, $this->tables, true ) ) {
 			$this->output( "Skipping table `$table`, not in --tables.\n" );
 			return;
@@ -504,11 +635,11 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 						}
 						$cont = [ $cont ];
 
-						if ( $doMove ) {
+						if ( $op === self::MOVE ) {
 							$ns = is_int( $nsField ) ? $nsField : (int)$row->$nsField;
 							$ret = $this->doMove( $db, $ns, $row->$titleField );
 						} else {
-							$ret = $this->doUpdate( $db, $table, $nsField, $titleField, $row );
+							$ret = $this->doUpdate( $db, $op, $table, $nsField, $titleField, $row );
 						}
 						if ( $ret === true ) {
 							$count++;
@@ -518,6 +649,7 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 					}
 
 					if ( $this->run ) {
+						// @phan-suppress-next-line PhanPossiblyUndeclaredVariable rows contains at least one item
 						$r = $cont ? json_encode( $row, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE ) : '<end>';
 						$this->output( "... $table: $count renames, $errors errors at $r\n" );
 						$lbFactory->waitForReplication(
@@ -543,7 +675,7 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 			return;
 		}
 
-		$fh = fopen( $userlistFile, 'wb' );
+		$fh = fopen( $userlistFile, 'ab' );
 		if ( !$fh ) {
 			$this->error( "Could not open user list file $userlistFile" );
 			return;
@@ -555,32 +687,34 @@ class UppercaseTitlesForUnicodeTransition extends Maintenance {
 		foreach ( $this->getLikeBatches( $db, 'user_name' ) as $like ) {
 			$cont = [];
 			while ( true ) {
-				$names = $db->selectFieldValues(
+				$rows = $db->select(
 					'user',
-					'user_name',
+					[ 'user_id', 'user_name' ],
 					array_merge( [ $like ], $cont ),
 					__METHOD__,
 					[ 'ORDER BY' => 'user_name', 'LIMIT' => $batchSize ]
 				);
-				if ( !$names ) {
+
+				if ( !$rows->numRows() ) {
 					break;
 				}
 
-				$last = end( $names );
-				$cont = [ 'user_name > ' . $db->addQuotes( $last ) ];
-				foreach ( $names as $name ) {
-					$char = mb_substr( $name, 0, 1 );
+				foreach ( $rows as $row ) {
+					$char = mb_substr( $row->user_name, 0, 1 );
 					if ( !array_key_exists( $char, $this->charmap ) ) {
 						$this->error(
-							"Query returned $name, but user name does not begin with a character in the charmap."
+							"Query returned $row->user_name, but user name does not " .
+							"begin with a character in the charmap."
 						);
 						continue;
 					}
-					$newName = $this->charmap[$char] . mb_substr( $name, 1 );
-					fprintf( $fh, "%s\t%s\n", $name, $newName );
+					$newName = $this->charmap[$char] . mb_substr( $row->user_name, 1 );
+					fprintf( $fh, "%s\t%s\t%s\n", WikiMap::getCurrentWikiId(), $row->user_id, $newName );
 					$count++;
+					$cont = [ 'user_name > ' . $db->addQuotes( $row->user_name ) ];
 				}
-				$this->output( "... at $last, $count names so far\n" );
+				// @phan-suppress-next-line PhanPossiblyUndeclaredVariable rows contains at least one item
+				$this->output( "... at $row->user_name, $count names so far\n" );
 			}
 		}
 

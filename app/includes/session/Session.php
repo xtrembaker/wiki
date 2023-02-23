@@ -23,12 +23,14 @@
 
 namespace MediaWiki\Session;
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
 use Psr\Log\LoggerInterface;
 use User;
 use WebRequest;
 
 /**
- * Manages data for an an authenticated session
+ * Manages data for an authenticated session
  *
  * A Session represents the fact that the current HTTP request is part of a
  * session. There are two broad types of Sessions, based on whether they
@@ -45,7 +47,7 @@ use WebRequest;
  * @ingroup Session
  * @since 1.27
  */
-final class Session implements \Countable, \Iterator, \ArrayAccess {
+class Session implements \Countable, \Iterator, \ArrayAccess {
 	/** @var null|string[] Encryption algorithm to use */
 	private static $encryptionAlgorithm = null;
 
@@ -83,7 +85,7 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 
 	/**
 	 * Returns the SessionId object
-	 * @private For internal use by WebRequest
+	 * @internal For internal use by WebRequest
 	 * @return SessionId
 	 */
 	public function getSessionId() {
@@ -209,7 +211,10 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/**
-	 * Whether HTTPS should be forced
+	 * Get the expected value of the forceHTTPS cookie. This reflects whether
+	 * session cookies were sent with the Secure attribute. If $wgForceHTTPS
+	 * is true, the forceHTTPS cookie is not sent and this value is ignored.
+	 *
 	 * @return bool
 	 */
 	public function shouldForceHTTPS() {
@@ -217,7 +222,10 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/**
-	 * Set whether HTTPS should be forced
+	 * Set the value of the forceHTTPS cookie. This reflects whether session
+	 * cookies were sent with the Secure attribute. If $wgForceHTTPS is true,
+	 * the forceHTTPS cookie is not sent, and this value is ignored.
+	 *
 	 * @param bool $force
 	 */
 	public function setForceHTTPS( $force ) {
@@ -233,7 +241,6 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/**
-	 * Set the "logged out" timestamp
 	 * @param int $ts
 	 */
 	public function setLoggedOutTimestamp( $ts ) {
@@ -242,7 +249,7 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 
 	/**
 	 * Fetch provider metadata
-	 * @protected For use by SessionProvider subclasses only
+	 * @note For use by SessionProvider subclasses only
 	 * @return mixed
 	 */
 	public function getProviderMetadata() {
@@ -265,8 +272,6 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/**
-	 * Renew the session
-	 *
 	 * Resets the TTL in the backend store if the session is near expiring, and
 	 * re-persists the session to any active WebRequests if persistent.
 	 */
@@ -336,6 +341,21 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/**
+	 * Check if a CSRF token is set for the session
+	 *
+	 * @since 1.37
+	 * @param string $key Token key
+	 * @return bool
+	 */
+	public function hasToken( string $key = 'default' ): bool {
+		$secrets = $this->get( 'wsTokenSecrets' );
+		if ( !is_array( $secrets ) ) {
+			return false;
+		}
+		return isset( $secrets[$key] ) && is_string( $secrets[$key] );
+	}
+
+	/**
 	 * Fetch a CSRF token from the session
 	 *
 	 * Note that this does not persist the session, which you'll probably want
@@ -392,9 +412,11 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	 * @return string[] Encryption key, HMAC key
 	 */
 	private function getSecretKeys() {
-		global $wgSessionSecret, $wgSecretKey, $wgSessionPbkdf2Iterations;
-
-		$wikiSecret = $wgSessionSecret ?: $wgSecretKey;
+		$mainConfig = MediaWikiServices::getInstance()->getMainConfig();
+		$sessionSecret = $mainConfig->get( MainConfigNames::SessionSecret );
+		$secretKey = $mainConfig->get( MainConfigNames::SecretKey );
+		$sessionPbkdf2Iterations = $mainConfig->get( MainConfigNames::SessionPbkdf2Iterations );
+		$wikiSecret = $sessionSecret ?: $secretKey;
 		$userSecret = $this->get( 'wsSessionSecret', null );
 		if ( $userSecret === null ) {
 			$userSecret = \MWCryptRand::generateHex( 32 );
@@ -402,7 +424,7 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 		}
 		$iterations = $this->get( 'wsSessionPbkdf2Iterations', null );
 		if ( $iterations === null ) {
-			$iterations = $wgSessionPbkdf2Iterations;
+			$iterations = $sessionPbkdf2Iterations;
 			$this->set( 'wsSessionPbkdf2Iterations', $iterations );
 		}
 
@@ -418,7 +440,8 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	 * @return array
 	 */
 	private static function getEncryptionAlgorithm() {
-		global $wgSessionInsecureSecrets;
+		$sessionInsecureSecrets = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::SessionInsecureSecrets );
 
 		if ( self::$encryptionAlgorithm === null ) {
 			if ( function_exists( 'openssl_encrypt' ) ) {
@@ -433,7 +456,7 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 				}
 			}
 
-			if ( $wgSessionInsecureSecrets ) {
+			if ( $sessionInsecureSecrets ) {
 				// @todo: import a pure-PHP library for AES instead of this
 				self::$encryptionAlgorithm = [ 'insecure' ];
 				return self::$encryptionAlgorithm;
@@ -569,8 +592,6 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/**
-	 * Save the session
-	 *
 	 * This will update the backend data and might re-persist the session
 	 * if needed.
 	 */
@@ -578,43 +599,45 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 		$this->backend->save();
 	}
 
-	/**
-	 * @name Interface methods
+	// region   Interface methods
+	/** @name   Interface methods
 	 * @{
 	 */
 
 	/** @inheritDoc */
-	public function count() {
+	public function count(): int {
 		$data = &$this->backend->getData();
 		return count( $data );
 	}
 
 	/** @inheritDoc */
+	#[\ReturnTypeWillChange]
 	public function current() {
 		$data = &$this->backend->getData();
 		return current( $data );
 	}
 
 	/** @inheritDoc */
+	#[\ReturnTypeWillChange]
 	public function key() {
 		$data = &$this->backend->getData();
 		return key( $data );
 	}
 
 	/** @inheritDoc */
-	public function next() {
+	public function next(): void {
 		$data = &$this->backend->getData();
 		next( $data );
 	}
 
 	/** @inheritDoc */
-	public function rewind() {
+	public function rewind(): void {
 		$data = &$this->backend->getData();
 		reset( $data );
 	}
 
 	/** @inheritDoc */
-	public function valid() {
+	public function valid(): bool {
 		$data = &$this->backend->getData();
 		return key( $data ) !== null;
 	}
@@ -624,7 +647,7 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	 *  rather than array_key_exists(). So do that.
 	 * @inheritDoc
 	 */
-	public function offsetExists( $offset ) {
+	public function offsetExists( $offset ): bool {
 		$data = &$this->backend->getData();
 		return isset( $data[$offset] );
 	}
@@ -637,6 +660,7 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	 *  be created with a null value, and does not raise a PHP warning.
 	 * @inheritDoc
 	 */
+	#[\ReturnTypeWillChange]
 	public function &offsetGet( $offset ) {
 		$data = &$this->backend->getData();
 		if ( !array_key_exists( $offset, $data ) ) {
@@ -647,15 +671,15 @@ final class Session implements \Countable, \Iterator, \ArrayAccess {
 	}
 
 	/** @inheritDoc */
-	public function offsetSet( $offset, $value ) {
+	public function offsetSet( $offset, $value ): void {
 		$this->set( $offset, $value );
 	}
 
 	/** @inheritDoc */
-	public function offsetUnset( $offset ) {
+	public function offsetUnset( $offset ): void {
 		$this->remove( $offset );
 	}
 
 	/** @} */
-
+	// endregion  -- end of Interface methods
 }

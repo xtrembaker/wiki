@@ -1,6 +1,6 @@
 <?php
 
-use MediaWiki\MediaWikiServices;
+use MediaWiki\MainConfigNames;
 
 /**
  * Test class for Export methods.
@@ -11,11 +11,9 @@ use MediaWiki\MediaWikiServices;
  */
 class ExportTest extends MediaWikiLangTestCase {
 
-	protected function setUp() {
+	protected function setUp(): void {
 		parent::setUp();
-		$this->setMwGlobals( [
-			'wgCapitalLinks' => true,
-		] );
+		$this->overrideConfigValue( MainConfigNames::CapitalLinks, true );
 	}
 
 	/**
@@ -24,10 +22,10 @@ class ExportTest extends MediaWikiLangTestCase {
 	public function testPageByTitle() {
 		$pageTitle = 'UTPage';
 
-		$exporter = new WikiExporter(
-			$this->db,
-			WikiExporter::FULL
-		);
+		$services = $this->getServiceContainer();
+		$exporter = $services
+			->getWikiExporterFactory()
+			->getWikiExporter( $this->db, WikiExporter::FULL );
 
 		$title = Title::newFromText( $pageTitle );
 
@@ -37,23 +35,25 @@ class ExportTest extends MediaWikiLangTestCase {
 		$exporter->pageByTitle( $title );
 		$exporter->closeStream();
 
+		// phpcs:ignore Generic.PHP.NoSilencedErrors -- suppress deprecation per T268847
+		$oldDisable = @libxml_disable_entity_loader( true );
+
 		// This throws error if invalid xml output
 		$xmlObject = simplexml_load_string( $sink );
+
+		// phpcs:ignore Generic.PHP.NoSilencedErrors
+		@libxml_disable_entity_loader( $oldDisable );
 
 		/**
 		 * Check namespaces match xml
 		 */
-		$xmlNamespaces = (array)$xmlObject->siteinfo->namespaces->namespace;
-		$xmlNamespaces = str_replace( ' ', '_', $xmlNamespaces );
-		unset( $xmlNamespaces[ '@attributes' ] );
-		foreach ( $xmlNamespaces as &$namespaceObject ) {
-			if ( is_object( $namespaceObject ) ) {
-				$namespaceObject = '';
-			}
+		foreach ( $xmlObject->siteinfo->namespaces->children() as $namespace ) {
+			// Get the text content of the SimpleXMLElement
+			$xmlNamespaces[] = (string)$namespace;
 		}
+		$xmlNamespaces = str_replace( ' ', '_', $xmlNamespaces );
 
-		$actualNamespaces = (array)MediaWikiServices::getInstance()->getContentLanguage()->
-			getNamespaces();
+		$actualNamespaces = (array)$services->getContentLanguage()->getNamespaces();
 		$actualNamespaces = array_values( $actualNamespaces );
 		$this->assertEquals( $actualNamespaces, $xmlNamespaces );
 

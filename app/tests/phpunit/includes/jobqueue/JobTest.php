@@ -1,9 +1,11 @@
 <?php
 
+use MediaWiki\MainConfigNames;
+
 /**
  * @author Addshore
  */
-class JobTest extends MediaWikiTestCase {
+class JobTest extends MediaWikiIntegrationTestCase {
 
 	/**
 	 * @dataProvider provideTestToString
@@ -14,15 +16,15 @@ class JobTest extends MediaWikiTestCase {
 	 * @covers Job::toString
 	 */
 	public function testToString( $job, $expected ) {
+		$this->overrideConfigValue( MainConfigNames::LanguageCode, 'en' );
 		$this->assertEquals( $expected, $job->toString() );
 	}
 
 	public function provideTestToString() {
 		$mockToStringObj = $this->getMockBuilder( stdClass::class )
-			->setMethods( [ '__toString' ] )->getMock();
-		$mockToStringObj->expects( $this->any() )
-			->method( '__toString' )
-			->will( $this->returnValue( '{STRING_OBJ_VAL}' ) );
+			->addMethods( [ '__toString' ] )->getMock();
+		$mockToStringObj->method( '__toString' )
+			->willReturn( '{STRING_OBJ_VAL}' );
 
 		$requestId = 'requestId=' . WebRequest::getRequestId();
 
@@ -44,7 +46,7 @@ class JobTest extends MediaWikiTestCase {
 				'someCommand Special: 0=val1 1=val2 ' . $requestId
 			],
 			[
-				$this->getMockJob( [ new stdClass() ] ),
+				$this->getMockJob( [ (object)[] ] ),
 				'someCommand Special: 0=object(stdClass) ' . $requestId
 			],
 			[
@@ -95,14 +97,13 @@ class JobTest extends MediaWikiTestCase {
 	 */
 	public function testInvalidParamsArgument() {
 		$params = false;
-		$this->setExpectedException( InvalidArgumentException::class, '$params must be an array' );
+		$this->expectException( InvalidArgumentException::class );
+		$this->expectExceptionMessage( '$params must be an array' );
 		$job = $this->getMockJob( $params );
 	}
 
 	/**
 	 * @dataProvider provideTestJobFactory
-	 *
-	 * @param mixed $handler
 	 *
 	 * @covers Job::factory
 	 */
@@ -120,7 +121,7 @@ class JobTest extends MediaWikiTestCase {
 	public function provideTestJobFactory() {
 		return [
 			'class name' => [ 'NullJob' ],
-			'closure' => [ function ( Title $title, array $params ) {
+			'closure' => [ static function ( Title $title, array $params ) {
 				return Job::factory( 'null', $title, $params );
 			} ],
 			'function' => [ [ $this, 'newNullJob' ] ],
@@ -168,10 +169,10 @@ class JobTest extends MediaWikiTestCase {
 	 * @covers Job::__construct()
 	 */
 	public function testJobSignatureTitleBased() {
-		$testPage = Title::makeTitle( NS_PROJECT, 'x' );
+		$testPage = Title::makeTitle( NS_PROJECT, 'X' );
 		$blankPage = Title::makeTitle( NS_SPECIAL, 'Blankpage' );
 		$params = [ 'z' => 1, 'causeAction' => 'unknown', 'causeAgent' => 'unknown' ];
-		$paramsWithTitle = $params + [ 'namespace' => NS_PROJECT, 'title' => 'x' ];
+		$paramsWithTitle = $params + [ 'namespace' => NS_PROJECT, 'title' => 'X' ];
 		$paramsWithBlankpage = $params + [ 'namespace' => NS_SPECIAL, 'title' => 'Blankpage' ];
 
 		$job = new RefreshLinksJob( $testPage, $params );
@@ -179,15 +180,15 @@ class JobTest extends MediaWikiTestCase {
 		$this->assertTrue( $testPage->equals( $job->getTitle() ) );
 		$this->assertJobParamsMatch( $job, $paramsWithTitle );
 
-		$job = Job::factory( 'refreshLinks', $testPage, $params );
+		$job = Job::factory( 'htmlCacheUpdate', $testPage, $params );
 		$this->assertEquals( $testPage->getPrefixedText(), $job->getTitle()->getPrefixedText() );
 		$this->assertJobParamsMatch( $job, $paramsWithTitle );
 
-		$job = Job::factory( 'refreshLinks', $paramsWithTitle );
+		$job = Job::factory( 'htmlCacheUpdate', $paramsWithTitle );
 		$this->assertEquals( $testPage->getPrefixedText(), $job->getTitle()->getPrefixedText() );
 		$this->assertJobParamsMatch( $job, $paramsWithTitle );
 
-		$job = Job::factory( 'refreshLinks', $params );
+		$job = Job::factory( 'htmlCacheUpdate', $params );
 		$this->assertTrue( $blankPage->equals( $job->getTitle() ) );
 		$this->assertJobParamsMatch( $job, $paramsWithBlankpage );
 	}
@@ -197,7 +198,7 @@ class JobTest extends MediaWikiTestCase {
 	 * @covers Job::__construct()
 	 */
 	public function testJobSignatureTitleBasedIncomplete() {
-		$testPage = Title::makeTitle( NS_PROJECT, 'x' );
+		$testPage = Title::makeTitle( NS_PROJECT, 'X' );
 		$blankTitle = Title::makeTitle( NS_SPECIAL, '' );
 		$params = [ 'z' => 1, 'causeAction' => 'unknown', 'causeAgent' => 'unknown' ];
 

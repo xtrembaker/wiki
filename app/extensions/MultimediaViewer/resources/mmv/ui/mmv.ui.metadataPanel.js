@@ -53,7 +53,7 @@
 	/**
 	 * Maximum number of restriction icons before default icon is used
 	 *
-	 * @property MAX_RESTRICT
+	 * @property {number} MAX_RESTRICT
 	 * @static
 	 */
 	MetadataPanel.MAX_RESTRICT = 4;
@@ -105,10 +105,8 @@
 		} ).on( 'mmv-metadata-close.mmv-mp', function () {
 			panel.hideTruncatedText();
 		} ).on( 'mouseleave.mmv-mp', function () {
-			var duration;
-
 			if ( panel.isFullscreened() ) {
-				duration = parseFloat( panel.$container.css( 'transition-duration' ) ) * 1000 || 0;
+				var duration = parseFloat( panel.$container.css( 'transition-duration' ) ) * 1000 || 0;
 				panel.panelShrinkTimeout = setTimeout( function () {
 					panel.hideTruncatedText();
 				}, duration );
@@ -262,20 +260,11 @@
 	MPP.initializeCredit = function () {
 		this.$credit = $( '<p>' )
 			.addClass( 'mw-mmv-credit empty' )
-			.appendTo( this.$imageMetadataLeft )
-			.on( 'click.mmv-mp', '.mw-mmv-credit-fallback', function () {
-				mw.mmv.actionLogger.log( 'author-page' );
-			} );
+			.appendTo( this.$imageMetadataLeft );
 
 		// we need an inline container for tipsy, otherwise it would be centered weirdly
 		this.$authorAndSource = $( '<span>' )
-			.addClass( 'mw-mmv-source-author' )
-			.on( 'click', '.mw-mmv-author a', function () {
-				mw.mmv.actionLogger.log( 'author-page' );
-			} )
-			.on( 'click', '.mw-mmv-source a', function () {
-				mw.mmv.actionLogger.log( 'source-page' );
-			} );
+			.addClass( 'mw-mmv-source-author' );
 
 		this.creditField = new mw.mmv.ui.TruncatableTextField(
 			this.$credit,
@@ -325,10 +314,7 @@
 		this.$license = $( '<a>' )
 			.addClass( 'mw-mmv-license' )
 			.prop( 'href', '#' )
-			.appendTo( this.$licenseLi )
-			.on( 'click', function () {
-				mw.mmv.actionLogger.log( 'license-page' );
-			} );
+			.appendTo( this.$licenseLi );
 
 		this.$restrictions = $( '<span>' )
 			.addClass( 'mw-mmv-restrictions' )
@@ -390,42 +376,22 @@
 
 		this.$location = $( '<a>' )
 			.addClass( 'mw-mmv-location' )
-			.appendTo( this.$locationLi )
-			.on( 'click', function () { mw.mmv.actionLogger.log( 'location-page' ); } );
+			.appendTo( this.$locationLi );
 	};
 
 	/**
 	 * Initializes two about links at the bottom of the panel.
 	 */
 	MPP.initializeAboutLinks = function () {
-		var separator = ' | ';
-
 		this.$mmvAboutLink = $( '<a>' )
 			.prop( 'href', mw.config.get( 'wgMultimediaViewer' ).infoLink )
 			.text( mw.message( 'multimediaviewer-about-mmv' ).text() )
-			.addClass( 'mw-mmv-about-link' )
-			.on( 'click', function () { mw.mmv.actionLogger.log( 'about-page' ); } );
-
-		this.$mmvDiscussLink = $( '<a>' )
-			.prop( 'href', mw.config.get( 'wgMultimediaViewer' ).discussionLink )
-			.text( mw.message( 'multimediaviewer-discuss-mmv' ).text() )
-			.addClass( 'mw-mmv-discuss-link' )
-			.on( 'click', function () { mw.mmv.actionLogger.log( 'discuss-page' ); } );
-
-		this.$mmvHelpLink = $( '<a>' )
-			.prop( 'href', mw.config.get( 'wgMultimediaViewer' ).helpLink )
-			.text( mw.message( 'multimediaviewer-help-mmv' ).text() )
-			.addClass( 'mw-mmv-help-link' )
-			.on( 'click', function () { mw.mmv.actionLogger.log( 'help-page' ); } );
+			.addClass( 'mw-mmv-about-link' );
 
 		this.$mmvAboutLinks = $( '<div>' )
 			.addClass( 'mw-mmv-about-links' )
 			.append(
-				this.$mmvAboutLink,
-				separator,
-				this.$mmvDiscussLink,
-				separator,
-				this.$mmvHelpLink
+				this.$mmvAboutLink
 			)
 			.appendTo( this.$imageMetadata );
 	};
@@ -458,14 +424,14 @@
 
 	/**
 	 * Sets the upload or creation date and time in the panel
-	 *f
+	 *
 	 * @param {string} date The formatted date to set.
 	 * @param {boolean} created Whether this is the creation date
 	 */
 	MPP.setDateTime = function ( date, created ) {
 		this.$datetime.text(
 			mw.message(
-				'multimediaviewer-datetime-' + ( created ? 'created' : 'uploaded' ),
+				( created ? 'multimediaviewer-datetime-created' : 'multimediaviewer-datetime-uploaded' ),
 				date
 			).text()
 		);
@@ -516,6 +482,7 @@
 					.addClass( 'mw-mmv-credit-fallback' )
 					.prop( 'href', filepageUrl )
 					.text( mw.message( 'multimediaviewer-credit-fallback' ).plain() )
+					.get( 0 ).outerHTML
 			);
 		}
 
@@ -544,13 +511,11 @@
 	 * @return {string} unsafe HTML
 	 */
 	MPP.wrapAuthor = function ( author, authorCount, filepageUrl ) {
-		var moreText,
-			$wrapper = $( '<span>' );
-
-		$wrapper.addClass( 'mw-mmv-author' );
+		var $wrapper = $( '<span>' )
+			.addClass( 'mw-mmv-author' );
 
 		if ( authorCount > 1 ) {
-			moreText = this.htmlUtils.jqueryToHtml(
+			var moreText = this.htmlUtils.jqueryToHtml(
 				$( '<a>' )
 					.addClass( 'mw-mmv-more-authors' )
 					.text( mw.message( 'multimediaviewer-multiple-authors', authorCount - 1 ).text() )
@@ -631,6 +596,22 @@
 			validRestrictions = 0;
 
 		restrictions.forEach( function ( value, index ) {
+			// The following messages are used here:
+			// * multimediaviewer-restriction-2257
+			// * multimediaviewer-restriction-aus-reserve
+			// * multimediaviewer-restriction-communist
+			// * multimediaviewer-restriction-costume
+			// * multimediaviewer-restriction-currency
+			// * multimediaviewer-restriction-design
+			// * multimediaviewer-restriction-fan-art
+			// * multimediaviewer-restriction-ihl
+			// * multimediaviewer-restriction-insignia
+			// * multimediaviewer-restriction-ita-mibac
+			// * multimediaviewer-restriction-nazi
+			// * multimediaviewer-restriction-personality
+			// * multimediaviewer-restriction-trademarked
+			// * multimediaviewer-restriction-default
+			// * multimediaviewer-restriction-default-and-others
 			if ( !mw.message( 'multimediaviewer-restriction-' + value ).exists() || value === 'default' || index + 1 > MetadataPanel.MAX_RESTRICT ) {
 				showDefault = true; // If the restriction isn't defined or there are more than MAX_RESTRICT of them, show a generic symbol at the end
 				return;
@@ -663,6 +644,22 @@
 	MPP.createRestriction = function ( type ) {
 		var $label = $( '<span>' )
 			.addClass( 'mw-mmv-label mw-mmv-restriction-label' )
+			// Messages duplicated from above for linter
+			// * multimediaviewer-restriction-2257
+			// * multimediaviewer-restriction-aus-reserve
+			// * multimediaviewer-restriction-communist
+			// * multimediaviewer-restriction-costume
+			// * multimediaviewer-restriction-currency
+			// * multimediaviewer-restriction-design
+			// * multimediaviewer-restriction-fan-art
+			// * multimediaviewer-restriction-ihl
+			// * multimediaviewer-restriction-insignia
+			// * multimediaviewer-restriction-ita-mibac
+			// * multimediaviewer-restriction-nazi
+			// * multimediaviewer-restriction-personality
+			// * multimediaviewer-restriction-trademarked
+			// * multimediaviewer-restriction-default
+			// * multimediaviewer-restriction-default-and-others
 			.prop( 'title', mw.message( 'multimediaviewer-restriction-' + type ).text() )
 			.tipsy( {
 				delay: mw.config.get( 'wgMultimediaViewer' ).tooltipDelay,
@@ -670,6 +667,21 @@
 			} );
 
 		$( '<span>' )
+			// The following classes are used here:
+			// * mw-mmv-restriction-2257
+			// * mw-mmv-restriction-aus-reserve
+			// * mw-mmv-restriction-communist
+			// * mw-mmv-restriction-costume
+			// * mw-mmv-restriction-currency
+			// * mw-mmv-restriction-design
+			// * mw-mmv-restriction-fan-art
+			// * mw-mmv-restriction-ihl
+			// * mw-mmv-restriction-insignia
+			// * mw-mmv-restriction-ita-mibac
+			// * mw-mmv-restriction-nazi
+			// * mw-mmv-restriction-personality
+			// * mw-mmv-restriction-trademarked:after
+			// * mw-mmv-restriction-default
 			.addClass( 'mw-mmv-restriction-label-inner mw-mmv-restriction-' +
 				( type === 'default-and-others' ? 'default' : type ) )
 			.text( mw.message( 'multimediaviewer-restriction-' + type ).text() )
@@ -684,29 +696,26 @@
 	 * @param {mw.mmv.model.Image} imageData
 	 */
 	MPP.setLocationData = function ( imageData ) {
-		var latsec, latitude, latmsg, latdeg, latremain, latmin,
-			longsec, longitude, longmsg, longdeg, longremain, longmin;
-
 		if ( !imageData.hasCoords() ) {
 			return;
 		}
 
-		latitude = imageData.latitude >= 0 ? imageData.latitude : imageData.latitude * -1;
-		latmsg = 'multimediaviewer-geoloc-' + ( imageData.latitude >= 0 ? 'north' : 'south' );
-		latdeg = Math.floor( latitude );
-		latremain = latitude - latdeg;
-		latmin = Math.floor( ( latremain ) * 60 );
+		var latitude = imageData.latitude >= 0 ? imageData.latitude : imageData.latitude * -1;
+		var latmsg = 'multimediaviewer-geoloc-' + ( imageData.latitude >= 0 ? 'north' : 'south' );
+		var latdeg = Math.floor( latitude );
+		var latremain = latitude - latdeg;
+		var latmin = Math.floor( ( latremain ) * 60 );
 
-		longitude = imageData.longitude >= 0 ? imageData.longitude : imageData.longitude * -1;
-		longmsg = 'multimediaviewer-geoloc-' + ( imageData.longitude >= 0 ? 'east' : 'west' );
-		longdeg = Math.floor( longitude );
-		longremain = longitude - longdeg;
-		longmin = Math.floor( ( longremain ) * 60 );
+		var longitude = imageData.longitude >= 0 ? imageData.longitude : imageData.longitude * -1;
+		var longmsg = 'multimediaviewer-geoloc-' + ( imageData.longitude >= 0 ? 'east' : 'west' );
+		var longdeg = Math.floor( longitude );
+		var longremain = longitude - longdeg;
+		var longmin = Math.floor( ( longremain ) * 60 );
 
 		longremain -= longmin / 60;
 		latremain -= latmin / 60;
-		latsec = Math.round( latremain * 100 * 60 * 60 ) / 100;
-		longsec = Math.round( longremain * 100 * 60 * 60 ) / 100;
+		var latsec = Math.round( latremain * 100 * 60 * 60 ) / 100;
+		var longsec = Math.round( longremain * 100 * 60 * 60 ) / 100;
 
 		this.$location.text(
 			mw.message( 'multimediaviewer-geolocation',
@@ -718,6 +727,9 @@
 						mw.language.convertNumber( latdeg ),
 						mw.language.convertNumber( latmin ),
 						mw.language.convertNumber( latsec ),
+						// The following messages are used here:
+						// * multimediaviewer-geoloc-north
+						// * multimediaviewer-geoloc-south
 						mw.message( latmsg ).text()
 					).text(),
 
@@ -726,6 +738,9 @@
 						mw.language.convertNumber( longdeg ),
 						mw.language.convertNumber( longmin ),
 						mw.language.convertNumber( longsec ),
+						// The following messages are used here:
+						// * multimediaviewer-geoloc-east
+						// * multimediaviewer-geoloc-west
 						mw.message( longmsg ).text()
 					).text()
 				).text()
@@ -753,8 +768,6 @@
 	 */
 	MPP.setImageInfo = function ( image, imageData, repoData ) {
 		var panel = this;
-
-		mw.mmv.attributionLogger.logAttribution( imageData );
 
 		if ( imageData.creationDateTime ) {
 			panel.setDateTime( this.formatDate( imageData.creationDateTime ), true );
@@ -807,16 +820,22 @@
 	 * @return {string} formatted date
 	 */
 	MPP.formatDate = function ( dateString ) {
-		var date,
-			lang = mw.config.get( 'wgUserLanguage' );
-		if ( lang === 'en' ) { lang = 'en-GB'; } // for D MMMM YYYY format
-		date = new Date( dateString );
+		var lang = mw.config.get( 'wgUserLanguage' );
+		if ( lang === 'en' || lang === 'qqx' ) {
+			// prefer "D MMMM YYYY" format
+			// avoid passing invalid "qqx" to native toLocaleString(),
+			// which would cause developer's browser locale to be used,
+			// and thus sometimes cause tests to fail.
+			lang = 'en-GB';
+		}
+		var date = new Date( dateString );
 		try {
 			if ( date instanceof Date && !isNaN( date ) ) {
 				return date.toLocaleString( lang, {
 					day: 'numeric',
 					month: 'long',
-					year: 'numeric'
+					year: 'numeric',
+					timeZone: 'UTC'
 				} );
 			}
 		} catch ( ignore ) {}

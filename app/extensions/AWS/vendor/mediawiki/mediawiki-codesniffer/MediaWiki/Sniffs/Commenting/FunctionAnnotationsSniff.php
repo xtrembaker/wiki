@@ -48,19 +48,23 @@ class FunctionAnnotationsSniff implements Sniff {
 		'@note' => true,
 		'@par' => true,
 		'@param' => true,
-		'@param[in]' => true,
-		'@param[in,out]' => true,
-		'@param[out]' => true,
-		'@params' => true,
 		'@requires' => true,
 		'@return' => true,
-		'@returns' => true,
 		'@see' => true,
 		'@since' => true,
-		'@throw' => true,
 		'@throws' => true,
 		'@todo' => true,
+		'@uses' => true,
 		'@warning' => true,
+
+		// Automatically replaced
+		'@param[in]' => '@param',
+		'@param[in,out]' => '@param',
+		'@param[out]' => '@param',
+		'@params' => '@param',
+		'@returns' => '@return',
+		'@throw' => '@throws',
+		'@exception' => '@throws',
 
 		// private and protected is needed when functions stay public
 		// for deprecation or backward compatibility reasons
@@ -94,15 +98,36 @@ class FunctionAnnotationsSniff implements Sniff {
 		'@param-taint' => true,
 		'@return-taint' => true,
 
-		// Allowed mixed-case tags, mapping from all-lowercase to the expected mixed-case
+		// T263390
+		'@noinspection' => true,
+
+		// phpunit tags that are mixed-case - map lowercase to preferred mixed-case
+		// phpunit tags that are already all-lowercase, like @after and @before
+		// are listed above
+		'@afterclass' => '@afterClass',
+		'@beforeclass' => '@beforeClass',
 		'@codecoverageignore' => '@codeCoverageIgnore',
 		'@covernothing' => '@coverNothing',
 		'@coversnothing' => '@coversNothing',
 		'@dataprovider' => '@dataProvider',
+		'@doesnotperformassertions' => '@doesNotPerformAssertions',
+		'@testwith' => '@testWith',
+
+		// Other phpunit annotations that we recognize, even if PhpunitAnnotationsSniff
+		// complains about them. See T276971
+		'@small' => true,
+		'@medium' => true,
+		'@large' => true,
+		'@test' => true,
+		'@testdox' => true,
+		'@backupglobals' => '@backupGlobals',
+		'@backupstaticattributes' => '@backupStaticAttributes',
+		'@runinseparateprocess' => '@runInSeparateProcess',
 		'@expectedexception' => '@expectedException',
 		'@expectedexceptioncode' => '@expectedExceptionCode',
 		'@expectedexceptionmessage' => '@expectedExceptionMessage',
 		'@expectedexceptionmessageregexp' => '@expectedExceptionMessageRegExp',
+
 		'@inheritdoc' => '@inheritDoc',
 
 		// Tags to automatically fix
@@ -115,7 +140,7 @@ class FunctionAnnotationsSniff implements Sniff {
 	/**
 	 * @inheritDoc
 	 */
-	public function register() {
+	public function register(): array {
 		return [ T_FUNCTION ];
 	}
 
@@ -168,7 +193,7 @@ class FunctionAnnotationsSniff implements Sniff {
 	 * @param string $anno
 	 * @return string|false Tag or false if it's not canonical
 	 */
-	private function normalizeAnnotation( $anno ) {
+	private function normalizeAnnotation( string $anno ) {
 		$anno = rtrim( $anno, ':' );
 		$lower = mb_strtolower( $anno );
 		if ( array_key_exists( $lower, self::ALLOWED_ANNOTATIONS ) ) {
@@ -190,7 +215,7 @@ class FunctionAnnotationsSniff implements Sniff {
 	 * @param int $tag Token position of the annotation tag
 	 * @param string $tagContent Content of the annotation
 	 */
-	private function handleAccessAnnotation( File $phpcsFile, $tokens, $tag, $tagContent ) {
+	private function handleAccessAnnotation( File $phpcsFile, array $tokens, int $tag, string $tagContent ): void {
 		if ( $tokens[$tag + 2]['code'] === T_DOC_COMMENT_STRING ) {
 			$text = strtolower( $tokens[$tag + 2]['content'] );
 			if ( $text === 'protected' || $text === 'private' ) {

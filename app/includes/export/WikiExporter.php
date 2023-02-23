@@ -27,10 +27,16 @@
  * @defgroup Dump Dump
  */
 
-use MediaWiki\MediaWikiServices as MediaWikiServicesAlias;
+use MediaWiki\HookContainer\HookContainer;
+use MediaWiki\HookContainer\HookRunner;
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\Page\PageIdentity;
+use MediaWiki\Revision\RevisionAccessException;
 use MediaWiki\Revision\RevisionRecord;
-use Wikimedia\Rdbms\IResultWrapper;
+use MediaWiki\Revision\RevisionStore;
 use Wikimedia\Rdbms\IDatabase;
+use Wikimedia\Rdbms\IResultWrapper;
 
 /**
  * @ingroup SpecialPage Dump
@@ -48,16 +54,16 @@ class WikiExporter {
 	/** @var string */
 	public $author_list = "";
 
-	const FULL = 1;
-	const CURRENT = 2;
-	const STABLE = 4; // extension defined
-	const LOGS = 8;
-	const RANGE = 16;
+	public const FULL = 1;
+	public const CURRENT = 2;
+	public const STABLE = 4; // extension defined
+	public const LOGS = 8;
+	public const RANGE = 16;
 
-	const TEXT = XmlDumpWriter::WRITE_CONTENT;
-	const STUB = XmlDumpWriter::WRITE_STUB;
+	public const TEXT = XmlDumpWriter::WRITE_CONTENT;
+	public const STUB = XmlDumpWriter::WRITE_STUB;
 
-	const BATCH_SIZE = 50000;
+	protected const BATCH_SIZE = 50000;
 
 	/** @var int */
 	public $text;
@@ -77,38 +83,57 @@ class WikiExporter {
 	/** @var array|null */
 	protected $limitNamespaces;
 
+	/** @var RevisionStore */
+	private $revisionStore;
+
+	/** @var TitleParser */
+	private $titleParser;
+
+	/** @var HookRunner */
+	private $hookRunner;
+
 	/**
-	 * Returns the default export schema version, as defined by $wgXmlDumpSchemaVersion.
+	 * Returns the default export schema version, as defined by the XmlDumpSchemaVersion setting.
 	 * @return string
 	 */
 	public static function schemaVersion() {
-		global $wgXmlDumpSchemaVersion;
-		return $wgXmlDumpSchemaVersion;
+		return MediaWikiServices::getInstance()->getMainConfig()->get(
+			MainConfigNames::XmlDumpSchemaVersion );
 	}
 
 	/**
 	 * @param IDatabase $db
+	 * @param HookContainer $hookContainer
+	 * @param RevisionStore $revisionStore
+	 * @param TitleParser $titleParser
 	 * @param int|array $history One of WikiExporter::FULL, WikiExporter::CURRENT,
 	 *   WikiExporter::RANGE or WikiExporter::STABLE, or an associative array:
 	 *   - offset: non-inclusive offset at which to start the query
 	 *   - limit: maximum number of rows to return
 	 *   - dir: "asc" or "desc" timestamp order
 	 * @param int $text One of WikiExporter::TEXT or WikiExporter::STUB
-	 * @param null|array $limitNamespaces Comma-separated list of namespace numbers
-	 *   to limit results
+	 * @param null|array $limitNamespaces List of namespace numbers to limit results
 	 */
-	function __construct(
+	public function __construct(
 		$db,
+		HookContainer $hookContainer,
+		RevisionStore $revisionStore,
+		TitleParser $titleParser,
 		$history = self::CURRENT,
 		$text = self::TEXT,
 		$limitNamespaces = null
 	) {
 		$this->db = $db;
 		$this->history = $history;
+		// TODO: add a $hookContainer parameter to XmlDumpWriter so that we can inject
+		// and then be able to convert the factory test to a unit test
 		$this->writer = new XmlDumpWriter( $text, self::schemaVersion() );
 		$this->sink = new DumpOutput();
 		$this->text = $text;
 		$this->limitNamespaces = $limitNamespaces;
+		$this->hookRunner = new HookRunner( $hookContainer );
+		$this->revisionStore = $revisionStore;
+		$this->titleParser = $titleParser;
 	}
 
 	/**
@@ -189,12 +214,12 @@ class WikiExporter {
 	}
 
 	/**
-	 * @param Title $title
+	 * @param PageIdentity $page
 	 */
-	public function pageByTitle( $title ) {
+	public function pageByTitle( PageIdentity $page ) {
 		$this->dumpFrom(
-			'page_namespace=' . $title->getNamespace() .
-			' AND page_title=' . $this->db->addQuotes( $title->getDBkey() ) );
+			'page_namespace=' . $page->getNamespace() .
+			' AND page_title=' . $this->db->addQuotes( $page->getDBkey() ) );
 	}
 
 	/**
@@ -202,16 +227,18 @@ class WikiExporter {
 	 * @throws MWException
 	 */
 	public function pageByName( $name ) {
-		$title = Title::newFromText( $name );
-		if ( is_null( $title ) ) {
+		try {
+			$link = $this->titleParser->parseTitle( $name );
+			$this->dumpFrom(
+				'page_namespace=' . $link->getNamespace() .
+				' AND page_title=' . $this->db->addQuotes( $link->getDBkey() ) );
+		} catch ( MalformedTitleException $ex ) {
 			throw new MWException( "Can't export invalid title" );
-		} else {
-			$this->pageByTitle( $title );
 		}
 	}
 
 	/**
-	 * @param array $names
+	 * @param string[] $names
 	 */
 	public function pagesByName( $names ) {
 		foreach ( $names as $name ) {
@@ -246,7 +273,7 @@ class WikiExporter {
 		$this->author_list = "<contributors>";
 		// rev_deleted
 
-		$revQuery = Revision::getQueryInfo( [ 'page' ] );
+		$revQuery = $this->revisionStore->getQueryInfo( [ 'page' ] );
 		$res = $this->db->select(
 			$revQuery['tables'],
 			[
@@ -282,7 +309,7 @@ class WikiExporter {
 	 * @throws Exception
 	 */
 	protected function dumpFrom( $cond = '', $orderRevs = false ) {
-		if ( $this->history & self::LOGS ) {
+		if ( is_int( $this->history ) && ( $this->history & self::LOGS ) ) {
 			$this->dumpLogs( $cond );
 		} else {
 			$this->dumpPages( $cond, $orderRevs );
@@ -307,23 +334,22 @@ class WikiExporter {
 		$result = null; // Assuring $result is not undefined, if exception occurs early
 
 		$commentQuery = CommentStore::getStore()->getJoin( 'log_comment' );
-		$actorQuery = ActorMigration::newMigration()->getJoin( 'log_user' );
 
 		$tables = array_merge(
-			[ 'logging' ], $commentQuery['tables'], $actorQuery['tables'], [ 'user' ]
+			[ 'logging', 'actor' ], $commentQuery['tables']
 		);
 		$fields = [
 			'log_id', 'log_type', 'log_action', 'log_timestamp', 'log_namespace',
-			'log_title', 'log_params', 'log_deleted', 'user_name'
-		] + $commentQuery['fields'] + $actorQuery['fields'];
+			'log_title', 'log_params', 'log_deleted', 'actor_user', 'actor_name'
+		] + $commentQuery['fields'];
 		$options = [
 			'ORDER BY' => 'log_id',
 			'USE INDEX' => [ 'logging' => 'PRIMARY' ],
 			'LIMIT' => self::BATCH_SIZE,
 		];
 		$joins = [
-			'user' => [ 'JOIN', 'user_id = ' . $actorQuery['fields']['log_user'] ]
-		] + $commentQuery['joins'] + $actorQuery['joins'];
+			'actor' => [ 'JOIN', 'actor_id=log_actor' ]
+		] + $commentQuery['joins'];
 
 		$lastLogId = 0;
 		while ( true ) {
@@ -341,6 +367,7 @@ class WikiExporter {
 			}
 
 			$lastLogId = $this->outputLogStream( $result );
+			$this->reloadDBConfig();
 		}
 	}
 
@@ -351,12 +378,8 @@ class WikiExporter {
 	 * @throws Exception
 	 */
 	protected function dumpPages( $cond, $orderRevs ) {
-		$revQuery = MediaWikiServicesAlias::getInstance()->getRevisionStore()->getQueryInfo(
-			[ 'page' ]
-		);
-		$slotQuery = MediaWikiServicesAlias::getInstance()->getRevisionStore()->getSlotsQueryInfo(
-			[ 'content' ]
-		);
+		$revQuery = $this->revisionStore->getQueryInfo( [ 'page' ] );
+		$slotQuery = $this->revisionStore->getSlotsQueryInfo( [ 'content' ] );
 
 		// We want page primary rather than revision.
 		// We also want to join in the slots and content tables.
@@ -373,7 +396,6 @@ class WikiExporter {
 		unset( $join['page'] );
 
 		$fields = array_merge( $revQuery['fields'], $slotQuery['fields'] );
-		$fields[] = 'page_restrictions';
 
 		if ( $this->text != self::STUB ) {
 			$fields['_load_content'] = '1';
@@ -410,7 +432,6 @@ class WikiExporter {
 			# query optimization for history stub dumps
 			if ( $this->text == self::STUB ) {
 				$opts[] = 'STRAIGHT_JOIN';
-				$opts['USE INDEX']['revision'] = 'rev_page_id';
 				unset( $join['revision'] );
 				$join['page'] = [ 'JOIN', 'rev_page=page_id' ];
 			}
@@ -426,7 +447,7 @@ class WikiExporter {
 			# Default JOIN, to be overridden...
 			$join['revision'] = [ 'JOIN', 'page_id=rev_page AND page_latest=rev_id' ];
 			# One, and only one hook should set this, and return false
-			if ( Hooks::run( 'WikiExporter::dumpStableQuery', [ &$tables, &$opts, &$join ] ) ) {
+			if ( $this->hookRunner->onWikiExporter__dumpStableQuery( $tables, $opts, $join ) ) {
 				throw new MWException( __METHOD__ . " given invalid history dump type." );
 			}
 		} elseif ( $this->history & self::RANGE ) {
@@ -445,8 +466,8 @@ class WikiExporter {
 
 		$opts['LIMIT'] = self::BATCH_SIZE;
 
-		Hooks::run( 'ModifyExportQuery',
-			[ $this->db, &$tables, &$cond, &$opts, &$join ] );
+		$this->hookRunner->onModifyExportQuery(
+			$this->db, $tables, $cond, $opts, $join, $conds );
 
 		while ( !$done ) {
 			// If necessary, impose the overall maximum and stop looping after this iteration.
@@ -481,6 +502,10 @@ class WikiExporter {
 			if ( $done && $lastRow ) {
 				$this->finishPageStreamOutput( $lastRow );
 			}
+
+			if ( !$done ) {
+				$this->reloadDBConfig();
+			}
 		}
 	}
 
@@ -490,8 +515,8 @@ class WikiExporter {
 	 * and be sorted/grouped by page and revision to avoid duplicate page records in the output.
 	 *
 	 * @param IResultWrapper $results
-	 * @param object $lastRow the last row output from the previous call (or null if none)
-	 * @return object the last row processed
+	 * @param stdClass|null $lastRow the last row output from the previous call (or null if none)
+	 * @return stdClass the last row processed
 	 */
 	protected function outputPageStreamBatch( $results, $lastRow ) {
 		$rowCarry = null;
@@ -526,8 +551,13 @@ class WikiExporter {
 				$output = $this->writer->openPage( $revRow );
 				$this->sink->writeOpenPage( $revRow, $output );
 			}
-			$output = $this->writer->writeRevision( $revRow, $slotRows );
-			$this->sink->writeRevision( $revRow, $output );
+			try {
+				$output = $this->writer->writeRevision( $revRow, $slotRows );
+				$this->sink->writeRevision( $revRow, $output );
+			} catch ( RevisionAccessException $ex ) {
+				MWDebug::warning( 'Problem encountered retrieving rev and slot metadata for'
+					. ' revision ' . $revRow->rev_id . ': ' . $ex->getMessage() );
+			}
 			$lastRow = $revRow;
 		}
 
@@ -535,6 +565,7 @@ class WikiExporter {
 			throw new LogicException( 'Error while processing a stream of slot rows' );
 		}
 
+		// @phan-suppress-next-line PhanTypeMismatchReturnNullable False positive
 		return $lastRow;
 	}
 
@@ -543,9 +574,9 @@ class WikiExporter {
 	 * Takes and returns a carry row from the last batch;
 	 *
 	 * @param IResultWrapper|array $results
-	 * @param null|object &$carry A row carried over from the last call to getSlotRowBatch()
+	 * @param null|stdClass &$carry A row carried over from the last call to getSlotRowBatch()
 	 *
-	 * @return object[]
+	 * @return stdClass[]
 	 */
 	protected function getSlotRowBatch( $results, &$carry = null ) {
 		$slotRows = [];
@@ -572,7 +603,7 @@ class WikiExporter {
 	/**
 	 * Final page stream output, after all batches are complete
 	 *
-	 * @param object $lastRow the last row output from the last batch (or null if none)
+	 * @param stdClass $lastRow the last row output from the last batch (or null if none)
 	 */
 	protected function finishPageStreamOutput( $lastRow ) {
 		$output = '';
@@ -586,13 +617,24 @@ class WikiExporter {
 
 	/**
 	 * @param IResultWrapper $resultset
-	 * @return int the log_id value of the last item output, or null if none
+	 * @return int|null the log_id value of the last item output, or null if none
 	 */
 	protected function outputLogStream( $resultset ) {
 		foreach ( $resultset as $row ) {
 			$output = $this->writer->writeLogItem( $row );
 			$this->sink->writeLogItem( $row, $output );
 		}
-		return isset( $row ) ? $row->log_id : null;
+		return $row->log_id ?? null;
+	}
+
+	/**
+	 * Attempt to reload the database configuration, so any changes can take effect.
+	 * Dynamic reloading can be enabled by setting $wgLBFactoryConf['configCallback']
+	 * to a function that returns an array of any keys that should be updated
+	 * in LBFactoryConf.
+	 */
+	private function reloadDBConfig() {
+		MediaWikiServices::getInstance()->getDBLoadBalancerFactory()
+			->autoReconfigure();
 	}
 }

@@ -20,13 +20,21 @@
  * @file
  */
 
+use MediaWiki\DAO\WikiAwareEntityTrait;
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+use MediaWiki\User\UserGroupManager;
+use MediaWiki\User\UserIdentity;
 use Wikimedia\Rdbms\IDatabase;
 
 /**
  * Cut-down copy of User interface for local-interwiki-database
  * user rights manipulation.
+ * @deprecated since 1.38, pass the correct domain to UserGroupManagerFactory instead.
  */
-class UserRightsProxy {
+class UserRightsProxy implements UserIdentity {
+	use WikiAwareEntityTrait;
+
 	/** @var IDatabase */
 	private $db;
 	/** @var string */
@@ -37,6 +45,8 @@ class UserRightsProxy {
 	private $id;
 	/** @var array */
 	private $newOptions;
+	/** @var UserGroupManager */
+	private $userGroupManager;
 
 	/**
 	 * @see newFromId()
@@ -52,6 +62,9 @@ class UserRightsProxy {
 		$this->name = $name;
 		$this->id = intval( $id );
 		$this->newOptions = [];
+		$this->userGroupManager = MediaWikiServices::getInstance()
+			->getUserGroupManagerFactory()
+			->getUserGroupManager( $dbDomain );
 	}
 
 	/**
@@ -61,8 +74,9 @@ class UserRightsProxy {
 	 * @return bool
 	 */
 	public static function validDatabase( $dbDomain ) {
-		global $wgLocalDatabases;
-		return in_array( $dbDomain, $wgLocalDatabases );
+		$localDatabases = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::LocalDatabases );
+		return in_array( $dbDomain, $localDatabases );
 	}
 
 	/**
@@ -71,7 +85,7 @@ class UserRightsProxy {
 	 * @param string $dbDomain Database name
 	 * @param int $id User ID
 	 * @param bool $ignoreInvalidDB If true, don't check if $dbDomain is in $wgLocalDatabases
-	 * @return string User name or false if the user doesn't exist
+	 * @return string|false User name or false if the user doesn't exist
 	 */
 	public static function whoIs( $dbDomain, $id, $ignoreInvalidDB = false ) {
 		$user = self::newFromId( $dbDomain, $id, $ignoreInvalidDB );
@@ -109,17 +123,20 @@ class UserRightsProxy {
 	/**
 	 * @param string $dbDomain
 	 * @param string $field
-	 * @param string $value
+	 * @param string|int $value
 	 * @param bool $ignoreInvalidDB
 	 * @return null|UserRightsProxy
 	 */
 	private static function newFromLookup( $dbDomain, $field, $value, $ignoreInvalidDB = false ) {
-		global $wgSharedDB, $wgSharedTables;
+		$sharedDB = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::SharedDB );
+		$sharedTables = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::SharedTables );
 		// If the user table is shared, perform the user query on it,
 		// but don't pass it to the UserRightsProxy,
 		// as user rights are normally not shared.
-		if ( $wgSharedDB && in_array( 'user', $wgSharedTables ) ) {
-			$userdb = self::getDB( $wgSharedDB, $ignoreInvalidDB );
+		if ( $sharedDB && in_array( 'user', $sharedTables ) ) {
+			$userdb = self::getDB( $sharedDB, $ignoreInvalidDB );
 		} else {
 			$userdb = self::getDB( $dbDomain, $ignoreInvalidDB );
 		}
@@ -152,26 +169,27 @@ class UserRightsProxy {
 		if ( $ignoreInvalidDB || self::validDatabase( $dbDomain ) ) {
 			if ( WikiMap::isCurrentWikiId( $dbDomain ) ) {
 				// Hmm... this shouldn't happen though. :)
-				return wfGetDB( DB_MASTER );
+				return wfGetDB( DB_PRIMARY );
 			} else {
-				return wfGetDB( DB_MASTER, [], $dbDomain );
+				return wfGetDB( DB_PRIMARY, [], $dbDomain );
 			}
 		}
 		return null;
 	}
 
 	/**
+	 * @param string|false $wikiId
 	 * @return int
 	 */
-	public function getId() {
+	public function getId( $wikiId = self::LOCAL ): int {
 		return $this->id;
 	}
 
 	/**
 	 * @return bool
 	 */
-	public function isAnon() {
-		return $this->getId() == 0;
+	public function isAnon(): bool {
+		return !$this->isRegistered();
 	}
 
 	/**
@@ -179,7 +197,7 @@ class UserRightsProxy {
 	 *
 	 * @return string
 	 */
-	public function getName() {
+	public function getName(): string {
 		return $this->name . '@' . $this->dbDomain;
 	}
 
@@ -194,20 +212,20 @@ class UserRightsProxy {
 
 	/**
 	 * Replaces User::getUserGroups()
-	 * @return array
+	 * @return string[]
 	 */
-	function getGroups() {
+	public function getGroups() {
 		return array_keys( self::getGroupMemberships() );
 	}
 
 	/**
 	 * Replaces User::getGroupMemberships()
 	 *
-	 * @return array
+	 * @return UserGroupMembership[]
 	 * @since 1.29
 	 */
-	function getGroupMemberships() {
-		return UserGroupMembership::getMembershipsForUser( $this->id, $this->db );
+	public function getGroupMemberships() {
+		return $this->userGroupManager->getUserGroupMemberships( $this, IDBAccessObject::READ_LATEST );
 	}
 
 	/**
@@ -217,13 +235,13 @@ class UserRightsProxy {
 	 * @param string|null $expiry
 	 * @return bool
 	 */
-	function addGroup( $group, $expiry = null ) {
-		if ( $expiry ) {
-			$expiry = wfTimestamp( TS_MW, $expiry );
-		}
-
-		$ugm = new UserGroupMembership( $this->id, $group, $expiry );
-		return $ugm->insert( true, $this->db );
+	public function addGroup( $group, $expiry = null ) {
+		return $this->userGroupManager->addUserToGroup(
+			$this,
+			$group,
+			$expiry,
+			true
+		);
 	}
 
 	/**
@@ -232,12 +250,11 @@ class UserRightsProxy {
 	 * @param string $group
 	 * @return bool
 	 */
-	function removeGroup( $group ) {
-		$ugm = UserGroupMembership::getMembership( $this->id, $group, $this->db );
-		if ( !$ugm ) {
-			return false;
-		}
-		return $ugm->delete( $this->db );
+	public function removeGroup( $group ) {
+		return $this->userGroupManager->removeUserFromGroup(
+			$this,
+			$group
+		);
 	}
 
 	/**
@@ -258,9 +275,11 @@ class UserRightsProxy {
 				'up_value' => $value,
 			];
 		}
-		$this->db->replace( 'user_properties',
+		$this->db->replace(
+			'user_properties',
 			[ [ 'up_user', 'up_property' ] ],
-			$rows, __METHOD__
+			$rows,
+			__METHOD__
 		);
 		$this->invalidateCache();
 	}
@@ -268,7 +287,7 @@ class UserRightsProxy {
 	/**
 	 * Replaces User::touchUser()
 	 */
-	function invalidateCache() {
+	public function invalidateCache() {
 		$this->db->update(
 			'user',
 			[ 'user_touched' => $this->db->timestamp() ],
@@ -279,10 +298,37 @@ class UserRightsProxy {
 		$domainId = $this->db->getDomainID();
 		$userId = $this->id;
 		$this->db->onTransactionPreCommitOrIdle(
-			function () use ( $domainId, $userId ) {
+			static function () use ( $domainId, $userId ) {
 				User::purge( $domainId, $userId );
 			},
 			__METHOD__
 		);
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function equals( ?UserIdentity $user ): bool {
+		if ( !$user ) {
+			return false;
+		}
+		return $this->getName() === $user->getName();
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function isRegistered(): bool {
+		return $this->getId( $this->getWikiId() ) != 0;
+	}
+
+	/**
+	 * Returns the db Domain of the wiki the UserRightsProxy is associated with.
+	 *
+	 * @since 1.37
+	 * @return string
+	 */
+	public function getWikiId() {
+		return $this->dbDomain;
 	}
 }

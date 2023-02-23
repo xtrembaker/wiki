@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Copyright © 2004 Brion Vibber <brion@pobox.com>
  * https://www.mediawiki.org/
@@ -21,6 +22,9 @@
  * @file
  */
 
+use MediaWiki\MainConfigNames;
+use MediaWiki\MediaWikiServices;
+
 /**
  * Generate an Atom feed.
  *
@@ -33,18 +37,18 @@ class AtomFeed extends ChannelFeed {
 	 * @param string|int|null $timestamp
 	 * @return string|null
 	 */
-	function formatTime( $timestamp ) {
+	private function formatTime( $timestamp ) {
 		if ( $timestamp ) {
 			// need to use RFC 822 time format at least for rss2.0
-			return gmdate( 'Y-m-d\TH:i:s', wfTimestamp( TS_UNIX, $timestamp ) );
+			return gmdate( 'Y-m-d\TH:i:s', (int)wfTimestamp( TS_UNIX, $timestamp ) );
 		}
+		return null;
 	}
 
 	/**
 	 * Outputs a basic header for Atom 1.0 feeds.
 	 */
-	function outHeader() {
-		global $wgVersion;
+	public function outHeader() {
 		$this->outXmlHeader();
 		// Manually escaping rather than letting Mustache do it because Mustache
 		// uses htmlentities, which does not work with XML
@@ -56,7 +60,7 @@ class AtomFeed extends ChannelFeed {
 			'selfUrl' => $this->getSelfUrl(),
 			'timestamp' => $this->xmlEncode( $this->formatTime( wfTimestampNow() ) ),
 			'description' => $this->getDescription(),
-			'version' => $this->xmlEncode( $wgVersion ),
+			'version' => $this->xmlEncode( MW_VERSION ),
 		];
 		print $this->templateParser->processTemplate( 'AtomHeader', $templateParams );
 	}
@@ -86,14 +90,15 @@ class AtomFeed extends ChannelFeed {
 	 * Output a given item.
 	 * @param FeedItem $item
 	 */
-	function outItem( $item ) {
-		global $wgMimeType;
+	public function outItem( $item ) {
+		$mimeType = MediaWikiServices::getInstance()->getMainConfig()
+			->get( MainConfigNames::MimeType );
 		// Manually escaping rather than letting Mustache do it because Mustache
 		// uses htmlentities, which does not work with XML
 		$templateParams = [
 			"uniqueID" => $item->getUniqueID(),
 			"title" => $item->getTitle(),
-			"mimeType" => $this->xmlEncode( $wgMimeType ),
+			"mimeType" => $this->xmlEncode( $mimeType ),
 			"url" => $this->xmlEncode( wfExpandUrl( $item->getUrlUnescaped(), PROTO_CURRENT ) ),
 			"date" => $this->xmlEncode( $this->formatTime( $item->getDate() ) ),
 			"description" => $item->getDescription(),
@@ -105,7 +110,7 @@ class AtomFeed extends ChannelFeed {
 	/**
 	 * Outputs the footer for Atom 1.0 feed (basically '\</feed\>').
 	 */
-	function outFooter() {
+	public function outFooter() {
 		print "</feed>";
 	}
 }

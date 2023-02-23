@@ -2,7 +2,7 @@
 /**
  * @covers HTMLAutoCompleteSelectField
  */
-class HTMLAutoCompleteSelectFieldTest extends MediaWikiTestCase {
+class HTMLAutoCompleteSelectFieldTest extends MediaWikiIntegrationTestCase {
 
 	public $options = [
 		'Bulgaria'     => 'BGR',
@@ -14,38 +14,18 @@ class HTMLAutoCompleteSelectFieldTest extends MediaWikiTestCase {
 	 * Verify that attempting to instantiate an HTMLAutoCompleteSelectField
 	 * without providing any autocomplete options causes an exception to be
 	 * thrown.
-	 *
-	 * @expectedException        MWException
-	 * @expectedExceptionMessage called without any autocompletions
 	 */
-	function testMissingAutocompletions() {
+	public function testMissingAutocompletions() {
+		$this->expectException( MWException::class );
+		$this->expectExceptionMessage( "called without any autocompletions" );
 		new HTMLAutoCompleteSelectField( [ 'fieldname' => 'Test' ] );
-	}
-
-	/**
-	 * Verify that the autocomplete options are correctly encoded as
-	 * the 'data-autocomplete' attribute of the field.
-	 *
-	 * @covers HTMLAutoCompleteSelectField::getAttributes
-	 */
-	function testGetAttributes() {
-		$field = new HTMLAutoCompleteSelectField( [
-			'fieldname'    => 'Test',
-			'autocomplete' => $this->options,
-		] );
-
-		$attributes = $field->getAttributes( [] );
-		$this->assertEquals( array_keys( $this->options ),
-			FormatJson::decode( $attributes['data-autocomplete'] ),
-			"The 'data-autocomplete' attribute encodes autocomplete option keys as a JSON array."
-		);
 	}
 
 	/**
 	 * Test that the optional select dropdown is included or excluded based on
 	 * the presence or absence of the 'options' parameter.
 	 */
-	function testOptionalSelectElement() {
+	public function testOptionalSelectElement() {
 		$params = [
 			'fieldname'         => 'Test',
 			'autocomplete-data' => $this->options,

@@ -16,8 +16,11 @@
  * http://www.gnu.org/copyleft/gpl.html
  *
  * @file
- * @ingroup Deployment
+ * @ingroup Installer
  */
+
+use MediaWiki\Languages\LanguageNameUtils;
+use MediaWiki\MediaWikiServices;
 
 class WebInstallerLanguage extends WebInstallerPage {
 
@@ -30,7 +33,9 @@ class WebInstallerLanguage extends WebInstallerPage {
 		$userLang = $r->getVal( 'uselang' );
 		$contLang = $r->getVal( 'ContLang' );
 
-		$languages = Language::fetchLanguageNames( null, 'mwfile' );
+		$languages = MediaWikiServices::getInstance()
+			->getLanguageNameUtils()
+			->getLanguageNames( LanguageNameUtils::AUTONYMS, LanguageNameUtils::SUPPORTED );
 		$lifetime = intval( ini_get( 'session.gc_maxlifetime' ) );
 		if ( !$lifetime ) {
 			$lifetime = 1440; // PHP default
@@ -39,7 +44,7 @@ class WebInstallerLanguage extends WebInstallerPage {
 		if ( $r->wasPosted() ) {
 			# Do session test
 			if ( $this->parent->getSession( 'test' ) === null ) {
-				$requestTime = $r->getVal( 'LanguageRequestTime' );
+				$requestTime = $r->getIntOrNull( 'LanguageRequestTime' );
 				if ( !$requestTime ) {
 					// The most likely explanation is that the user was knocked back
 					// from another page on POST due to session expiry
@@ -103,7 +108,9 @@ class WebInstallerLanguage extends WebInstallerPage {
 		$select = new XmlSelect( $name, $name, $selectedCode );
 		$select->setAttribute( 'tabindex', $this->parent->nextTabIndex() );
 
-		$languages = Language::fetchLanguageNames( null, 'mwfile' );
+		$languages = MediaWikiServices::getInstance()
+			->getLanguageNameUtils()
+			->getLanguageNames( LanguageNameUtils::AUTONYMS, LanguageNameUtils::SUPPORTED );
 		foreach ( $languages as $code => $lang ) {
 			$select->addOption( "$code - $lang", $code );
 		}

@@ -22,6 +22,8 @@
  */
 
 use MediaWiki\Auth\AuthManager;
+use MediaWiki\MainConfigNames;
+use Wikimedia\ParamValidator\ParamValidator;
 
 /**
  * A query action to return meta information about AuthManager state.
@@ -30,23 +32,34 @@ use MediaWiki\Auth\AuthManager;
  */
 class ApiQueryAuthManagerInfo extends ApiQueryBase {
 
-	public function __construct( ApiQuery $query, $moduleName ) {
+	/** @var AuthManager */
+	private $authManager;
+
+	/**
+	 * @param ApiQuery $query
+	 * @param string $moduleName
+	 * @param AuthManager $authManager
+	 */
+	public function __construct(
+		ApiQuery $query,
+		$moduleName,
+		AuthManager $authManager
+	) {
 		parent::__construct( $query, $moduleName, 'ami' );
+		$this->authManager = $authManager;
 	}
 
 	public function execute() {
 		$params = $this->extractRequestParams();
-		$helper = new ApiAuthManagerHelper( $this );
-
-		$manager = AuthManager::singleton();
+		$helper = new ApiAuthManagerHelper( $this, $this->authManager );
 		$ret = [
-			'canauthenticatenow' => $manager->canAuthenticateNow(),
-			'cancreateaccounts' => $manager->canCreateAccounts(),
-			'canlinkaccounts' => $manager->canLinkAccounts(),
+			'canauthenticatenow' => $this->authManager->canAuthenticateNow(),
+			'cancreateaccounts' => $this->authManager->canCreateAccounts(),
+			'canlinkaccounts' => $this->authManager->canLinkAccounts(),
 		];
 
 		if ( $params['securitysensitiveoperation'] !== null ) {
-			$ret['securitysensitiveoperationstatus'] = $manager->securitySensitiveOperationStatus(
+			$ret['securitysensitiveoperationstatus'] = $this->authManager->securitySensitiveOperationStatus(
 				$params['securitysensitiveoperation']
 			);
 		}
@@ -69,18 +82,18 @@ class ApiQueryAuthManagerInfo extends ApiQueryBase {
 				];
 			}
 
-			$reqs = $manager->getAuthenticationRequests( $action, $this->getUser() );
+			$reqs = $this->authManager->getAuthenticationRequests( $action, $this->getUser() );
 
 			// Filter out blacklisted requests, depending on the action
 			switch ( $action ) {
 				case AuthManager::ACTION_CHANGE:
-					$reqs = ApiAuthManagerHelper::blacklistAuthenticationRequests(
-						$reqs, $this->getConfig()->get( 'ChangeCredentialsBlacklist' )
+					$reqs = ApiAuthManagerHelper::blacklistAuthenticationRequests( $reqs,
+						$this->getConfig()->get( MainConfigNames::ChangeCredentialsBlacklist )
 					);
 					break;
 				case AuthManager::ACTION_REMOVE:
-					$reqs = ApiAuthManagerHelper::blacklistAuthenticationRequests(
-						$reqs, $this->getConfig()->get( 'RemoveCredentialsBlacklist' )
+					$reqs = ApiAuthManagerHelper::blacklistAuthenticationRequests( $reqs,
+						$this->getConfig()->get( MainConfigNames::RemoveCredentialsBlacklist )
 					);
 					break;
 			}
@@ -99,7 +112,7 @@ class ApiQueryAuthManagerInfo extends ApiQueryBase {
 		return [
 			'securitysensitiveoperation' => null,
 			'requestsfor' => [
-				ApiBase::PARAM_TYPE => [
+				ParamValidator::PARAM_TYPE => [
 					AuthManager::ACTION_LOGIN,
 					AuthManager::ACTION_LOGIN_CONTINUE,
 					AuthManager::ACTION_CREATE,

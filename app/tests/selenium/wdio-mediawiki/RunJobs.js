@@ -1,3 +1,5 @@
+'use strict';
+
 const MWBot = require( 'mwbot' );
 const Page = require( './Page' );
 const MAINPAGE_REQUESTS_MAX_RUNS = 10; // (arbitrary) safe-guard against endless execution
@@ -10,9 +12,7 @@ function getJobCount() {
 		action: 'query',
 		meta: 'siteinfo',
 		siprop: 'statistics'
-	} ).then( ( response ) => {
-		return response.query.statistics.jobs;
-	} );
+	} ).then( ( response ) => response.query.statistics.jobs );
 }
 
 function log( message ) {
@@ -42,8 +42,6 @@ function runThroughMainPageRequests( runCount = 1 ) {
 /**
  * Trigger the execution of jobs
  *
- * @see https://www.mediawiki.org/wiki/Manual:Job_queue/For_developers#Execution_of_jobs
- *
  * Use RunJobs.run() to ensure that jobs are executed before making assertions that depend on it.
  *
  * Systems that are selenium-tested are usually provisioned for that purpose, see no organic
@@ -55,9 +53,10 @@ function runThroughMainPageRequests( runCount = 1 ) {
  * assertions impossible - e.g. checking a page is listed on Special:RecentChanges right
  * after creating it.
  *
- * This class will try to trigger job execution through
- * repeated blunt requests against the wiki's home page to trigger them at a rate
- * of $wgJobRunRate per request.
+ * This class will try to trigger job execution through repeated blunt requests against the
+ * wiki's home page to trigger them at a rate of `$wgJobRunRate` per request.
+ *
+ * See also <https://www.mediawiki.org/wiki/Manual:Job_queue/For_developers#Execution_of_jobs>.
  */
 class RunJobs {
 

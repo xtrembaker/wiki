@@ -144,7 +144,7 @@ ve.ui.MWReferenceDialog.static.getImportRules = function () {
  */
 ve.ui.MWReferenceDialog.prototype.documentHasContent = function () {
 	// TODO: Check for other types of empty, e.g. only whitespace?
-	return this.referenceModel.getDocument().data.hasContent();
+	return this.referenceModel && this.referenceModel.getDocument().data.hasContent();
 };
 
 /*
@@ -235,16 +235,14 @@ ve.ui.MWReferenceDialog.prototype.getBodyHeight = function () {
 	);
 };
 
-// eslint-disable-next-line valid-jsdoc
 /**
  * Work on a specific reference.
  *
  * @param {ve.dm.MWReferenceModel} [ref] Reference model, omit to work on a new reference
+ * @return {ve.ui.MWReferenceDialog}
  * @chainable
  */
 ve.ui.MWReferenceDialog.prototype.useReference = function ( ref ) {
-	var group;
-
 	// Properties
 	if ( ref instanceof ve.dm.MWReferenceModel ) {
 		// Use an existing reference
@@ -262,9 +260,8 @@ ve.ui.MWReferenceDialog.prototype.useReference = function ( ref ) {
 	this.referenceGroupInput.setDisabled( true );
 	this.referenceGroupInput.setValue( this.originalGroup );
 	this.referenceGroupInput.setDisabled( false );
-	this.referenceTarget.initialize();
 
-	group = this.getFragment().getDocument().getInternalList()
+	var group = this.getFragment().getDocument().getInternalList()
 		.getNodeGroup( this.referenceModel.getListGroup() );
 	if ( ve.getProp( group, 'keyedNodes', this.referenceModel.getListKey(), 'length' ) > 1 ) {
 		this.$reuseWarning.removeClass( 'oo-ui-element-hidden' );
@@ -283,10 +280,6 @@ ve.ui.MWReferenceDialog.prototype.useReference = function ( ref ) {
  * @inheritdoc
  */
 ve.ui.MWReferenceDialog.prototype.initialize = function () {
-	var citeCommands = Object.keys( ve.init.target.getSurface().commandRegistry.registry ).filter( function ( command ) {
-		return command.indexOf( 'cite-' ) !== -1;
-	} );
-
 	// Parent method
 	ve.ui.MWReferenceDialog.super.prototype.initialize.call( this );
 
@@ -303,9 +296,11 @@ ve.ui.MWReferenceDialog.prototype.initialize = function () {
 		.addClass( 've-ui-mwReferenceDialog-reuseWarning' )
 		.append( this.reuseWarningIcon.$element, this.$reuseWarningText );
 
+	var citeCommands = Object.keys( ve.init.target.getSurface().commandRegistry.registry ).filter( function ( command ) {
+		return command.indexOf( 'cite-' ) !== -1;
+	} );
 	this.referenceTarget = ve.init.target.createTargetWidget(
 		{
-			tools: ve.copy( ve.init.target.constructor.static.toolbarGroups ),
 			includeCommands: this.constructor.static.includeCommands,
 			excludeCommands: this.constructor.static.excludeCommands.concat( citeCommands ),
 			importRules: this.constructor.static.getImportRules(),
@@ -392,7 +387,6 @@ ve.ui.MWReferenceDialog.prototype.getSetupProcess = function ( data ) {
 	data = data || {};
 	return ve.ui.MWReferenceDialog.super.prototype.getSetupProcess.call( this, data )
 		.next( function () {
-			var isReadOnly = this.isReadOnly();
 			this.panels.setItem( this.editPanel );
 			if ( this.selectedNode instanceof ve.dm.MWReferenceNode ) {
 				this.useReference(
@@ -405,6 +399,7 @@ ve.ui.MWReferenceDialog.prototype.getSetupProcess = function ( data ) {
 
 			this.search.setInternalList( this.getFragment().getDocument().getInternalList() );
 
+			var isReadOnly = this.isReadOnly();
 			this.referenceTarget.setReadOnly( isReadOnly );
 			this.referenceGroupInput.setReadOnly( isReadOnly );
 

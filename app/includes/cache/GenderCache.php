@@ -1,7 +1,5 @@
 <?php
 /**
- * Caches user genders when needed to use correct namespace aliases.
- *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -19,16 +17,19 @@
  *
  * @file
  * @author Niklas Laxström
- * @ingroup Cache
  */
 
+use MediaWiki\Linker\LinkTarget;
 use MediaWiki\MediaWikiServices;
+use MediaWiki\User\UserIdentity;
+use MediaWiki\User\UserOptionsLookup;
 use Wikimedia\Rdbms\ILoadBalancer;
 
 /**
  * Caches user genders when needed to use correct namespace aliases.
  *
  * @since 1.18
+ * @ingroup Cache
  */
 class GenderCache {
 	protected $cache = [];
@@ -42,17 +43,17 @@ class GenderCache {
 	/** @var ILoadBalancer|null */
 	private $loadBalancer;
 
-	public function __construct( NamespaceInfo $nsInfo = null, ILoadBalancer $loadBalancer = null ) {
+	/** @var UserOptionsLookup */
+	private $userOptionsLookup;
+
+	public function __construct(
+		NamespaceInfo $nsInfo = null,
+		ILoadBalancer $loadBalancer = null,
+		UserOptionsLookup $userOptionsLookup = null
+	) {
 		$this->nsInfo = $nsInfo ?? MediaWikiServices::getInstance()->getNamespaceInfo();
 		$this->loadBalancer = $loadBalancer;
-	}
-
-	/**
-	 * @deprecated in 1.28 see MediaWikiServices::getInstance()->getGenderCache()
-	 * @return GenderCache
-	 */
-	public static function singleton() {
-		return MediaWikiServices::getInstance()->getGenderCache();
+		$this->userOptionsLookup = $userOptionsLookup ?? MediaWikiServices::getInstance()->getUserOptionsLookup();
 	}
 
 	/**
@@ -61,7 +62,7 @@ class GenderCache {
 	 */
 	protected function getDefault() {
 		if ( $this->default === null ) {
-			$this->default = User::getDefaultOption( 'gender' );
+			$this->default = $this->userOptionsLookup->getDefaultOption( 'gender' );
 		}
 
 		return $this->default;
@@ -69,23 +70,23 @@ class GenderCache {
 
 	/**
 	 * Returns the gender for given username.
-	 * @param string|User $username
+	 * @param string|UserIdentity $username
 	 * @param string $caller The calling method
 	 * @return string
 	 */
 	public function getGenderOf( $username, $caller = '' ) {
-		global $wgUser;
-
-		if ( $username instanceof User ) {
+		if ( $username instanceof UserIdentity ) {
 			$username = $username->getName();
 		}
 
 		$username = self::normalizeUsername( $username );
 		if ( !isset( $this->cache[$username] ) ) {
-			if ( $this->misses >= $this->missLimit && $wgUser->getName() !== $username ) {
+			if ( $this->misses >= $this->missLimit &&
+				RequestContext::getMain()->getUser()->getName() !== $username
+			) {
 				if ( $this->misses === $this->missLimit ) {
 					$this->misses++;
-					wfDebug( __METHOD__ . ": too many misses, returning default onwards\n" );
+					wfDebug( __METHOD__ . ": too many misses, returning default onwards" );
 				}
 
 				return $this->getDefault();
@@ -122,19 +123,15 @@ class GenderCache {
 	}
 
 	/**
-	 * Wrapper for doQuery that processes a title or string array.
+	 * Wrapper for doQuery that processes a title array.
 	 *
 	 * @since 1.20
-	 * @param array $titles Array of Title objects or strings
+	 * @param LinkTarget[] $titles
 	 * @param string $caller The calling method
 	 */
 	public function doTitlesArray( $titles, $caller = '' ) {
 		$users = [];
-		foreach ( $titles as $title ) {
-			$titleObj = is_string( $title ) ? Title::newFromText( $title ) : $title;
-			if ( !$titleObj ) {
-				continue;
-			}
+		foreach ( $titles as $titleObj ) {
 			if ( !$this->nsInfo->hasGenderDistinction( $titleObj->getNamespace() ) ) {
 				continue;
 			}
@@ -146,7 +143,7 @@ class GenderCache {
 
 	/**
 	 * Preloads genders for given list of users.
-	 * @param array|string $users Usernames
+	 * @param string[]|string $users Usernames
 	 * @param string $caller The calling method
 	 */
 	public function doQuery( $users, $caller = '' ) {
@@ -159,10 +156,8 @@ class GenderCache {
 			if ( !isset( $this->cache[$name] ) ) {
 				// For existing users, this value will be overwritten by the correct value
 				$this->cache[$name] = $default;
-				// query only for valid names, which can be in the database
-				if ( User::isValidUserName( $name ) ) {
-					$usersToCheck[] = $name;
-				}
+				// We no longer verify that only valid names are checked for, T267054
+				$usersToCheck[] = $name;
 			}
 		}
 

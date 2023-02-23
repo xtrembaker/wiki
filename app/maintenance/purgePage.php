@@ -21,6 +21,8 @@
  * @ingroup Maintenance
  */
 
+use MediaWiki\MediaWikiServices;
+
 require_once __DIR__ . '/Maintenance.php';
 
 /**
@@ -49,17 +51,12 @@ class PurgePage extends Maintenance {
 	private function purge( $titleText ) {
 		$title = Title::newFromText( $titleText );
 
-		if ( is_null( $title ) ) {
+		if ( $title === null ) {
 			$this->error( 'Invalid page title' );
 			return;
 		}
 
-		$page = WikiPage::factory( $title );
-
-		if ( is_null( $page ) ) {
-			$this->error( "Could not instantiate page object" );
-			return;
-		}
+		$page = MediaWikiServices::getInstance()->getWikiPageFactory()->newFromTitle( $title );
 
 		if ( !$this->getOption( 'skip-exists-check' ) && !$page->exists() ) {
 			$this->error( "Page doesn't exist" );
